@@ -1,0 +1,35 @@
+name: Claude Code Review
+
+# Automatic review of every PR when it is opened or marked ready.
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review this pull request for the SplitDec app (FastAPI + React
+            Splitwise clone; see README.md and "SplitDec - specification.md").
+            Focus on:
+            - Correctness bugs, especially in money/balance math (NUMERIC(14,4),
+              banker's rounding, amounts serialized as strings)
+            - Authorization gaps (FastAPI is the sole authz boundary; RLS is off)
+            - Missing or weakened test coverage
+            - Split-second issues: idempotency, soft-delete filtering, transactions
+            Leave concise inline comments on real problems only; do not comment
+            on style. Finish with a short overall verdict.
