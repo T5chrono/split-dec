@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Plus, Users } from "lucide-react";
+import { Check, ChevronRight, MailOpen, Plus, Users, X } from "lucide-react";
 import { api } from "../lib/api";
-import type { Group } from "../lib/types";
+import type { Group, MyInvitation } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
@@ -28,6 +28,20 @@ export default function GroupsPage() {
     },
   });
 
+  const { data: myInvitations } = useQuery({
+    queryKey: ["my-invitations"],
+    queryFn: () => api.get<MyInvitation[]>("/invitations/mine"),
+  });
+
+  const respond = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "accept" | "decline" }) =>
+      api.post<void>(`/invitations/${id}/${action}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-invitations"] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
@@ -39,6 +53,41 @@ export default function GroupsPage() {
           <Plus className="h-4 w-4" /> {t("newGroup")}
         </button>
       </div>
+
+      {myInvitations && myInvitations.length > 0 && (
+        <div className="mb-5 space-y-2">
+          {myInvitations.map((inv) => (
+            <div
+              key={inv.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 dark:border-teal-900 dark:bg-teal-950/40"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <MailOpen className="h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400" />
+                <p className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">
+                  <span className="font-medium">{inv.invited_by_name ?? "?"}</span>{" "}
+                  {t("invitedYouTo")} <span className="font-medium">{inv.group_name}</span>
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  onClick={() => respond.mutate({ id: inv.id, action: "accept" })}
+                  disabled={respond.isPending}
+                  className="flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  <Check className="h-3.5 w-3.5" /> {t("accept")}
+                </button>
+                <button
+                  onClick={() => respond.mutate({ id: inv.id, action: "decline" })}
+                  disabled={respond.isPending}
+                  className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  <X className="h-3.5 w-3.5" /> {t("decline")}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {isLoading && <Spinner label={t("loadingGroups")} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}

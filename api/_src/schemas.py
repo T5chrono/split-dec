@@ -53,8 +53,32 @@ class GroupDetailOut(GroupOut):
     members: list[UserOut]
 
 
-class MemberAdd(BaseModel):
-    user_id: uuid.UUID
+class InvitationCreate(BaseModel):
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
+
+
+class InvitationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    group_id: uuid.UUID
+    email: str
+    status: str
+    invited_user_id: uuid.UUID | None
+    created_at: datetime
+
+
+class InvitationCreatedOut(InvitationOut):
+    user_exists: bool
+    email_sent: bool
+
+
+class MyInvitationOut(BaseModel):
+    id: uuid.UUID
+    group_id: uuid.UUID
+    group_name: str
+    invited_by_name: str | None
+    created_at: datetime
 
 
 # ---------- Expenses ----------

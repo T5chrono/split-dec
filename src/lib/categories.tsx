@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Gamepad2, Film, Music, Trophy, Sparkles,
+  Mountain, MountainSnow, Waves, Footprints, Medal,
   UtensilsCrossed, ShoppingCart, Wine, CupSoda,
   MonitorSmartphone, Armchair, SprayCan, Wrench, Landmark, PawPrint, Home, HandPlatter, House,
   Baby, Shirt, GraduationCap, Gift, ShieldCheck, Stethoscope, Receipt, HeartPulse,
@@ -23,8 +24,18 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
       { value: "Games", icon: Gamepad2 },
       { value: "Movies", icon: Film },
       { value: "Music", icon: Music },
-      { value: "Sports", icon: Trophy },
       { value: "Other Entertainment", icon: Sparkles },
+    ],
+  },
+  {
+    group: "Sports",
+    categories: [
+      { value: "Climbing", icon: Mountain },
+      { value: "Skiing", icon: MountainSnow },
+      { value: "Swimming", icon: Waves },
+      { value: "Running", icon: Footprints },
+      { value: "Biking", icon: Bike },
+      { value: "Other Sports", icon: Medal },
     ],
   },
   {
@@ -122,9 +133,11 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
   },
 ] as const;
 
-const ICON_BY_CATEGORY: ReadonlyMap<string, LucideIcon> = new Map(
-  CATEGORY_GROUPS.flatMap((g) => g.categories.map((c) => [c.value, c.icon] as const)),
-);
+const ICON_BY_CATEGORY: ReadonlyMap<string, LucideIcon> = new Map([
+  ...CATEGORY_GROUPS.flatMap((g) => g.categories.map((c) => [c.value, c.icon] as const)),
+  // Legacy value from when Sports lived under Entertainment; old expenses keep it.
+  ["Sports", Trophy] as const,
+]);
 
 export function CategoryIcon({ category, className }: { category: string; className?: string }) {
   const Icon = ICON_BY_CATEGORY.get(category) ?? CircleDollarSign;

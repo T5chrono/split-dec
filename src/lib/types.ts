@@ -78,6 +78,28 @@ export interface ExpensePayload {
   splits: SplitInput[];
 }
 
+export interface Invitation {
+  id: string;
+  group_id: string;
+  email: string;
+  status: string;
+  invited_user_id: string | null;
+  created_at: string;
+}
+
+export interface InvitationCreated extends Invitation {
+  user_exists: boolean;
+  email_sent: boolean;
+}
+
+export interface MyInvitation {
+  id: string;
+  group_id: string;
+  group_name: string;
+  invited_by_name: string | null;
+  created_at: string;
+}
+
 export interface SettlementPayload {
   paid_by_user_id: string;
   paid_to_user_id: string;

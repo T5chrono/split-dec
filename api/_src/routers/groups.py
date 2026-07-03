@@ -14,7 +14,6 @@ from ..schemas import (
     GroupCreate,
     GroupDetailOut,
     GroupOut,
-    MemberAdd,
     UserOut,
 )
 
@@ -74,25 +73,6 @@ async def get_group(
         created_at=group.created_at,
         members=[UserOut.model_validate(m) for m in members],
     )
-
-
-@router.post("/{group_id}/members", response_model=UserOut, status_code=201)
-async def add_member(
-    group_id: uuid.UUID,
-    body: MemberAdd,
-    db: AsyncSession = Depends(get_db),
-    caller: uuid.UUID = Depends(verify_jwt),
-):
-    await require_membership(db, group_id, caller)
-    user = await db.get(User, body.user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    existing = await db.get(GroupMember, (group_id, body.user_id))
-    if existing is not None:
-        raise HTTPException(status_code=400, detail="User is already a member of this group")
-    db.add(GroupMember(group_id=group_id, user_id=body.user_id))
-    await db.commit()
-    return user
 
 
 @router.delete("/{group_id}/members/{user_id}", status_code=204)
