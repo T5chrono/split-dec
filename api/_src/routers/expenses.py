@@ -126,6 +126,9 @@ async def update_expense(
     expense.total_amount = body.total_amount
     expense.currency = body.currency
     expense.paid_by_user_id = body.paid_by_user_id
+    # PATCH is a full replace like the other fields, but expense_date is
+    # optional in the schema (create defaults it to today) — an omitted date
+    # keeps the current one rather than silently resetting it to today.
     if body.expense_date is not None:
         expense.expense_date = body.expense_date
     # Flush the orphan-deletion of the old splits BEFORE adding replacements:

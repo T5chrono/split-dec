@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import type { Expense, ExpenseList, GroupDetail } from "../lib/types";
 import { formatMoney } from "../lib/currency";
+import { formatDateOnly } from "../lib/dates";
 import { CategoryIcon } from "../lib/categories";
 import { useI18n } from "../lib/i18n";
 import ExpenseFormModal from "./ExpenseFormModal";
@@ -82,7 +83,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
                 <div className="truncate font-medium">{e.description}</div>
                 <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {nameOf(e.paid_by_user_id)} {t("paidVerb")} · {tCategory(e.category)} ·{" "}
-                  {new Date(e.expense_date).toLocaleDateString(dateLocale)}
+                  {formatDateOnly(e.expense_date, dateLocale)}
                 </div>
               </div>
             </div>

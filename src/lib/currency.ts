@@ -41,9 +41,13 @@ export const AMOUNT_PATTERN = "^\\d+([.,]\\d+)?$";
  *  "30.00" (per the currency's precision; "100.0000" JPY -> "100"). */
 export function trimAmount(amount: string, currency: string): string {
   const precision = precisionFor(currency);
-  const [intPart, frac = ""] = amount.split(".");
-  if (precision === 0) return intPart;
-  return `${intPart}.${frac.padEnd(precision, "0").slice(0, precision)}`;
+  const negative = amount.startsWith("-");
+  const [intPart, frac = ""] = amount.replace("-", "").split(".");
+  const digits =
+    precision === 0
+      ? intPart
+      : `${intPart}.${frac.padEnd(precision, "0").slice(0, precision)}`;
+  return `${negative ? "-" : ""}${digits}`;
 }
 
 export const COMMON_CURRENCIES = [

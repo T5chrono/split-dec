@@ -17,6 +17,7 @@ import {
 import { CATEGORY_GROUPS } from "../lib/categories";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
+import { todayLocalISO } from "../lib/dates";
 import Modal from "./Modal";
 
 const inputCls =
@@ -45,7 +46,7 @@ export default function ExpenseFormModal({
   const [currency, setCurrency] = useState(expense?.currency ?? "PLN");
   const [paidBy, setPaidBy] = useState(expense?.paid_by_user_id ?? myId ?? "");
   const [expenseDate, setExpenseDate] = useState(
-    expense?.expense_date ?? new Date().toISOString().slice(0, 10),
+    expense?.expense_date ?? todayLocalISO(),
   );
   const [splitType, setSplitType] = useState<SplitType>(expense?.split_type ?? "EQUAL");
   const [participants, setParticipants] = useState<Set<string>>(
