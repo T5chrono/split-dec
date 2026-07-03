@@ -113,6 +113,20 @@ const dict = {
       "They can only be removed if they are fully settled up in this group.",
     removeMemberTip: "Remove from group (must be fully settled)",
     searchFailed: "Search failed",
+    invite: "Invite",
+    invitationSentInApp: "Invitation sent — they can accept it next time they open SplitDec.",
+    invitationEmailSent: "Invitation email sent.",
+    inviteeNotOnSplitDec:
+      "This person isn't on SplitDec yet. The invitation is saved and will greet them when they sign up with this email — you can also invite them yourself:",
+    openEmailDraft: "Open email draft",
+    pendingInvitations: "Pending invitations",
+    cancelInvitation: "Cancel invitation",
+    invitedYouTo: "invited you to",
+    accept: "Accept",
+    decline: "Decline",
+    inviteEmailSubject: "You're invited to SplitDec",
+    inviteEmailBody:
+      'I\'d like to split expenses with you in the group "{group}" on SplitDec. Sign in with Google using this email address and the invitation will be waiting for you.',
   },
   pl: {
     loading: "Wczytywanie…",
@@ -205,6 +219,21 @@ const dict = {
       "Można go usunąć tylko wtedy, gdy jest w pełni rozliczony w tej grupie.",
     removeMemberTip: "Usuń z grupy (wymaga pełnego rozliczenia)",
     searchFailed: "Wyszukiwanie nie powiodło się",
+    invite: "Zaproś",
+    invitationSentInApp:
+      "Zaproszenie wysłane — będzie można je zaakceptować przy następnym otwarciu SplitDec.",
+    invitationEmailSent: "E-mail z zaproszeniem został wysłany.",
+    inviteeNotOnSplitDec:
+      "Ta osoba nie korzysta jeszcze ze SplitDec. Zaproszenie zostało zapisane i pojawi się po rejestracji na ten adres — możesz też zaprosić ją samodzielnie:",
+    openEmailDraft: "Otwórz szkic e-maila",
+    pendingInvitations: "Oczekujące zaproszenia",
+    cancelInvitation: "Anuluj zaproszenie",
+    invitedYouTo: "zaprasza Cię do grupy",
+    accept: "Akceptuj",
+    decline: "Odrzuć",
+    inviteEmailSubject: "Zaproszenie do SplitDec",
+    inviteEmailBody:
+      "Chcę dzielić z Tobą wydatki w grupie „{group}” w SplitDec. Zaloguj się przez Google, używając tego adresu e-mail, a zaproszenie będzie na Ciebie czekać.",
   },
 } as const;
 
@@ -216,6 +245,12 @@ const CATEGORY_PL: Record<string, string> = {
   Music: "Muzyka",
   Sports: "Sport",
   "Other Entertainment": "Inna rozrywka",
+  Climbing: "Wspinaczka",
+  Skiing: "Narciarstwo",
+  Swimming: "Pływanie",
+  Running: "Bieganie",
+  Biking: "Jazda na rowerze",
+  "Other Sports": "Inne sporty",
   "Dining out": "Jedzenie na mieście",
   Groceries: "Zakupy spożywcze",
   Liquor: "Alkohol",
@@ -270,6 +305,7 @@ const CATEGORY_PL: Record<string, string> = {
 
 const CATEGORY_GROUP_PL: Record<string, string> = {
   Entertainment: "Rozrywka",
+  Sports: "Sport",
   "Food and drink": "Jedzenie i napoje",
   Home: "Dom",
   Life: "Życie",

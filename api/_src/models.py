@@ -48,6 +48,19 @@ class GroupMember(Base):
     user: Mapped[User] = relationship(lazy="joined")
 
 
+class GroupInvitation(Base):
+    __tablename__ = "group_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("groups.id"))
+    email: Mapped[str] = mapped_column(String)  # stored lowercased
+    invited_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    invited_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
 import { api } from "../lib/api";
 import type { GroupDetail } from "../lib/types";
 import { useI18n, type TKey } from "../lib/i18n";
@@ -34,6 +35,12 @@ export default function GroupPage() {
 
   return (
     <div>
+      <Link
+        to="/"
+        className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400"
+      >
+        <ArrowLeft className="h-4 w-4" /> {t("yourGroups")}
+      </Link>
       <h1 className="mb-1 text-2xl font-bold">{group.name}</h1>
       <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
         {membersLabel(group.members.length)}

@@ -8,8 +8,17 @@ class Category(StrEnum):
     GAMES = "Games"
     MOVIES = "Movies"
     MUSIC = "Music"
+    # Legacy value: "Sports" used to live under Entertainment; kept so existing
+    # expenses still validate on edit. New expenses use the Sports group below.
     SPORTS = "Sports"
     OTHER_ENTERTAINMENT = "Other Entertainment"
+    # Sports
+    CLIMBING = "Climbing"
+    SKIING = "Skiing"
+    SWIMMING = "Swimming"
+    RUNNING = "Running"
+    BIKING = "Biking"
+    OTHER_SPORTS = "Other Sports"
     # Food and drink
     DINING_OUT = "Dining out"
     GROCERIES = "Groceries"

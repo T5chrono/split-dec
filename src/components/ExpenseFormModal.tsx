@@ -14,12 +14,12 @@ import {
   normalizeAmountInput,
   trimAmount,
 } from "../lib/currency";
-import { CATEGORY_GROUPS } from "../lib/categories";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
 import Modal from "./Modal";
 import DatePicker from "./DatePicker";
+import CategorySelect from "./CategorySelect";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
@@ -36,7 +36,7 @@ export default function ExpenseFormModal({
   onSaved: () => void;
 }) {
   const { session } = useAuth();
-  const { t, tCategory, tCategoryGroup } = useI18n();
+  const { t } = useI18n();
   const myId = session?.user.id;
 
   const [description, setDescription] = useState(expense?.description ?? "");
@@ -61,7 +61,23 @@ export default function ExpenseFormModal({
       ]),
     ),
   );
-  const [percentages, setPercentages] = useState<Record<string, string>>({});
+  // When editing a PERCENTAGE expense, derive percentages from the stored
+  // owed amounts — all but the last, which the autofill below reconstructs so
+  // the total is exactly 100 despite rounding. Money strings never pass
+  // through floats: both amounts have exactly 4 decimals from the API, so
+  // stripping the dot yields exact integer minor units for BigInt division.
+  const [percentages, setPercentages] = useState<Record<string, string>>(() => {
+    if (!expense || expense.split_type !== "PERCENTAGE") return {};
+    const toUnits = (s: string) => BigInt(s.replace(".", ""));
+    const total = toUnits(expense.total_amount);
+    return Object.fromEntries(
+      expense.splits.slice(0, -1).map((s) => {
+        // Percentage in hundredths, rounded half-up: owed / total * 100_00
+        const hundredths = (toUnits(s.owed_amount) * 10000n + total / 2n) / total;
+        return [s.user_id, String(Number(hundredths) / 100)];
+      }),
+    );
+  });
 
   const toggleParticipant = (id: string) => {
     const next = new Set(participants);
@@ -70,16 +86,39 @@ export default function ExpenseFormModal({
     setParticipants(next);
   };
 
+  const parseNum = (s: string) => parseFloat(normalizeAmountInput(s)) || 0;
+  const selected = group.members.filter((m) => participants.has(m.id));
+
+  // Percentage autofill: when exactly one selected member has no percentage,
+  // it is obviously 100 minus the rest — fill it in automatically.
+  const emptyPctIds = selected
+    .map((m) => m.id)
+    .filter((id) => !(percentages[id] ?? "").trim());
+  const filledPctSum =
+    Math.round(
+      selected.reduce((acc, m) => acc + parseNum(percentages[m.id] ?? ""), 0) * 100,
+    ) / 100;
+  const autoPct =
+    splitType === "PERCENTAGE" && emptyPctIds.length === 1 && 100 - filledPctSum > 0
+      ? Math.round((100 - filledPctSum) * 100) / 100
+      : null;
+
   const buildSplits = (): SplitInput[] =>
-    group.members
-      .filter((m) => participants.has(m.id))
-      .map((m) => {
-        if (splitType === "EXACT")
-          return { user_id: m.id, amount: normalizeAmountInput(exactAmounts[m.id] || "0") };
-        if (splitType === "PERCENTAGE")
-          return { user_id: m.id, percentage: normalizeAmountInput(percentages[m.id] || "0") };
-        return { user_id: m.id };
-      });
+    selected.map((m) => {
+      if (splitType === "EXACT")
+        return { user_id: m.id, amount: normalizeAmountInput(exactAmounts[m.id] || "0") };
+      if (splitType === "PERCENTAGE") {
+        const raw = (percentages[m.id] ?? "").trim();
+        const pct =
+          raw !== ""
+            ? normalizeAmountInput(raw)
+            : autoPct !== null && emptyPctIds[0] === m.id
+              ? String(autoPct)
+              : "0";
+        return { user_id: m.id, percentage: pct };
+      }
+      return { user_id: m.id };
+    });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -101,10 +140,8 @@ export default function ExpenseFormModal({
     onSuccess: onSaved,
   });
 
-  const parseNum = (s: string) => parseFloat(normalizeAmountInput(s)) || 0;
-  const selected = group.members.filter((m) => participants.has(m.id));
   const exactSum = selected.reduce((acc, m) => acc + parseNum(exactAmounts[m.id] || "0"), 0);
-  const pctSum = selected.reduce((acc, m) => acc + parseNum(percentages[m.id] || "0"), 0);
+  const pctSum = Math.round((filledPctSum + (autoPct ?? 0)) * 100) / 100;
 
   return (
     <Modal title={expense ? t("editExpense") : t("addExpense")} onClose={onClose}>
@@ -162,21 +199,7 @@ export default function ExpenseFormModal({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-sm font-medium">{t("category")}</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className={inputCls}
-            >
-              {CATEGORY_GROUPS.map((g) => (
-                <optgroup key={g.group} label={tCategoryGroup(g.group)}>
-                  {g.categories.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {tCategory(c.value)}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <CategorySelect value={category} onChange={setCategory} />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">{t("paidBy")}</label>
@@ -244,8 +267,14 @@ export default function ExpenseFormModal({
                       pattern={AMOUNT_PATTERN}
                       value={percentages[m.id] ?? ""}
                       onChange={(e) => setPercentages({ ...percentages, [m.id]: e.target.value })}
-                      placeholder="0"
-                      className="w-16 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm dark:border-slate-600 dark:bg-slate-800"
+                      placeholder={
+                        autoPct !== null && emptyPctIds[0] === m.id ? String(autoPct) : "0"
+                      }
+                      className={`w-16 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
+                        autoPct !== null && emptyPctIds[0] === m.id
+                          ? "border-teal-400 placeholder:text-teal-600 dark:border-teal-600 dark:placeholder:text-teal-400"
+                          : "border-slate-300 bg-white dark:border-slate-600"
+                      }`}
                     />
                     <span className="text-xs text-slate-500 dark:text-slate-400">%</span>
                   </div>

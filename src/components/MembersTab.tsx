@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, UserMinus, UserPlus } from "lucide-react";
-import { api, ApiError } from "../lib/api";
-import type { GroupDetail, User } from "../lib/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Mail, MailPlus, UserMinus, X } from "lucide-react";
+import { api } from "../lib/api";
+import type { GroupDetail, Invitation, InvitationCreated, User } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import Avatar from "./Avatar";
 import ConfirmDialog from "./ConfirmDialog";
-
-type FoundUser = Pick<User, "id" | "full_name" | "avatar_url">;
 
 const inputCls =
   "flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
@@ -16,34 +14,32 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [email, setEmail] = useState("");
-  const [found, setFound] = useState<FoundUser | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [result, setResult] = useState<InvitationCreated | null>(null);
   const [removing, setRemoving] = useState<User | null>(null);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["group", group.id] });
-
-  const search = useMutation({
-    mutationFn: (q: string) =>
-      api.get<FoundUser>(`/users/search?email=${encodeURIComponent(q)}`),
-    onSuccess: (user) => {
-      setFound(user);
-      setSearchError(null);
-    },
-    onError: (e) => {
-      setFound(null);
-      setSearchError(e instanceof ApiError ? e.message : t("searchFailed"));
-    },
+  const { data: invitations } = useQuery({
+    queryKey: ["invitations", group.id],
+    queryFn: () => api.get<Invitation[]>(`/groups/${group.id}/invitations`),
   });
 
-  const addMember = useMutation({
-    mutationFn: (userId: string) =>
-      api.post<User>(`/groups/${group.id}/members`, { user_id: userId }),
-    onSuccess: () => {
-      setFound(null);
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["group", group.id] });
+    queryClient.invalidateQueries({ queryKey: ["invitations", group.id] });
+  };
+
+  const invite = useMutation({
+    mutationFn: (address: string) =>
+      api.post<InvitationCreated>(`/groups/${group.id}/invitations`, { email: address }),
+    onSuccess: (created) => {
+      setResult(created);
       setEmail("");
       invalidate();
     },
+  });
+
+  const cancelInvitation = useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/invitations/${id}`),
+    onSuccess: invalidate,
   });
 
   const removeMember = useMutation({
@@ -55,12 +51,18 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     },
   });
 
+  const mailtoHref = (address: string) =>
+    `mailto:${address}?subject=${encodeURIComponent(t("inviteEmailSubject"))}&body=${encodeURIComponent(
+      t("inviteEmailBody").replace("{group}", group.name) + "\n\nhttps://split-dec.vercel.app",
+    )}`;
+
   return (
     <div className="space-y-5">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (email.trim()) search.mutate(email.trim());
+          setResult(null);
+          if (email.trim()) invite.mutate(email.trim());
         }}
         className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       >
@@ -75,36 +77,65 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
           />
           <button
             type="submit"
-            disabled={search.isPending}
-            className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
+            disabled={invite.isPending}
+            className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
           >
-            <Search className="h-4 w-4" /> {t("find")}
+            <MailPlus className="h-4 w-4" /> {t("invite")}
           </button>
         </div>
-        {searchError && (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">{searchError}</p>
-        )}
-        {found && (
-          <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800">
-            <div className="flex items-center gap-2">
-              <Avatar user={{ ...found, email: "" }} size={8} />
-              <span className="text-sm font-medium">{found.full_name ?? t("unnamedUser")}</span>
-            </div>
-            <button
-              onClick={() => addMember.mutate(found.id)}
-              disabled={addMember.isPending}
-              className="flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-            >
-              <UserPlus className="h-4 w-4" /> {t("add")}
-            </button>
-          </div>
-        )}
-        {addMember.error && (
+        {invite.error && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            {(addMember.error as Error).message}
+            {(invite.error as Error).message}
           </p>
         )}
+        {result && (
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+            {result.user_exists ? (
+              <p className="text-emerald-700 dark:text-emerald-400">{t("invitationSentInApp")}</p>
+            ) : result.email_sent ? (
+              <p className="text-emerald-700 dark:text-emerald-400">{t("invitationEmailSent")}</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-slate-600 dark:text-slate-300">{t("inviteeNotOnSplitDec")}</p>
+                <a
+                  href={mailtoHref(result.email)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
+                >
+                  <Mail className="h-3.5 w-3.5" /> {t("openEmailDraft")}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
       </form>
+
+      {invitations && invitations.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            {t("pendingInvitations")}
+          </h3>
+          <ul className="space-y-2">
+            {invitations.map((inv) => (
+              <li
+                key={inv.id}
+                className="flex items-center justify-between rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2.5 dark:border-slate-600 dark:bg-slate-900"
+              >
+                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  <Mail className="h-4 w-4 text-slate-400" />
+                  {inv.email}
+                </div>
+                <button
+                  onClick={() => cancelInvitation.mutate(inv.id)}
+                  title={t("cancelInvitation")}
+                  className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ul className="space-y-2">
         {group.members.map((m) => (

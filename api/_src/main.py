@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from .config import DEV_FRONTEND_ORIGIN, ENV
-from .routers import expenses, groups, settlements, users
+from .routers import expenses, groups, invitations, settlements, users
 
 app = FastAPI(title="SplitDec API", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -21,6 +21,7 @@ if ENV == "development":
 
 app.include_router(users.router, prefix="/api")
 app.include_router(groups.router, prefix="/api")
+app.include_router(invitations.router, prefix="/api")
 app.include_router(expenses.router, prefix="/api")
 app.include_router(settlements.router, prefix="/api")
 

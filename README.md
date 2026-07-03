@@ -32,6 +32,15 @@ Built to `SplitDec - specification.md` (v6).
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
 
+## Email invitations (optional)
+
+Group membership is invitation-based: invitees accept or decline in-app.
+When the invited email doesn't belong to a SplitDec user yet, the backend
+tries to email them via [Resend](https://resend.com). Set `RESEND_API_KEY`
+(and optionally `RESEND_FROM`, `APP_URL`) on Vercel to enable this; without
+it, invitations are still recorded (they appear when the person signs up)
+and the UI offers a pre-written mailto draft instead.
+
 ## Branch workflow
 
 - `develop` is the working branch — push (or PR) feature work here; CI runs

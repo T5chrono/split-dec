@@ -39,31 +39,6 @@ async def test_group_404(client, two_user_group):
     assert (await client.get(f"/api/groups/{uuid.uuid4()}")).status_code == 404
 
 
-async def test_add_member(client, db_session, two_user_group):
-    g = two_user_group
-    carol = await make_user(db_session, "carol@test.dev", "Carol")
-    r = await client.post(
-        f"/api/groups/{g['group'].id}/members", json={"user_id": str(carol.id)}
-    )
-    assert r.status_code == 201
-    detail = await client.get(f"/api/groups/{g['group'].id}")
-    assert len(detail.json()["members"]) == 3
-
-    # Adding again fails cleanly.
-    dup = await client.post(
-        f"/api/groups/{g['group'].id}/members", json={"user_id": str(carol.id)}
-    )
-    assert dup.status_code == 400
-
-
-async def test_add_unknown_user_404(client, two_user_group):
-    r = await client.post(
-        f"/api/groups/{two_user_group['group'].id}/members",
-        json={"user_id": str(uuid.uuid4())},
-    )
-    assert r.status_code == 404
-
-
 async def test_remove_member_blocked_by_balance_in_any_currency(client, two_user_group):
     g = two_user_group
     # Bob owes Alice 15 PLN...
