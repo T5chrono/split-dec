@@ -3,59 +3,88 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import Select, func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Net Balance = paid (expenses) - owed (expense_splits)
-#             + received (settlements) - sent (settlements),
-# computed entirely on the database engine. Soft deletes are filtered
-# independently on BOTH expenses and settlements.
-_BALANCE_SQL = text("""
-WITH paid AS (
-  SELECT paid_by_user_id AS user_id, currency, SUM(total_amount) AS amt
-  FROM expenses
-  WHERE group_id = :group_id AND deleted_at IS NULL
-  GROUP BY 1, 2
-),
-owed AS (
-  SELECT es.user_id, e.currency, SUM(es.owed_amount) AS amt
-  FROM expense_splits es
-  JOIN expenses e ON e.id = es.expense_id
-  WHERE e.group_id = :group_id AND e.deleted_at IS NULL
-  GROUP BY 1, 2
-),
-received AS (
-  SELECT paid_to_user_id AS user_id, currency, SUM(amount) AS amt
-  FROM settlements
-  WHERE group_id = :group_id AND deleted_at IS NULL
-  GROUP BY 1, 2
-),
-sent AS (
-  SELECT paid_by_user_id AS user_id, currency, SUM(amount) AS amt
-  FROM settlements
-  WHERE group_id = :group_id AND deleted_at IS NULL
-  GROUP BY 1, 2
-)
-SELECT user_id, currency, SUM(amt) AS net
-FROM (
-  SELECT user_id, currency, amt FROM paid
-  UNION ALL SELECT user_id, currency, -amt FROM owed
-  UNION ALL SELECT user_id, currency, amt FROM received
-  UNION ALL SELECT user_id, currency, -amt FROM sent
-) combined
-GROUP BY user_id, currency
-""")
+from .models import Expense, ExpenseSplit, Settlement
+
+
+def _balance_stmt(group_id: uuid.UUID) -> Select:
+    """Single SELECT with CTEs computing net balances on the database engine.
+
+    Net Balance = paid (expenses) - owed (expense_splits)
+                + sent (settlements) - received (settlements).
+    Note: spec §3 v6 writes "+ received - sent", but that direction is
+    inverted — a debtor settling their debt (sending cash) must move their
+    net toward zero, and the creditor receiving that cash is owed less.
+    Soft deletes are filtered independently on BOTH expenses and settlements.
+    Built with Core (not a raw SQL string) so the same statement runs against
+    Postgres in production and SQLite in the test suite.
+    """
+    paid = (
+        select(
+            Expense.paid_by_user_id.label("user_id"),
+            Expense.currency.label("currency"),
+            func.sum(Expense.total_amount).label("amt"),
+        )
+        .where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
+        .group_by(Expense.paid_by_user_id, Expense.currency)
+        .cte("paid")
+    )
+    owed = (
+        select(
+            ExpenseSplit.user_id.label("user_id"),
+            Expense.currency.label("currency"),
+            func.sum(ExpenseSplit.owed_amount).label("amt"),
+        )
+        .join(Expense, Expense.id == ExpenseSplit.expense_id)
+        .where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
+        .group_by(ExpenseSplit.user_id, Expense.currency)
+        .cte("owed")
+    )
+    received = (
+        select(
+            Settlement.paid_to_user_id.label("user_id"),
+            Settlement.currency.label("currency"),
+            func.sum(Settlement.amount).label("amt"),
+        )
+        .where(Settlement.group_id == group_id, Settlement.deleted_at.is_(None))
+        .group_by(Settlement.paid_to_user_id, Settlement.currency)
+        .cte("received")
+    )
+    sent = (
+        select(
+            Settlement.paid_by_user_id.label("user_id"),
+            Settlement.currency.label("currency"),
+            func.sum(Settlement.amount).label("amt"),
+        )
+        .where(Settlement.group_id == group_id, Settlement.deleted_at.is_(None))
+        .group_by(Settlement.paid_by_user_id, Settlement.currency)
+        .cte("sent")
+    )
+    combined = union_all(
+        select(paid.c.user_id, paid.c.currency, paid.c.amt),
+        select(owed.c.user_id, owed.c.currency, (-owed.c.amt).label("amt")),
+        select(received.c.user_id, received.c.currency, (-received.c.amt).label("amt")),
+        select(sent.c.user_id, sent.c.currency, sent.c.amt),
+    ).subquery("combined")
+    return select(
+        combined.c.user_id,
+        combined.c.currency,
+        func.sum(combined.c.amt).label("net"),
+    ).group_by(combined.c.user_id, combined.c.currency)
 
 
 async def net_balances(
     db: AsyncSession, group_id: uuid.UUID
 ) -> dict[str, dict[uuid.UUID, Decimal]]:
     """Net balance per (currency, user). Positive = is owed money."""
-    rows = (await db.execute(_BALANCE_SQL, {"group_id": group_id})).all()
+    rows = (await db.execute(_balance_stmt(group_id))).all()
     buckets: dict[str, dict[uuid.UUID, Decimal]] = {}
     for user_id, currency, net in rows:
+        net = net if isinstance(net, Decimal) else Decimal(str(net))
         if net != 0:
-            buckets.setdefault(currency, {})[user_id] = Decimal(net)
+            buckets.setdefault(currency, {})[user_id] = net
     return buckets
 
 

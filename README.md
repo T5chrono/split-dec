@@ -32,6 +32,17 @@ Built to `SplitDec - specification.md` (v6).
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
 
+## Tests
+
+- `pip install -r requirements.txt -r requirements-dev.txt`, then `pytest`.
+- Pure logic (split math, debt simplification) plus full API tests running
+  against in-memory SQLite with the auth dependency overridden — no network.
+- `tests/test_balances_pg.py` additionally checks the balance CTE against a
+  real Postgres; it is skipped unless `TEST_DATABASE_URL` is set (use a
+  disposable database — the test rolls back everything it writes).
+- CI (`.github/workflows/ci.yml`) runs pytest and the frontend build on every
+  push and PR.
+
 ## Local development
 
 1. Copy `.env.example` to `.env` and fill in:
