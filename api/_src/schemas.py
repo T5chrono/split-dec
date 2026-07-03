@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -72,6 +72,7 @@ class ExpenseCreate(BaseModel):
     total_amount: Decimal = Field(gt=0)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     paid_by_user_id: uuid.UUID
+    expense_date: date | None = None  # defaults to today on the server
     splits: list[SplitInput] = Field(min_length=1)
 
 
@@ -97,6 +98,7 @@ class ExpenseOut(BaseModel):
     total_amount: Decimal
     currency: str
     paid_by_user_id: uuid.UUID
+    expense_date: date
     created_at: datetime
     splits: list[ExpenseSplitOut]
 

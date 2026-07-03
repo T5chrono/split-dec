@@ -176,3 +176,45 @@ async def test_non_member_cannot_touch_expense(client, two_user_group, db_sessio
 async def test_unknown_expense_404(client, two_user_group):
     r = await client.delete(f"/api/expenses/{uuid.uuid4()}")
     assert r.status_code == 404
+
+
+async def test_expense_date_defaults_to_today(client, two_user_group):
+    from datetime import date
+
+    g = two_user_group
+    r = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    assert r.json()["expense_date"] == date.today().isoformat()
+
+
+async def test_expense_date_set_and_modified(client, two_user_group):
+    g = two_user_group
+    created = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]], expense_date="2026-06-15"),
+        headers=idem(),
+    )
+    assert created.json()["expense_date"] == "2026-06-15"
+
+    edited = await client.patch(
+        f"/api/expenses/{created.json()['id']}",
+        json=expense_payload(g["alice"], [g["alice"]], expense_date="2026-06-20"),
+    )
+    assert edited.status_code == 200
+    assert edited.json()["expense_date"] == "2026-06-20"
+
+
+async def test_expenses_ordered_by_occurrence_date(client, two_user_group):
+    g = two_user_group
+    for d in ("2026-06-10", "2026-06-30", "2026-06-20"):
+        await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(g["alice"], [g["alice"]], description=d, expense_date=d),
+            headers=idem(),
+        )
+    listing = await client.get(f"/api/groups/{g['group'].id}/expenses")
+    dates = [e["expense_date"] for e in listing.json()["items"]]
+    assert dates == ["2026-06-30", "2026-06-20", "2026-06-10"]

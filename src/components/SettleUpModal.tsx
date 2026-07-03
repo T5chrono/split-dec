@@ -2,7 +2,12 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, newIdempotencyKey } from "../lib/api";
 import type { GroupDetail, Settlement, SettlementPayload } from "../lib/types";
-import { AMOUNT_PATTERN, COMMON_CURRENCIES, normalizeAmountInput } from "../lib/currency";
+import {
+  AMOUNT_PATTERN,
+  COMMON_CURRENCIES,
+  normalizeAmountInput,
+  trimAmount,
+} from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
@@ -31,7 +36,9 @@ export default function SettleUpModal({
   const [paidTo, setPaidTo] = useState(
     source?.paid_to_user_id ?? group.members.find((m) => m.id !== myId)?.id ?? "",
   );
-  const [amount, setAmount] = useState(source?.amount ?? "");
+  const [amount, setAmount] = useState(
+    source ? trimAmount(source.amount, source.currency) : "",
+  );
   const [currency, setCurrency] = useState(source?.currency ?? "PLN");
 
   const save = useMutation({
