@@ -3,15 +3,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, UserMinus, UserPlus } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import type { GroupDetail, User } from "../lib/types";
+import { useI18n } from "../lib/i18n";
 import Avatar from "./Avatar";
+import ConfirmDialog from "./ConfirmDialog";
 
 type FoundUser = Pick<User, "id" | "full_name" | "avatar_url">;
 
+const inputCls =
+  "flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
+
 export default function MembersTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [found, setFound] = useState<FoundUser | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<User | null>(null);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["group", group.id] });
@@ -25,7 +32,7 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     },
     onError: (e) => {
       setFound(null);
-      setSearchError(e instanceof ApiError ? e.message : "Search failed");
+      setSearchError(e instanceof ApiError ? e.message : t("searchFailed"));
     },
   });
 
@@ -42,7 +49,10 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
   const removeMember = useMutation({
     mutationFn: (userId: string) =>
       api.delete<void>(`/groups/${group.id}/members/${userId}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setRemoving(null);
+      invalidate();
+    },
   });
 
   return (
@@ -52,43 +62,47 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
           e.preventDefault();
           if (email.trim()) search.mutate(email.trim());
         }}
-        className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+        className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       >
-        <label className="mb-2 block text-sm font-medium">Invite by email</label>
+        <label className="mb-2 block text-sm font-medium">{t("inviteByEmail")}</label>
         <div className="flex gap-2">
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="friend@example.com"
-            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-teal-500"
+            className={inputCls}
           />
           <button
             type="submit"
             disabled={search.isPending}
-            className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
           >
-            <Search className="h-4 w-4" /> Find
+            <Search className="h-4 w-4" /> {t("find")}
           </button>
         </div>
-        {searchError && <p className="mt-2 text-sm text-red-600">{searchError}</p>}
+        {searchError && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">{searchError}</p>
+        )}
         {found && (
-          <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+          <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800">
             <div className="flex items-center gap-2">
               <Avatar user={{ ...found, email: "" }} size={8} />
-              <span className="text-sm font-medium">{found.full_name ?? "Unnamed user"}</span>
+              <span className="text-sm font-medium">{found.full_name ?? t("unnamedUser")}</span>
             </div>
             <button
               onClick={() => addMember.mutate(found.id)}
               disabled={addMember.isPending}
               className="flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
             >
-              <UserPlus className="h-4 w-4" /> Add
+              <UserPlus className="h-4 w-4" /> {t("add")}
             </button>
           </div>
         )}
         {addMember.error && (
-          <p className="mt-2 text-sm text-red-600">{(addMember.error as Error).message}</p>
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {(addMember.error as Error).message}
+          </p>
         )}
       </form>
 
@@ -96,20 +110,20 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
         {group.members.map((m) => (
           <li
             key={m.id}
-            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
           >
             <div className="flex items-center gap-3">
               <Avatar user={m} size={10} />
               <div>
                 <div className="font-medium">{m.full_name ?? m.email}</div>
-                <div className="text-xs text-slate-500">{m.email}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">{m.email}</div>
               </div>
             </div>
             <button
-              onClick={() => removeMember.mutate(m.id)}
+              onClick={() => setRemoving(m)}
               disabled={removeMember.isPending}
-              title="Remove from group (must be fully settled)"
-              className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+              title={t("removeMemberTip")}
+              className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
             >
               <UserMinus className="h-4 w-4" />
             </button>
@@ -117,7 +131,19 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
         ))}
       </ul>
       {removeMember.error && (
-        <p className="text-sm text-red-600">{(removeMember.error as Error).message}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">
+          {(removeMember.error as Error).message}
+        </p>
+      )}
+
+      {removing && (
+        <ConfirmDialog
+          title={t("removeMemberTitle")}
+          message={`${removing.full_name ?? removing.email} — ${t("removeMemberMsg")}`}
+          busy={removeMember.isPending}
+          onConfirm={() => removeMember.mutate(removing.id)}
+          onCancel={() => setRemoving(null)}
+        />
       )}
     </div>
   );

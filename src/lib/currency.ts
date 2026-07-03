@@ -9,6 +9,13 @@ const CURRENCY_PRECISION: Record<string, number> = {
 export const precisionFor = (currency: string): number =>
   CURRENCY_PRECISION[currency.toUpperCase()] ?? 2;
 
+// Locale-dependent decimal separator; kept in module state so formatMoney
+// call sites stay simple. Set by I18nProvider on language change.
+let decimalSep = ".";
+export function setMoneyLocale(lang: "en" | "pl"): void {
+  decimalSep = lang === "pl" ? "," : ".";
+}
+
 /** Format a backend money string (e.g. "120.5000") for display at the
  *  currency's own precision, without ever passing through a float total. */
 export function formatMoney(amount: string, currency: string): string {
@@ -16,10 +23,19 @@ export function formatMoney(amount: string, currency: string): string {
   const negative = amount.startsWith("-");
   const [intPartRaw, fracRaw = ""] = amount.replace("-", "").split(".");
   const frac = fracRaw.padEnd(precision, "0").slice(0, precision);
-  const intPart = intPartRaw.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const digits = precision > 0 ? `${intPart}.${frac}` : intPart;
-  return `${negative ? "-" : ""}${digits} ${currency}`;
+  const intPart = intPartRaw.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const digits = precision > 0 ? `${intPart}${decimalSep}${frac}` : intPart;
+  return `${negative ? "-" : ""}${digits} ${currency}`;
 }
+
+/** Normalize user-typed amounts: trims and accepts both comma and dot as
+ *  the decimal separator ("12,50" -> "12.50"). */
+export function normalizeAmountInput(raw: string): string {
+  return raw.trim().replace(",", ".");
+}
+
+/** Shared input validation pattern allowing either separator. */
+export const AMOUNT_PATTERN = "^\\d+([.,]\\d+)?$";
 
 export const COMMON_CURRENCIES = [
   "PLN", "EUR", "USD", "GBP", "CHF", "CZK", "SEK", "NOK", "DKK", "JPY",

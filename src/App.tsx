@@ -4,14 +4,15 @@ import LoginPage from "./pages/LoginPage";
 import GroupsPage from "./pages/GroupsPage";
 import GroupPage from "./pages/GroupPage";
 import Layout from "./components/Layout";
+import Spinner from "./components/Spinner";
 
 export default function App() {
   const { session, loading } = useAuth();
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-slate-500">
-        Loading…
+      <div className="flex h-screen items-center justify-center">
+        <Spinner />
       </div>
     );
   }

@@ -2,9 +2,13 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, newIdempotencyKey } from "../lib/api";
 import type { GroupDetail, Settlement, SettlementPayload } from "../lib/types";
-import { COMMON_CURRENCIES } from "../lib/currency";
+import { AMOUNT_PATTERN, COMMON_CURRENCIES, normalizeAmountInput } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
+import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
+
+const inputCls =
+  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
 
 export default function SettleUpModal({
   group,
@@ -18,6 +22,7 @@ export default function SettleUpModal({
   onClose: () => void;
 }) {
   const { session } = useAuth();
+  const { t } = useI18n();
   const myId = session?.user.id;
   const queryClient = useQueryClient();
 
@@ -34,7 +39,7 @@ export default function SettleUpModal({
       const payload: SettlementPayload = {
         paid_by_user_id: paidBy,
         paid_to_user_id: paidTo,
-        amount,
+        amount: normalizeAmountInput(amount),
         currency,
       };
       if (editing) {
@@ -58,11 +63,11 @@ export default function SettleUpModal({
 
   const label = (id: string) => {
     const m = group.members.find((x) => x.id === id);
-    return id === myId ? "You" : (m?.full_name ?? m?.email ?? "Former member");
+    return id === myId ? t("you") : (m?.full_name ?? m?.email ?? t("formerMember"));
   };
 
   return (
-    <Modal title={editing ? "Edit settlement" : "Settle up"} onClose={onClose}>
+    <Modal title={editing ? t("editSettlement") : t("settleUp")} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -72,12 +77,8 @@ export default function SettleUpModal({
       >
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium">Who paid</label>
-            <select
-              value={paidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500"
-            >
+            <label className="mb-1 block text-sm font-medium">{t("whoPaid")}</label>
+            <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)} className={inputCls}>
               {group.members.map((m) => (
                 <option key={m.id} value={m.id}>
                   {label(m.id)}
@@ -86,12 +87,8 @@ export default function SettleUpModal({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Who received</label>
-            <select
-              value={paidTo}
-              onChange={(e) => setPaidTo(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500"
-            >
+            <label className="mb-1 block text-sm font-medium">{t("whoReceived")}</label>
+            <select value={paidTo} onChange={(e) => setPaidTo(e.target.value)} className={inputCls}>
               {group.members.map((m) => (
                 <option key={m.id} value={m.id}>
                   {label(m.id)}
@@ -103,23 +100,23 @@ export default function SettleUpModal({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium">Amount</label>
+            <label className="mb-1 block text-sm font-medium">{t("amount")}</label>
             <input
               required
               inputMode="decimal"
-              pattern="^\d+(\.\d+)?$"
+              pattern={AMOUNT_PATTERN}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="120.50"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-teal-500"
+              placeholder="120,50"
+              className={inputCls}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Currency</label>
+            <label className="mb-1 block text-sm font-medium">{t("currency")}</label>
             <select
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500"
+              className={inputCls}
             >
               {COMMON_CURRENCIES.map((c) => (
                 <option key={c}>{c}</option>
@@ -129,16 +126,18 @@ export default function SettleUpModal({
         </div>
 
         {paidBy === paidTo && (
-          <p className="text-sm text-amber-600">Payer and receiver must be different people.</p>
+          <p className="text-sm text-amber-600 dark:text-amber-400">{t("samePersonWarning")}</p>
         )}
-        {save.error && <p className="text-sm text-red-600">{(save.error as Error).message}</p>}
+        {save.error && (
+          <p className="text-sm text-red-600 dark:text-red-400">{(save.error as Error).message}</p>
+        )}
 
         <button
           type="submit"
           disabled={save.isPending || paidBy === paidTo || !amount}
           className="w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50"
         >
-          {save.isPending ? "Saving…" : editing ? "Save changes" : "Record payment"}
+          {save.isPending ? t("saving") : editing ? t("saveChanges") : t("recordPayment")}
         </button>
       </form>
     </Modal>

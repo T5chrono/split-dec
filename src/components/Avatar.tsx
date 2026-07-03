@@ -20,7 +20,7 @@ export default function Avatar({ user, size = 8 }: { user: User; size?: 6 | 8 | 
     .toUpperCase();
   return (
     <div
-      className={`${cls} flex items-center justify-center rounded-full bg-teal-100 font-semibold text-teal-700`}
+      className={`${cls} flex items-center justify-center rounded-full bg-teal-100 font-semibold text-teal-700 dark:bg-teal-900 dark:text-teal-300`}
     >
       {initials}
     </div>
