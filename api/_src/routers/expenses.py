@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import select
@@ -48,7 +48,7 @@ async def list_expenses(
         await db.execute(
             select(Expense)
             .where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
-            .order_by(Expense.created_at.desc())
+            .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -82,6 +82,7 @@ async def create_expense(
         total_amount=body.total_amount,
         currency=body.currency,
         paid_by_user_id=body.paid_by_user_id,
+        expense_date=body.expense_date or date.today(),
         idempotency_key=idempotency_key,
         splits=[
             ExpenseSplit(user_id=user_id, owed_amount=amount)
@@ -125,6 +126,8 @@ async def update_expense(
     expense.total_amount = body.total_amount
     expense.currency = body.currency
     expense.paid_by_user_id = body.paid_by_user_id
+    if body.expense_date is not None:
+        expense.expense_date = body.expense_date
     # Flush the orphan-deletion of the old splits BEFORE adding replacements:
     # the unit of work otherwise emits the new INSERTs first, violating
     # UNIQUE(expense_id, user_id) for any user who stays in the split.

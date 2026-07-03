@@ -82,7 +82,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
                 <div className="truncate font-medium">{e.description}</div>
                 <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {nameOf(e.paid_by_user_id)} {t("paidVerb")} · {tCategory(e.category)} ·{" "}
-                  {new Date(e.created_at).toLocaleDateString(dateLocale)}
+                  {new Date(e.expense_date).toLocaleDateString(dateLocale)}
                 </div>
               </div>
             </div>

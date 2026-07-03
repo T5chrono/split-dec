@@ -32,6 +32,7 @@ export interface Expense {
   total_amount: string;
   currency: string;
   paid_by_user_id: string;
+  expense_date: string; // ISO date (YYYY-MM-DD) the expense occurred
   created_at: string;
   splits: ExpenseSplit[];
 }
@@ -73,6 +74,7 @@ export interface ExpensePayload {
   total_amount: string;
   currency: string;
   paid_by_user_id: string;
+  expense_date: string;
   splits: SplitInput[];
 }
 

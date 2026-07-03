@@ -37,6 +37,15 @@ export function normalizeAmountInput(raw: string): string {
 /** Shared input validation pattern allowing either separator. */
 export const AMOUNT_PATTERN = "^\\d+([.,]\\d+)?$";
 
+/** Trim a backend money string for use in an editable input: "30.0000" ->
+ *  "30.00" (per the currency's precision; "100.0000" JPY -> "100"). */
+export function trimAmount(amount: string, currency: string): string {
+  const precision = precisionFor(currency);
+  const [intPart, frac = ""] = amount.split(".");
+  if (precision === 0) return intPart;
+  return `${intPart}.${frac.padEnd(precision, "0").slice(0, precision)}`;
+}
+
 export const COMMON_CURRENCIES = [
   "PLN", "EUR", "USD", "GBP", "CHF", "CZK", "SEK", "NOK", "DKK", "JPY",
   "AUD", "CAD", "HUF", "UAH", "KWD",

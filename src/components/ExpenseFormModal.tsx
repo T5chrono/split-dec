@@ -8,7 +8,12 @@ import type {
   SplitInput,
   SplitType,
 } from "../lib/types";
-import { AMOUNT_PATTERN, COMMON_CURRENCIES, normalizeAmountInput } from "../lib/currency";
+import {
+  AMOUNT_PATTERN,
+  COMMON_CURRENCIES,
+  normalizeAmountInput,
+  trimAmount,
+} from "../lib/currency";
 import { CATEGORY_GROUPS } from "../lib/categories";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
@@ -34,15 +39,25 @@ export default function ExpenseFormModal({
 
   const [description, setDescription] = useState(expense?.description ?? "");
   const [category, setCategory] = useState(expense?.category ?? "General");
-  const [totalAmount, setTotalAmount] = useState(expense?.total_amount ?? "");
+  const [totalAmount, setTotalAmount] = useState(
+    expense ? trimAmount(expense.total_amount, expense.currency) : "",
+  );
   const [currency, setCurrency] = useState(expense?.currency ?? "PLN");
   const [paidBy, setPaidBy] = useState(expense?.paid_by_user_id ?? myId ?? "");
+  const [expenseDate, setExpenseDate] = useState(
+    expense?.expense_date ?? new Date().toISOString().slice(0, 10),
+  );
   const [splitType, setSplitType] = useState<SplitType>(expense?.split_type ?? "EQUAL");
   const [participants, setParticipants] = useState<Set<string>>(
     new Set(expense ? expense.splits.map((s) => s.user_id) : group.members.map((m) => m.id)),
   );
   const [exactAmounts, setExactAmounts] = useState<Record<string, string>>(
-    Object.fromEntries((expense?.splits ?? []).map((s) => [s.user_id, s.owed_amount])),
+    Object.fromEntries(
+      (expense?.splits ?? []).map((s) => [
+        s.user_id,
+        trimAmount(s.owed_amount, expense?.currency ?? "PLN"),
+      ]),
+    ),
   );
   const [percentages, setPercentages] = useState<Record<string, string>>({});
 
@@ -73,6 +88,7 @@ export default function ExpenseFormModal({
         total_amount: normalizeAmountInput(totalAmount),
         currency,
         paid_by_user_id: paidBy,
+        expense_date: expenseDate,
         splits: buildSplits(),
       };
       if (expense) {
@@ -105,6 +121,17 @@ export default function ExpenseFormModal({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t("descriptionPlaceholder")}
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium">{t("date")}</label>
+          <input
+            type="date"
+            required
+            value={expenseDate}
+            onChange={(e) => setExpenseDate(e.target.value)}
             className={inputCls}
           />
         </div>

@@ -32,6 +32,16 @@ Built to `SplitDec - specification.md` (v6).
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
 
+## Branch workflow
+
+- `develop` is the working branch — push (or PR) feature work here; CI runs
+  the test suite and the frontend build on every push.
+- When `develop` is green, open a PR to `master` and request a review from
+  Claude (mention `@claude` in the PR). Address comments, then merge.
+- Merging to `master` runs CI again and Vercel auto-deploys `master` to
+  production (https://split-dec.vercel.app). Pushes to `develop` get Vercel
+  preview deployments.
+
 ## Tests
 
 - `pip install -r requirements.txt -r requirements-dev.txt`, then `pytest`.
