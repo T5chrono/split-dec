@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -61,6 +61,7 @@ class Expense(Base):
 
 class ExpenseSplit(Base):
     __tablename__ = "expense_splits"
+    __table_args__ = (UniqueConstraint("expense_id", "user_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     expense_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("expenses.id"))

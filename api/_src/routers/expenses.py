@@ -125,6 +125,11 @@ async def update_expense(
     expense.total_amount = body.total_amount
     expense.currency = body.currency
     expense.paid_by_user_id = body.paid_by_user_id
+    # Flush the orphan-deletion of the old splits BEFORE adding replacements:
+    # the unit of work otherwise emits the new INSERTs first, violating
+    # UNIQUE(expense_id, user_id) for any user who stays in the split.
+    expense.splits = []
+    await db.flush()
     expense.splits = [
         ExpenseSplit(user_id=user_id, owed_amount=amount)
         for user_id, amount in shares.items()
