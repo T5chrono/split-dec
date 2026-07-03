@@ -10,3 +10,4 @@ venv/
 .env.*.local
 
 .vercel
+*.tsbuildinfo
