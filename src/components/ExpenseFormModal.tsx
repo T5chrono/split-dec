@@ -63,15 +63,19 @@ export default function ExpenseFormModal({
   );
   // When editing a PERCENTAGE expense, derive percentages from the stored
   // owed amounts — all but the last, which the autofill below reconstructs so
-  // the total is exactly 100 despite rounding.
+  // the total is exactly 100 despite rounding. Money strings never pass
+  // through floats: both amounts have exactly 4 decimals from the API, so
+  // stripping the dot yields exact integer minor units for BigInt division.
   const [percentages, setPercentages] = useState<Record<string, string>>(() => {
     if (!expense || expense.split_type !== "PERCENTAGE") return {};
-    const total = parseFloat(expense.total_amount);
+    const toUnits = (s: string) => BigInt(s.replace(".", ""));
+    const total = toUnits(expense.total_amount);
     return Object.fromEntries(
-      expense.splits.slice(0, -1).map((s) => [
-        s.user_id,
-        String(Math.round((parseFloat(s.owed_amount) / total) * 10000) / 100),
-      ]),
+      expense.splits.slice(0, -1).map((s) => {
+        // Percentage in hundredths, rounded half-up: owed / total * 100_00
+        const hundredths = (toUnits(s.owed_amount) * 10000n + total / 2n) / total;
+        return [s.user_id, String(Number(hundredths) / 100)];
+      }),
     );
   });
 

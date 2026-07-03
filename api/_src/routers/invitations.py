@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
@@ -88,7 +89,29 @@ async def invite_to_group(
         invited_user_id=invitee.id if invitee else None,
     )
     db.add(invitation)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Concurrent duplicate (double-click/retry) hit the partial unique
+        # index; return the winner idempotently, like expense creation does.
+        await db.rollback()
+        existing = (
+            await db.execute(
+                select(GroupInvitation).where(
+                    GroupInvitation.group_id == group_id,
+                    GroupInvitation.email == email,
+                    GroupInvitation.status == "PENDING",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise HTTPException(status_code=400, detail="Invitation could not be created")
+        response.status_code = 200
+        return InvitationCreatedOut(
+            **InvitationOut.model_validate(existing).model_dump(),
+            user_exists=invitee is not None,
+            email_sent=False,
+        )
 
     email_sent = False
     if invitee is None:
