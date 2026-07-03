@@ -19,6 +19,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
 import Modal from "./Modal";
+import DatePicker from "./DatePicker";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
@@ -128,13 +129,7 @@ export default function ExpenseFormModal({
 
         <div>
           <label className="mb-1 block text-sm font-medium">{t("date")}</label>
-          <input
-            type="date"
-            required
-            value={expenseDate}
-            onChange={(e) => setExpenseDate(e.target.value)}
-            className={inputCls}
-          />
+          <DatePicker value={expenseDate} onChange={setExpenseDate} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
