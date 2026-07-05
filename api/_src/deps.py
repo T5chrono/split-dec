@@ -7,6 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Expense, Group, GroupMember, Settlement
 
 
+async def lock_group(db: AsyncSession, group_id: uuid.UUID, *, exclusive: bool) -> None:
+    """Take a row lock on the group to serialize financial writes against a
+    concurrent group deletion. Writers that add/increase obligations take a
+    shared lock; delete_group takes an exclusive lock and re-checks balances
+    while holding it, so nothing can slip in between the check and the deletes.
+    (No-op on SQLite, which ignores row-level locking clauses.)"""
+    await db.execute(
+        select(Group.id).where(Group.id == group_id).with_for_update(read=not exclusive)
+    )
+
+
 async def require_membership(
     db: AsyncSession, group_id: uuid.UUID, user_id: uuid.UUID
 ) -> None:

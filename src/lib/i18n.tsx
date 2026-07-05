@@ -127,6 +127,12 @@ const dict = {
     inviteEmailSubject: "You're invited to SplitDec",
     inviteEmailBody:
       'I\'d like to split expenses with you in the group "{group}" on SplitDec. Sign in with Google using this email address and the invitation will be waiting for you.',
+    deleteGroup: "Delete group",
+    deleteGroupHint:
+      "Permanently deletes this group and its expenses and settlements for everyone. Only possible when the group is fully settled.",
+    deleteGroupTitle: "Delete this group?",
+    deleteGroupMsg:
+      "This permanently removes the group and all its expenses and settlements for every member. It can only be done when everyone is settled up, and it cannot be undone.",
   },
   pl: {
     loading: "Wczytywanie…",
@@ -234,6 +240,12 @@ const dict = {
     inviteEmailSubject: "Zaproszenie do SplitDec",
     inviteEmailBody:
       "Chcę dzielić z Tobą wydatki w grupie „{group}” w SplitDec. Zaloguj się przez Google, używając tego adresu e-mail, a zaproszenie będzie na Ciebie czekać.",
+    deleteGroup: "Usuń grupę",
+    deleteGroupHint:
+      "Trwale usuwa tę grupę wraz z jej wydatkami i rozliczeniami dla wszystkich. Możliwe tylko, gdy grupa jest w pełni rozliczona.",
+    deleteGroupTitle: "Usunąć tę grupę?",
+    deleteGroupMsg:
+      "To trwale usunie grupę oraz wszystkie jej wydatki i rozliczenia dla każdego członka. Można to zrobić tylko, gdy wszyscy są rozliczeni. Tej operacji nie można cofnąć.",
   },
 } as const;
 

@@ -82,6 +82,101 @@ async def test_remove_member_after_settling(client, two_user_group):
     assert r.status_code == 204
 
 
+async def test_delete_empty_group(client, two_user_group):
+    g = two_user_group
+    assert (await client.delete(f"/api/groups/{g['group'].id}")).status_code == 204
+    assert (await client.get("/api/groups")).json() == []
+    assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 404
+
+
+async def test_delete_settled_group_removes_all_records(client, two_user_group, db_session):
+    g = two_user_group
+    # Expense then a settlement that clears it -> group is settled but has records.
+    await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"], g["bob"]], total_amount="20.00"),
+        headers=idem(),
+    )
+    await client.post(
+        f"/api/groups/{g['group'].id}/settlements",
+        json={
+            "paid_by_user_id": str(g["bob"].id),
+            "paid_to_user_id": str(g["alice"].id),
+            "amount": "10.00",
+            "currency": "PLN",
+        },
+        headers=idem(),
+    )
+    # A pending invitation should be swept away too.
+    await client.post(
+        f"/api/groups/{g['group'].id}/invitations",
+        json={"email": "future@test.dev"},
+    )
+
+    assert (await client.delete(f"/api/groups/{g['group'].id}")).status_code == 204
+
+    # Every child row is gone too (no orphans), including invitations and the group.
+    from sqlalchemy import func, select
+    from _src.models import (
+        Expense,
+        ExpenseSplit,
+        Group,
+        GroupInvitation,
+        GroupMember,
+        Settlement,
+    )
+
+    async with db_session() as s:
+        for model in (
+            Expense,
+            ExpenseSplit,
+            GroupMember,
+            Settlement,
+            GroupInvitation,
+            Group,
+        ):
+            count = (await s.execute(select(func.count()).select_from(model))).scalar_one()
+            assert count == 0, model.__name__
+
+
+async def test_delete_unsettled_group_blocked(client, two_user_group):
+    g = two_user_group
+    await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"], g["bob"]]),
+        headers=idem(),
+    )
+    r = await client.delete(f"/api/groups/{g['group'].id}")
+    assert r.status_code == 400
+    assert "PLN" in r.json()["detail"]
+    # Still there.
+    assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 200
+
+
+async def test_delete_unsettled_group_blocked_multi_currency(client, two_user_group):
+    g = two_user_group
+    for currency in ("PLN", "EUR"):
+        await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(
+                g["alice"], [g["alice"], g["bob"]], total_amount="10.00", currency=currency
+            ),
+            headers=idem(),
+        )
+    r = await client.delete(f"/api/groups/{g['group'].id}")
+    assert r.status_code == 400
+    # Every unsettled currency is named, not just one.
+    assert "PLN" in r.json()["detail"] and "EUR" in r.json()["detail"]
+
+
+async def test_delete_group_requires_membership(client, two_user_group, db_session, current_user):
+    outsider = await make_user(db_session, "outsider@test.dev")
+    current_user.id = outsider.id
+    assert (
+        await client.delete(f"/api/groups/{two_user_group['group'].id}")
+    ).status_code == 403
+
+
 async def test_balances_shape_and_math(client, two_user_group):
     g = two_user_group
     await client.post(
