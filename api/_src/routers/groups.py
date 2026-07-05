@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..balances import greedy_simplify, net_balances
 from ..db import get_db
-from ..deps import require_membership
+from ..deps import lock_group, require_membership
 from ..models import (
     Expense,
     ExpenseSplit,
@@ -93,6 +93,9 @@ async def delete_group(
     settlements, invitations cascade). Any member may delete, but only once
     the group is fully settled — no non-zero balance in any currency."""
     await require_membership(db, group_id, caller)
+    # Lock the group so no expense/settlement can be created/updated between
+    # this settled-check and the deletes below (they take a shared lock).
+    await lock_group(db, group_id, exclusive=True)
     buckets = await net_balances(db, group_id)
     unsettled = sorted(c for c, users in buckets.items() if any(v != 0 for v in users.values()))
     if unsettled:

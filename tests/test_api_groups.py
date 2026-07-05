@@ -107,14 +107,34 @@ async def test_delete_settled_group_removes_all_records(client, two_user_group, 
         },
         headers=idem(),
     )
+    # A pending invitation should be swept away too.
+    await client.post(
+        f"/api/groups/{g['group'].id}/invitations",
+        json={"email": "future@test.dev"},
+    )
+
     assert (await client.delete(f"/api/groups/{g['group'].id}")).status_code == 204
 
-    # Child rows are gone too (no orphans).
+    # Every child row is gone too (no orphans), including invitations and the group.
     from sqlalchemy import func, select
-    from _src.models import Expense, ExpenseSplit, GroupMember, Settlement
+    from _src.models import (
+        Expense,
+        ExpenseSplit,
+        Group,
+        GroupInvitation,
+        GroupMember,
+        Settlement,
+    )
 
     async with db_session() as s:
-        for model in (Expense, ExpenseSplit, GroupMember, Settlement):
+        for model in (
+            Expense,
+            ExpenseSplit,
+            GroupMember,
+            Settlement,
+            GroupInvitation,
+            Group,
+        ):
             count = (await s.execute(select(func.count()).select_from(model))).scalar_one()
             assert count == 0, model.__name__
 
@@ -131,6 +151,22 @@ async def test_delete_unsettled_group_blocked(client, two_user_group):
     assert "PLN" in r.json()["detail"]
     # Still there.
     assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 200
+
+
+async def test_delete_unsettled_group_blocked_multi_currency(client, two_user_group):
+    g = two_user_group
+    for currency in ("PLN", "EUR"):
+        await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(
+                g["alice"], [g["alice"], g["bob"]], total_amount="10.00", currency=currency
+            ),
+            headers=idem(),
+        )
+    r = await client.delete(f"/api/groups/{g['group'].id}")
+    assert r.status_code == 400
+    # Every unsettled currency is named, not just one.
+    assert "PLN" in r.json()["detail"] and "EUR" in r.json()["detail"]
 
 
 async def test_delete_group_requires_membership(client, two_user_group, db_session, current_user):
