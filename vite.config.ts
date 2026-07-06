@@ -31,8 +31,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // The SPA shell is precached; API traffic must never be intercepted
-        // or served stale by the service worker.
+        // SPA offline fallback for client-side routes (vite-plugin-pwa sets
+        // this by default; explicit so the denylist's dependency is visible).
+        // API traffic must never be intercepted or served stale by the SW.
+        navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
       },
