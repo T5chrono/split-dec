@@ -78,7 +78,19 @@ These were shared during development and should be rotated before launch:
   public launch add a Privacy Policy and Terms (also required to publish the
   Google OAuth app). Link them from the login page footer.
 
-## 9. Nice-to-haves before launch — ☐
+## 9. Android app (Play Store) via TWA — ☐ (PWA prerequisite ☑)
+The app is an installable PWA (manifest + service worker; Chrome → "Add to
+Home Screen"). To turn it into a Play Store app:
+1. `npx @bubblewrap/cli init --manifest https://split-dec.vercel.app/manifest.webmanifest`
+   (Bubblewrap offers to install JDK/Android SDK; it generates a signing key).
+2. Serve `/.well-known/assetlinks.json` with the signing key's SHA-256
+   fingerprint (drop the file in `public/.well-known/`) so the TWA runs
+   fullscreen without the browser bar.
+3. `npx @bubblewrap/cli build` → sideload the `.apk` to test, or upload the
+   `.aab` to Google Play ($25 one-time developer account; privacy policy from
+   item 8 is required for the listing).
+
+## 10. Nice-to-haves before launch — ☐
 - Rate limiting on write endpoints (expense/settlement/invite creation).
 - Empty-state polish and a 404 page.
 - `robots.txt` / basic SEO meta if the marketing page is public.
