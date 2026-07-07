@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, HandCoins, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import type { GroupDetail, Settlement } from "../lib/types";
+import { settlementsQuery } from "../lib/queries";
 import { formatMoney } from "../lib/currency";
 import { useI18n } from "../lib/i18n";
 import SettleUpModal from "./SettleUpModal";
@@ -20,15 +21,25 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
   const nameOf = (id: string) =>
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["settlements", group.id],
-    queryFn: () => api.get<Settlement[]>(`/groups/${group.id}/settlements`),
-  });
+  const { data, isLoading, error } = useQuery(settlementsQuery(group.id));
 
   const deleteSettlement = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/settlements/${id}`),
-    onSuccess: () => {
+    // Optimistic: the row disappears immediately; restored if the server says no.
+    onMutate: async (id: string) => {
       setDeleting(null);
+      await queryClient.cancelQueries({ queryKey: ["settlements", group.id] });
+      const previous = queryClient.getQueryData<Settlement[]>(["settlements", group.id]);
+      queryClient.setQueryData<Settlement[]>(
+        ["settlements", group.id],
+        (old) => old?.filter((s) => s.id !== id),
+      );
+      return { previous };
+    },
+    onError: (_err, _id, ctx) => {
+      queryClient.setQueryData(["settlements", group.id], ctx?.previous);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["settlements", group.id] });
       queryClient.invalidateQueries({ queryKey: ["balances", group.id] });
     },
