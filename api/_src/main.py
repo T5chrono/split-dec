@@ -1,6 +1,7 @@
+import os
 import time
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,8 +38,19 @@ async def health():
 
 
 @app.get("/api/health/db")
-async def health_db(db: AsyncSession = Depends(get_db)):
-    """Round-trip through the database; used to measure connect+query latency."""
+async def health_db(
+    db: AsyncSession = Depends(get_db),
+    x_health_key: str | None = Header(default=None, alias="X-Health-Key"),
+):
+    """Round-trip through the database; used to measure connect+query latency.
+
+    Every call opens a fresh pooler connection (NullPool), so when
+    HEALTH_PROBE_KEY is configured the probe demands it — an unauthenticated
+    free lever on pooler slots otherwise. Read at call time for testability.
+    """
+    expected = os.getenv("HEALTH_PROBE_KEY", "")
+    if expected and x_health_key != expected:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Health-Key")
     started = time.perf_counter()
     await db.execute(text("SELECT 1"))
     return {"status": "ok", "db_ms": round((time.perf_counter() - started) * 1000, 1)}
