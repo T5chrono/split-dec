@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..currencies import precision_for
 from ..db import get_db
-from ..deps import get_settlement_for_member, lock_group, require_membership
+from ..deps import get_settlement_for_member, require_membership
 from ..models import GroupMember, Settlement
 from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
 
@@ -72,8 +72,7 @@ async def create_settlement(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    await require_membership(db, group_id, caller)
-    await lock_group(db, group_id, exclusive=False)
+    await require_membership(db, group_id, caller, lock="shared")
     await _validate_parties(db, group_id, body.paid_by_user_id, body.paid_to_user_id)
     _validate_amount_precision(body.amount, body.currency)
     settlement = Settlement(
@@ -109,8 +108,7 @@ async def update_settlement(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    settlement = await get_settlement_for_member(db, settlement_id, caller)
-    await lock_group(db, settlement.group_id, exclusive=False)
+    settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
     paid_by = body.paid_by_user_id or settlement.paid_by_user_id
     paid_to = body.paid_to_user_id or settlement.paid_to_user_id
     amount = body.amount if body.amount is not None else settlement.amount

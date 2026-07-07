@@ -1,60 +1,103 @@
 import uuid
+from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Expense, Group, GroupMember, Settlement
 
+# Row locks on the group serialize financial writes against a concurrent
+# group deletion: writers that add/increase obligations take a shared lock,
+# delete_group takes an exclusive one and re-checks balances while holding
+# it. Locks ride along the authorization query (no extra round trip) and are
+# ignored by SQLite in tests. Postgres allows FOR SHARE/UPDATE only OF the
+# non-nullable side of an outer join, which Group is in all queries below.
+GroupLock = Literal["shared", "exclusive"] | None
 
-async def lock_group(db: AsyncSession, group_id: uuid.UUID, *, exclusive: bool) -> None:
-    """Take a row lock on the group to serialize financial writes against a
-    concurrent group deletion. Writers that add/increase obligations take a
-    shared lock; delete_group takes an exclusive lock and re-checks balances
-    while holding it, so nothing can slip in between the check and the deletes.
-    (No-op on SQLite, which ignores row-level locking clauses.)"""
-    await db.execute(
-        select(Group.id).where(Group.id == group_id).with_for_update(read=not exclusive)
-    )
+
+def _with_group_lock(stmt: Select, lock: GroupLock) -> Select:
+    if lock is None:
+        return stmt
+    return stmt.with_for_update(read=(lock == "shared"), of=Group)
 
 
 async def require_membership(
-    db: AsyncSession, group_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    lock: GroupLock = None,
 ) -> None:
-    """404 if the group doesn't exist, 403 if the caller isn't a member."""
-    group = await db.get(Group, group_id)
-    if group is None:
+    """404 if the group doesn't exist, 403 if the caller isn't a member.
+
+    Single round trip: group existence and the caller's membership come back
+    in one row via an outer join.
+    """
+    stmt = (
+        select(Group.id, GroupMember.user_id)
+        .outerjoin(
+            GroupMember,
+            (GroupMember.group_id == Group.id) & (GroupMember.user_id == user_id),
+        )
+        .where(Group.id == group_id)
+    )
+    row = (await db.execute(_with_group_lock(stmt, lock))).first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Group not found")
-    member = await db.get(GroupMember, (group_id, user_id))
-    if member is None:
+    if row.user_id is None:
         raise HTTPException(status_code=403, detail="You are not a member of this group")
 
 
 async def get_expense_for_member(
-    db: AsyncSession, expense_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    expense_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    lock: GroupLock = None,
 ) -> Expense:
-    expense = (
-        await db.execute(
-            select(Expense).where(Expense.id == expense_id, Expense.deleted_at.is_(None))
+    """Fetch the expense and verify the caller's membership in one query."""
+    stmt = (
+        select(Expense, GroupMember.user_id)
+        .join(Group, Group.id == Expense.group_id)
+        .outerjoin(
+            GroupMember,
+            (GroupMember.group_id == Expense.group_id)
+            & (GroupMember.user_id == user_id),
         )
-    ).scalar_one_or_none()
-    if expense is None:
+        .where(Expense.id == expense_id, Expense.deleted_at.is_(None))
+    )
+    row = (await db.execute(_with_group_lock(stmt, lock))).first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Expense not found")
-    await require_membership(db, expense.group_id, user_id)
+    expense, member_id = row
+    if member_id is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
     return expense
 
 
 async def get_settlement_for_member(
-    db: AsyncSession, settlement_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    settlement_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    lock: GroupLock = None,
 ) -> Settlement:
-    settlement = (
-        await db.execute(
-            select(Settlement).where(
-                Settlement.id == settlement_id, Settlement.deleted_at.is_(None)
-            )
+    """Fetch the settlement and verify the caller's membership in one query."""
+    stmt = (
+        select(Settlement, GroupMember.user_id)
+        .join(Group, Group.id == Settlement.group_id)
+        .outerjoin(
+            GroupMember,
+            (GroupMember.group_id == Settlement.group_id)
+            & (GroupMember.user_id == user_id),
         )
-    ).scalar_one_or_none()
-    if settlement is None:
+        .where(Settlement.id == settlement_id, Settlement.deleted_at.is_(None))
+    )
+    row = (await db.execute(_with_group_lock(stmt, lock))).first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Settlement not found")
-    await require_membership(db, settlement.group_id, user_id)
+    settlement, member_id = row
+    if member_id is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
     return settlement

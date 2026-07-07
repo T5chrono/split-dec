@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import get_expense_for_member, lock_group, require_membership
+from ..deps import get_expense_for_member, require_membership
 from ..models import Expense, ExpenseSplit, GroupMember
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut
 from ..splits import compute_splits
@@ -69,8 +69,7 @@ async def create_expense(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    await require_membership(db, group_id, caller)
-    await lock_group(db, group_id, exclusive=False)
+    await require_membership(db, group_id, caller, lock="shared")
     await _validate_participants(db, group_id, body)
     shares = compute_splits(
         body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
@@ -115,8 +114,7 @@ async def update_expense(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    expense = await get_expense_for_member(db, expense_id, caller)
-    await lock_group(db, expense.group_id, exclusive=False)
+    expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
     await _validate_participants(db, expense.group_id, body)
     shares = compute_splits(
         body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
