@@ -1,6 +1,11 @@
-from fastapi import FastAPI
+import time
+
+from fastapi import Depends, FastAPI
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import DEV_FRONTEND_ORIGIN, ENV
+from .db import get_db
 from .routers import expenses, groups, invitations, settlements, users
 
 app = FastAPI(title="SplitDec API", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -29,3 +34,11 @@ app.include_router(settlements.router, prefix="/api")
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/health/db")
+async def health_db(db: AsyncSession = Depends(get_db)):
+    """Round-trip through the database; used to measure connect+query latency."""
+    started = time.perf_counter()
+    await db.execute(text("SELECT 1"))
+    return {"status": "ok", "db_ms": round((time.perf_counter() - started) * 1000, 1)}
