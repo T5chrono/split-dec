@@ -56,11 +56,19 @@ and the UI offers a pre-written mailto draft instead.
 - `pip install -r requirements.txt -r requirements-dev.txt`, then `pytest`.
 - Pure logic (split math, debt simplification) plus full API tests running
   against in-memory SQLite with the auth dependency overridden — no network.
-- `tests/test_balances_pg.py` additionally checks the balance CTE against a
-  real Postgres; it is skipped unless `TEST_DATABASE_URL` is set (use a
-  disposable database — the test rolls back everything it writes).
-- CI (`.github/workflows/ci.yml`) runs pytest and the frontend build on every
-  push and PR.
+- `tests/test_balances_pg.py` / `tests/test_locks_pg.py` additionally check
+  the balance CTE and row-lock clauses against a real Postgres; both are
+  skipped unless `TEST_DATABASE_URL` is set (use a disposable database — they
+  roll back everything they write).
+- Frontend: `npm test` (Vitest + React Testing Library, jsdom). Pure `lib/`
+  functions (currency formatting, local-date handling) plus component tests
+  — `../lib/api` and `../lib/supabase` are mocked so no network calls happen;
+  `.env.test` supplies dummy Supabase env vars so importing `useAuth` doesn't
+  throw outside a real build. The `ExpensesTab` suite exercises the
+  optimistic-delete/rollback flow directly (row disappears before the mocked
+  request resolves, reappears with the server's error message if it fails).
+- CI (`.github/workflows/ci.yml`) runs pytest, `npm test`, and the frontend
+  build on every push and PR.
 
 ## Local development
 
