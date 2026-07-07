@@ -100,6 +100,21 @@ class ExpenseCreate(BaseModel):
     splits: list[SplitInput] = Field(min_length=1)
 
 
+class ExpenseUpdate(BaseModel):
+    """Partial update. Metadata fields apply independently; the five
+    split-affecting fields must be provided together (or not at all) so the
+    splits always stay consistent with the amount, currency, and payer."""
+
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    category: Category | None = None
+    split_type: SplitType | None = None
+    total_amount: Decimal | None = Field(default=None, gt=0)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    paid_by_user_id: uuid.UUID | None = None
+    expense_date: date | None = None
+    splits: list[SplitInput] | None = Field(default=None, min_length=1)
+
+
 class ExpenseSplitOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

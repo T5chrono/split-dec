@@ -125,6 +125,100 @@ describe("ExpenseFormModal — percentage split autofill", () => {
   });
 });
 
+describe("ExpenseFormModal — exact split autofill", () => {
+  it("autofills the sole empty amount as total minus the rest and submits it", async () => {
+    const twoMemberGroup: GroupDetail = { ...group, members: [alice, bob] };
+    vi.mocked(api.post).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal
+        group={twoMemberGroup}
+        expense={null}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /exact amounts/i }));
+
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Dinner");
+    await user.type(screen.getByPlaceholderText("120,50"), "100,00");
+    const amountInputs = screen
+      .getAllByRole("textbox")
+      .filter((el) => el.className.includes("text-right"));
+    await user.type(amountInputs[0], "62,50"); // comma decimal, like Polish input
+
+    // Bob's field is the sole empty one: autofilled with the remainder.
+    expect(amountInputs[1]).toHaveAttribute("placeholder", "37.50");
+    expect(screen.getByText(/Sum of amounts: 100\.00/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add expense/i }));
+    const [, payload] = vi.mocked(api.post).mock.calls[0];
+    const splits = (payload as { splits: { user_id: string; amount: string }[] }).splits;
+    expect(splits.find((s) => s.user_id === alice.id)?.amount).toBe("62.50");
+    expect(splits.find((s) => s.user_id === bob.id)?.amount).toBe("37.50");
+  });
+
+  it("does not autofill when the entered amounts already exceed the total", async () => {
+    const twoMemberGroup: GroupDetail = { ...group, members: [alice, bob] };
+    renderWithProviders(
+      <ExpenseFormModal
+        group={twoMemberGroup}
+        expense={null}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /exact amounts/i }));
+    await user.type(screen.getByPlaceholderText("120,50"), "50");
+    const amountInputs = screen
+      .getAllByRole("textbox")
+      .filter((el) => el.className.includes("text-right"));
+    await user.type(amountInputs[0], "60"); // already over the 50 total
+    expect(amountInputs[1]).toHaveAttribute("placeholder", "0,00");
+  });
+});
+
+describe("ExpenseFormModal — delete from edit view", () => {
+  it("shows a red delete button when editing and fires onDelete", async () => {
+    const onDelete = vi.fn();
+    const expense: Expense = {
+      id: "e1",
+      group_id: group.id,
+      description: "Rent",
+      category: "Rent",
+      split_type: "EQUAL",
+      total_amount: "100.0000",
+      currency: "PLN",
+      paid_by_user_id: alice.id,
+      expense_date: "2026-06-01",
+      created_at: "2026-06-01T00:00:00Z",
+      splits: [{ user_id: alice.id, owed_amount: "100.0000" }],
+    };
+    renderWithProviders(
+      <ExpenseFormModal
+        group={group}
+        expense={expense}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onDelete={onDelete}
+      />,
+    );
+    const deleteButton = screen.getByRole("button", { name: /delete expense/i });
+    expect(deleteButton.className).toContain("bg-red-600");
+    const user = userEvent.setup();
+    await user.click(deleteButton);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no delete button when creating", () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: /delete expense/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("ExpenseFormModal — editing a percentage expense", () => {
   it("derives percentages from stored owed amounts, leaving the last for autofill", () => {
     const expense: Expense = {

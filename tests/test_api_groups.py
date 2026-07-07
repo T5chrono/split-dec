@@ -82,6 +82,31 @@ async def test_remove_member_after_settling(client, two_user_group):
     assert r.status_code == 204
 
 
+async def test_rename_group(client, two_user_group):
+    g = two_user_group
+    r = await client.patch(f"/api/groups/{g['group'].id}", json={"name": "New name"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "New name"
+    detail = await client.get(f"/api/groups/{g['group'].id}")
+    assert detail.json()["name"] == "New name"
+
+
+async def test_rename_group_requires_membership(
+    client, db_session, two_user_group, current_user
+):
+    outsider = await make_user(db_session, "outsider@test.dev")
+    current_user.id = outsider.id
+    r = await client.patch(
+        f"/api/groups/{two_user_group['group'].id}", json={"name": "Hijacked"}
+    )
+    assert r.status_code == 403
+
+
+async def test_rename_group_validates_name(client, two_user_group):
+    r = await client.patch(f"/api/groups/{two_user_group['group'].id}", json={"name": ""})
+    assert r.status_code == 422
+
+
 async def test_delete_empty_group(client, two_user_group):
     g = two_user_group
     assert (await client.delete(f"/api/groups/{g['group'].id}")).status_code == 204

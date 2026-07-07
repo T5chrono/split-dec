@@ -178,6 +178,58 @@ async def test_unknown_expense_404(client, two_user_group):
     assert r.status_code == 404
 
 
+async def test_patch_category_only_leaves_splits_untouched(client, two_user_group):
+    g = two_user_group
+    created = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"], g["bob"]]),
+        headers=idem(),
+    )
+    r = await client.patch(
+        f"/api/expenses/{created.json()['id']}", json={"category": "Climbing"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["category"] == "Climbing"
+    # Everything financial is untouched (order of splits is not guaranteed).
+    by_user = lambda s: s["user_id"]  # noqa: E731
+    assert body["total_amount"] == created.json()["total_amount"]
+    assert sorted(body["splits"], key=by_user) == sorted(created.json()["splits"], key=by_user)
+    assert body["description"] == created.json()["description"]
+
+
+async def test_patch_metadata_only_fields(client, two_user_group):
+    g = two_user_group
+    created = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    r = await client.patch(
+        f"/api/expenses/{created.json()['id']}",
+        json={"description": "Renamed", "expense_date": "2026-05-01"},
+    )
+    assert r.status_code == 200
+    assert r.json()["description"] == "Renamed"
+    assert r.json()["expense_date"] == "2026-05-01"
+    assert r.json()["splits"] == created.json()["splits"]
+
+
+async def test_patch_partial_split_fields_rejected(client, two_user_group):
+    g = two_user_group
+    created = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    # total_amount without the rest of the split group must fail as a unit.
+    r = await client.patch(
+        f"/api/expenses/{created.json()['id']}", json={"total_amount": "99.00"}
+    )
+    assert r.status_code == 422
+    assert "together" in r.json()["detail"]
+
+
 async def test_expense_date_defaults_to_today(client, two_user_group):
     from datetime import date
 

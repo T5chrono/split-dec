@@ -50,6 +50,26 @@ export function trimAmount(amount: string, currency: string): string {
   return `${negative ? "-" : ""}${digits}`;
 }
 
+/** Parse a user-entered amount into integer minor units ("12,50" -> 1250 for
+ *  a 2-decimal currency). Returns null for empty/invalid input. Integer math
+ *  only — money never passes through binary floats. */
+export function toMinorUnits(raw: string, currency: string): number | null {
+  const normalized = normalizeAmountInput(raw);
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const precision = precisionFor(currency);
+  const [intPart, frac = ""] = normalized.split(".");
+  if (frac.length > precision) return null; // more decimals than the currency allows
+  return Number(intPart) * 10 ** precision + Number(frac.padEnd(precision, "0") || "0");
+}
+
+/** Format integer minor units back into an input-ready string (1250 -> "12.50"). */
+export function fromMinorUnits(units: number, currency: string): string {
+  const precision = precisionFor(currency);
+  if (precision === 0) return String(units);
+  const s = String(units).padStart(precision + 1, "0");
+  return `${s.slice(0, -precision)}.${s.slice(-precision)}`;
+}
+
 export const COMMON_CURRENCIES = [
   "PLN", "EUR", "USD", "GBP", "CHF", "CZK", "SEK", "NOK", "DKK", "JPY",
   "AUD", "CAD", "HUF", "UAH", "KWD",

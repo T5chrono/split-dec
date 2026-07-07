@@ -10,14 +10,14 @@ from ..auth import verify_jwt
 from ..db import get_db
 from ..deps import get_expense_for_member, require_membership
 from ..models import Expense, ExpenseSplit, GroupMember
-from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut
+from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
 from ..splits import compute_splits
 
 router = APIRouter(tags=["expenses"])
 
 
 async def _validate_participants(
-    db: AsyncSession, group_id: uuid.UUID, body: ExpenseCreate
+    db: AsyncSession, group_id: uuid.UUID, body: ExpenseCreate | ExpenseUpdate
 ) -> None:
     """The payer and every split participant must be active group members."""
     member_ids = set(
@@ -110,36 +110,57 @@ async def create_expense(
 @router.patch("/expenses/{expense_id}", response_model=ExpenseOut)
 async def update_expense(
     expense_id: uuid.UUID,
-    body: ExpenseCreate,
+    body: ExpenseUpdate,
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
+    """Partial update. Metadata (description, category, expense_date) applies
+    independently; the split-affecting fields travel as an all-or-nothing
+    group and trigger a full rewrite of expense_splits (spec §4)."""
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
-    await _validate_participants(db, expense.group_id, body)
-    shares = compute_splits(
-        body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
+
+    split_fields = (
+        body.split_type,
+        body.total_amount,
+        body.currency,
+        body.paid_by_user_id,
+        body.splits,
     )
-    # Edit + full rewrite of expense_splits inside one transaction (spec §4).
-    expense.description = body.description
-    expense.category = body.category.value
-    expense.split_type = body.split_type
-    expense.total_amount = body.total_amount
-    expense.currency = body.currency
-    expense.paid_by_user_id = body.paid_by_user_id
-    # PATCH is a full replace like the other fields, but expense_date is
-    # optional in the schema (create defaults it to today) — an omitted date
-    # keeps the current one rather than silently resetting it to today.
+    if any(f is not None for f in split_fields):
+        if any(f is None for f in split_fields):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "split_type, total_amount, currency, paid_by_user_id and "
+                    "splits must be provided together"
+                ),
+            )
+        await _validate_participants(db, expense.group_id, body)
+        shares = compute_splits(
+            body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
+        )
+        expense.split_type = body.split_type
+        expense.total_amount = body.total_amount
+        expense.currency = body.currency
+        expense.paid_by_user_id = body.paid_by_user_id
+        # Flush the orphan-deletion of the old splits BEFORE adding
+        # replacements: the unit of work otherwise emits the new INSERTs
+        # first, violating UNIQUE(expense_id, user_id) for any user who
+        # stays in the split.
+        expense.splits = []
+        await db.flush()
+        expense.splits = [
+            ExpenseSplit(user_id=user_id, owed_amount=amount)
+            for user_id, amount in shares.items()
+        ]
+
+    if body.description is not None:
+        expense.description = body.description
+    if body.category is not None:
+        expense.category = body.category.value
     if body.expense_date is not None:
         expense.expense_date = body.expense_date
-    # Flush the orphan-deletion of the old splits BEFORE adding replacements:
-    # the unit of work otherwise emits the new INSERTs first, violating
-    # UNIQUE(expense_id, user_id) for any user who stays in the split.
-    expense.splits = []
-    await db.flush()
-    expense.splits = [
-        ExpenseSplit(user_id=user_id, owed_amount=amount)
-        for user_id, amount in shares.items()
-    ]
+
     await db.commit()
     await db.refresh(expense)
     return ExpenseOut.model_validate(expense)

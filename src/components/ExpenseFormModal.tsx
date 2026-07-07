@@ -8,10 +8,13 @@ import type {
   SplitInput,
   SplitType,
 } from "../lib/types";
+import { Trash2 } from "lucide-react";
 import {
   AMOUNT_PATTERN,
   COMMON_CURRENCIES,
+  fromMinorUnits,
   normalizeAmountInput,
+  toMinorUnits,
   trimAmount,
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
@@ -29,11 +32,13 @@ export default function ExpenseFormModal({
   expense,
   onClose,
   onSaved,
+  onDelete,
 }: {
   group: GroupDetail;
   expense: Expense | null; // null = create
   onClose: () => void;
   onSaved: () => void;
+  onDelete?: () => void; // present only when editing
 }) {
   const { session } = useAuth();
   const { t } = useI18n();
@@ -103,10 +108,40 @@ export default function ExpenseFormModal({
       ? Math.round((100 - filledPctSum) * 100) / 100
       : null;
 
+  // Same idea for EXACT amounts: one empty field gets total minus the rest.
+  // Integer minor-unit math (no floats); disabled while any filled entry or
+  // the total is unparseable.
+  const emptyExactIds = selected
+    .map((m) => m.id)
+    .filter((id) => !(exactAmounts[id] ?? "").trim());
+  const totalUnits = toMinorUnits(totalAmount, currency);
+  const filledExactUnits = selected
+    .filter((m) => (exactAmounts[m.id] ?? "").trim())
+    .map((m) => toMinorUnits(exactAmounts[m.id], currency));
+  const filledExactSum = filledExactUnits.every((u): u is number => u !== null)
+    ? filledExactUnits.reduce((a: number, b) => a + (b as number), 0)
+    : null;
+  const autoExact =
+    splitType === "EXACT" &&
+    emptyExactIds.length === 1 &&
+    totalUnits !== null &&
+    filledExactSum !== null &&
+    totalUnits - filledExactSum > 0
+      ? fromMinorUnits(totalUnits - filledExactSum, currency)
+      : null;
+
   const buildSplits = (): SplitInput[] =>
     selected.map((m) => {
-      if (splitType === "EXACT")
-        return { user_id: m.id, amount: normalizeAmountInput(exactAmounts[m.id] || "0") };
+      if (splitType === "EXACT") {
+        const raw = (exactAmounts[m.id] ?? "").trim();
+        const amount =
+          raw !== ""
+            ? normalizeAmountInput(raw)
+            : autoExact !== null && emptyExactIds[0] === m.id
+              ? autoExact
+              : "0";
+        return { user_id: m.id, amount };
+      }
       if (splitType === "PERCENTAGE") {
         const raw = (percentages[m.id] ?? "").trim();
         const pct =
@@ -140,7 +175,13 @@ export default function ExpenseFormModal({
     onSuccess: onSaved,
   });
 
-  const exactSum = selected.reduce((acc, m) => acc + parseNum(exactAmounts[m.id] || "0"), 0);
+  const exactSum =
+    filledExactSum !== null
+      ? fromMinorUnits(
+          filledExactSum + (autoExact !== null ? toMinorUnits(autoExact, currency)! : 0),
+          currency,
+        )
+      : selected.reduce((acc, m) => acc + parseNum(exactAmounts[m.id] || "0"), 0).toFixed(2);
   const pctSum = Math.round((filledPctSum + (autoPct ?? 0)) * 100) / 100;
 
   return (
@@ -256,8 +297,14 @@ export default function ExpenseFormModal({
                     pattern={AMOUNT_PATTERN}
                     value={exactAmounts[m.id] ?? ""}
                     onChange={(e) => setExactAmounts({ ...exactAmounts, [m.id]: e.target.value })}
-                    placeholder="0,00"
-                    className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm dark:border-slate-600 dark:bg-slate-800"
+                    placeholder={
+                      autoExact !== null && emptyExactIds[0] === m.id ? autoExact : "0,00"
+                    }
+                    className={`w-24 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
+                      autoExact !== null && emptyExactIds[0] === m.id
+                        ? "border-teal-400 placeholder:text-teal-600 dark:border-teal-600 dark:placeholder:text-teal-400"
+                        : "border-slate-300 bg-white dark:border-slate-600"
+                    }`}
                   />
                 )}
                 {splitType === "PERCENTAGE" && participants.has(m.id) && (
@@ -284,7 +331,7 @@ export default function ExpenseFormModal({
           </ul>
           {splitType === "EXACT" && (
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {t("sumOfAmounts")}: {exactSum.toFixed(2)} ({t("mustEqual")}{" "}
+              {t("sumOfAmounts")}: {exactSum} ({t("mustEqual")}{" "}
               {totalAmount || t("theTotal")})
             </p>
           )}
@@ -306,6 +353,16 @@ export default function ExpenseFormModal({
         >
           {save.isPending ? t("saving") : expense ? t("saveChanges") : t("addExpense")}
         </button>
+
+        {expense && onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-700"
+          >
+            <Trash2 className="h-4 w-4" /> {t("deleteExpense")}
+          </button>
+        )}
       </form>
     </Modal>
   );

@@ -5,12 +5,15 @@ import type { GroupDetail, SettlementPayload } from "../lib/types";
 import { balancesQuery } from "../lib/queries";
 import { formatMoney } from "../lib/currency";
 import { useI18n } from "../lib/i18n";
+import { useAuth } from "../hooks/useAuth";
 import Avatar from "./Avatar";
 import SettleUpModal from "./SettleUpModal";
 import Spinner from "./Spinner";
 
 export default function BalancesTab({ group }: { group: GroupDetail }) {
   const { t } = useI18n();
+  const { session } = useAuth();
+  const myId = session?.user.id;
   const [settling, setSettling] = useState<SettlementPayload | null>(null);
 
   const membersById = new Map(group.members.map((m) => [m.id, m]));
@@ -44,6 +47,15 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
               {transfers.map((tr, i) => {
                 const from = membersById.get(tr.from_user_id);
                 const to = membersById.get(tr.to_user_id);
+                // Color from MY perspective: red = money leaving my pocket,
+                // green = money coming to me, neutral = between others.
+                const iOwe = tr.from_user_id === myId;
+                const owedToMe = tr.to_user_id === myId;
+                const amountCls = iOwe
+                  ? "text-red-600 dark:text-red-400"
+                  : owedToMe
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-slate-600 dark:text-slate-300";
                 return (
                   <li
                     key={`${currency}-${i}`}
@@ -51,15 +63,26 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
                   >
                     <div className="flex items-center gap-2 text-sm">
                       {from && <Avatar user={from} size={6} />}
-                      <span className="font-medium">{nameOf(tr.from_user_id)}</span>
+                      <span className="font-medium">
+                        {iOwe ? t("you") : nameOf(tr.from_user_id)}
+                      </span>
                       <ArrowRight className="h-4 w-4 text-slate-400" />
                       {to && <Avatar user={to} size={6} />}
-                      <span className="font-medium">{nameOf(tr.to_user_id)}</span>
+                      <span className="font-medium">
+                        {owedToMe ? t("you") : nameOf(tr.to_user_id)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-red-600 dark:text-red-400">
-                        {formatMoney(tr.amount, currency)}
-                      </span>
+                      <div className="text-right">
+                        <div className={`font-semibold ${amountCls}`}>
+                          {formatMoney(tr.amount, currency)}
+                        </div>
+                        {(iOwe || owedToMe) && (
+                          <div className={`text-[10px] leading-tight ${amountCls}`}>
+                            {iOwe ? t("youOwe") : t("owedToYou")}
+                          </div>
+                        )}
+                      </div>
                       <button
                         onClick={() =>
                           setSettling({
