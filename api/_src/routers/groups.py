@@ -65,7 +65,9 @@ async def rename_group(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    await require_membership(db, group_id, caller)
+    # Shared lock like the other group-mutating endpoints: serializes against
+    # a concurrent delete_group so the follow-up get can't find nothing.
+    await require_membership(db, group_id, caller, lock="shared")
     group = await db.get(Group, group_id)
     group.name = body.name
     await db.commit()

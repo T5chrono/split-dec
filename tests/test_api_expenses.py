@@ -230,6 +230,27 @@ async def test_patch_partial_split_fields_rejected(client, two_user_group):
     assert "together" in r.json()["detail"]
 
 
+async def test_patch_with_split_fields_still_validates_participants(
+    client, two_user_group, db_session
+):
+    from conftest import make_user
+
+    g = two_user_group
+    created = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    stranger = await make_user(db_session, "stranger@test.dev")
+    # Full split-field group supplied, but with a non-member participant:
+    # the membership validation must still fire behind the new conditional.
+    payload = expense_payload(g["alice"], [g["alice"], stranger])
+    del payload["description"], payload["category"]
+    r = await client.patch(f"/api/expenses/{created.json()['id']}", json=payload)
+    assert r.status_code == 400
+    assert "members" in r.json()["detail"]
+
+
 async def test_expense_date_defaults_to_today(client, two_user_group):
     from datetime import date
 
