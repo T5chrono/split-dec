@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..balances import greedy_simplify, net_balances
 from ..db import get_db
-from ..deps import require_membership
+from ..deps import raise_unless_member, require_membership
 from ..models import (
     Expense,
     ExpenseSplit,
@@ -74,12 +74,12 @@ async def get_group(
             .order_by(GroupMember.joined_at)
         )
     ).all()
-    if not rows:
-        raise HTTPException(status_code=404, detail="Group not found")
-    group = rows[0][0]
     members = [u for _, u in rows if u is not None]
-    if caller not in {m.id for m in members}:
-        raise HTTPException(status_code=403, detail="You are not a member of this group")
+    raise_unless_member(
+        group_exists=bool(rows),
+        is_member=caller in {m.id for m in members},
+    )
+    group = rows[0][0]
     return GroupDetailOut(
         id=group.id,
         name=group.name,

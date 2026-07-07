@@ -22,6 +22,17 @@ def _with_group_lock(stmt: Select, lock: GroupLock) -> Select:
     return stmt.with_for_update(read=(lock == "shared"), of=Group)
 
 
+def raise_unless_member(*, group_exists: bool, is_member: bool) -> None:
+    """The single authorization decision for group access: 404 for a missing
+    group, 403 for a non-member. Every code path that answers "may this
+    caller touch this group?" must funnel through here (FastAPI is the sole
+    authz boundary — RLS is off)."""
+    if not group_exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if not is_member:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+
 async def require_membership(
     db: AsyncSession,
     group_id: uuid.UUID,
@@ -43,10 +54,7 @@ async def require_membership(
         .where(Group.id == group_id)
     )
     row = (await db.execute(_with_group_lock(stmt, lock))).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if row.user_id is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this group")
+    raise_unless_member(group_exists=row is not None, is_member=row is not None and row.user_id is not None)
 
 
 async def get_expense_for_member(
@@ -71,8 +79,7 @@ async def get_expense_for_member(
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found")
     expense, member_id = row
-    if member_id is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this group")
+    raise_unless_member(group_exists=True, is_member=member_id is not None)
     return expense
 
 
@@ -98,6 +105,5 @@ async def get_settlement_for_member(
     if row is None:
         raise HTTPException(status_code=404, detail="Settlement not found")
     settlement, member_id = row
-    if member_id is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this group")
+    raise_unless_member(group_exists=True, is_member=member_id is not None)
     return settlement
