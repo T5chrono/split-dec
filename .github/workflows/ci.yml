@@ -16,6 +16,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: pytest -v
+        env:
+          # Enables the Postgres integration tests (balance CTE, row locks);
+          # they roll back everything they write.
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
 
   frontend:
     runs-on: ubuntu-latest

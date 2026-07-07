@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..balances import greedy_simplify, net_balances
 from ..db import get_db
-from ..deps import lock_group, require_membership
+from ..deps import raise_unless_member, require_membership
 from ..models import (
     Expense,
     ExpenseSplit,
@@ -64,16 +64,22 @@ async def get_group(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    await require_membership(db, group_id, caller)
-    group = await db.get(Group, group_id)
-    members = (
+    # Group, members, and the caller's membership in one round trip.
+    rows = (
         await db.execute(
-            select(User)
-            .join(GroupMember, GroupMember.user_id == User.id)
-            .where(GroupMember.group_id == group_id)
+            select(Group, User)
+            .outerjoin(GroupMember, GroupMember.group_id == Group.id)
+            .outerjoin(User, User.id == GroupMember.user_id)
+            .where(Group.id == group_id)
             .order_by(GroupMember.joined_at)
         )
-    ).scalars().all()
+    ).all()
+    members = [u for _, u in rows if u is not None]
+    raise_unless_member(
+        group_exists=bool(rows),
+        is_member=caller in {m.id for m in members},
+    )
+    group = rows[0][0]
     return GroupDetailOut(
         id=group.id,
         name=group.name,
@@ -92,10 +98,10 @@ async def delete_group(
     """Delete a group and all its records (members, expenses, splits,
     settlements, invitations cascade). Any member may delete, but only once
     the group is fully settled — no non-zero balance in any currency."""
-    await require_membership(db, group_id, caller)
-    # Lock the group so no expense/settlement can be created/updated between
-    # this settled-check and the deletes below (they take a shared lock).
-    await lock_group(db, group_id, exclusive=True)
+    # The exclusive lock rides on the membership query: no expense/settlement
+    # can be created/updated (they take a shared lock) between the
+    # settled-check below and the deletes.
+    await require_membership(db, group_id, caller, lock="exclusive")
     buckets = await net_balances(db, group_id)
     unsettled = sorted(c for c, users in buckets.items() if any(v != 0 for v in users.values()))
     if unsettled:
