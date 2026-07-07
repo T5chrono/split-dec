@@ -5,21 +5,21 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { api } from "../lib/api";
 import type { Expense, ExpenseList, GroupDetail } from "../lib/types";
 import { formatMoney } from "../lib/currency";
-import { formatDateOnly } from "../lib/dates";
-import { CategoryIcon } from "../lib/categories";
+import { parseLocalISO } from "../lib/dates";
 import { expensesQuery, PAGE_SIZE } from "../lib/queries";
 import { useI18n } from "../lib/i18n";
 import ExpenseFormModal from "./ExpenseFormModal";
 import ConfirmDialog from "./ConfirmDialog";
+import CategoryIconButton from "./CategoryIconButton";
 import ListSkeleton from "./ListSkeleton";
 
 export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
-  const { t, tCategory, dateLocale } = useI18n();
+  const { t, dateLocale } = useI18n();
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [adding, setAdding] = useState(false);
@@ -28,6 +28,8 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const membersById = new Map(group.members.map((m) => [m.id, m]));
   const nameOf = (id: string) =>
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
+
+  const monthFmt = new Intl.DateTimeFormat(dateLocale, { month: "short" });
 
   const { data, isLoading, error } = useQuery({
     ...expensesQuery(group.id, offset),
@@ -87,42 +89,39 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
       )}
 
       <ul className="space-y-2">
-        {data?.items.map((e) => (
-          <li
-            key={e.id}
-            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                <CategoryIcon category={e.category} className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate font-medium">{e.description}</div>
-                <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                  {nameOf(e.paid_by_user_id)} {t("paidVerb")} · {tCategory(e.category)} ·{" "}
-                  {formatDateOnly(e.expense_date, dateLocale)}
+        {data?.items.map((e) => {
+          const date = parseLocalISO(e.expense_date);
+          return (
+            <li
+              key={e.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`${t("editExpense")}: ${e.description}`}
+              onClick={() => setEditing(e)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter" && ev.target === ev.currentTarget) setEditing(e);
+              }}
+              className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm transition hover:border-teal-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-teal-500"
+            >
+              <div className="w-10 shrink-0 text-center">
+                <div className="text-base font-semibold leading-tight">{date.getDate()}</div>
+                <div className="text-[10px] uppercase leading-tight text-slate-400 dark:text-slate-500">
+                  {monthFmt.format(date).replace(".", "")}
                 </div>
               </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <span className="mr-2 font-semibold">{formatMoney(e.total_amount, e.currency)}</span>
-              <button
-                onClick={() => setEditing(e)}
-                className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                title={t("edit")}
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setDeleting(e)}
-                className="rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
-                title={t("delete")}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </li>
-        ))}
+              <CategoryIconButton expense={e} groupId={group.id} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{e.description}</div>
+                <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {nameOf(e.paid_by_user_id)} {t("paidVerb")}
+                </div>
+              </div>
+              <span className="shrink-0 font-semibold">
+                {formatMoney(e.total_amount, e.currency)}
+              </span>
+            </li>
+          );
+        })}
       </ul>
 
       {data && (data.items.length === PAGE_SIZE || offset > 0) && (
@@ -160,6 +159,14 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
             setEditing(null);
             invalidate();
           }}
+          onDelete={
+            editing
+              ? () => {
+                  setDeleting(editing);
+                  setEditing(null);
+                }
+              : undefined
+          }
         />
       )}
 

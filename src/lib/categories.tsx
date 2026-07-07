@@ -18,6 +18,12 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
   group: string;
   categories: ReadonlyArray<{ value: string; icon: LucideIcon }>;
 }> = [
+  // "General" leads the list: it is the default category, so the picker
+  // opens on it and the user scrolls down through the specific groups.
+  {
+    group: "Uncategorized",
+    categories: [{ value: "General", icon: CircleDollarSign }],
+  },
   {
     group: "Entertainment",
     categories: [
@@ -126,10 +132,6 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
       { value: "Generation Tools", icon: WandSparkles },
       { value: "Other AI Expenses", icon: Cpu },
     ],
-  },
-  {
-    group: "Uncategorized",
-    categories: [{ value: "General", icon: CircleDollarSign }],
   },
 ] as const;
 

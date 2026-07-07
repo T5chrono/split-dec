@@ -127,6 +127,11 @@ const dict = {
     inviteEmailSubject: "You're invited to SplitDec",
     inviteEmailBody:
       'I\'d like to split expenses with you in the group "{group}" on SplitDec. Sign in with Google using this email address and the invitation will be waiting for you.',
+    deleteExpense: "Delete expense",
+    renameGroup: "Rename group",
+    save: "Save",
+    youOwe: "you pay",
+    owedToYou: "you receive",
     deleteGroup: "Delete group",
     deleteGroupHint:
       "Permanently deletes this group and its expenses and settlements for everyone. Only possible when the group is fully settled.",
@@ -240,6 +245,11 @@ const dict = {
     inviteEmailSubject: "Zaproszenie do SplitDec",
     inviteEmailBody:
       "Chcę dzielić z Tobą wydatki w grupie „{group}” w SplitDec. Zaloguj się przez Google, używając tego adresu e-mail, a zaproszenie będzie na Ciebie czekać.",
+    deleteExpense: "Usuń wydatek",
+    renameGroup: "Zmień nazwę grupy",
+    save: "Zapisz",
+    youOwe: "płacisz",
+    owedToYou: "otrzymujesz",
     deleteGroup: "Usuń grupę",
     deleteGroupHint:
       "Trwale usuwa tę grupę wraz z jej wydatkami i rozliczeniami dla wszystkich. Możliwe tylko, gdy grupa jest w pełni rozliczona.",

@@ -58,6 +58,22 @@ async def create_group(
     return group
 
 
+@router.patch("/{group_id}", response_model=GroupOut)
+async def rename_group(
+    group_id: uuid.UUID,
+    body: GroupCreate,
+    db: AsyncSession = Depends(get_db),
+    caller: uuid.UUID = Depends(verify_jwt),
+):
+    # Shared lock like the other group-mutating endpoints: serializes against
+    # a concurrent delete_group so the follow-up get can't find nothing.
+    await require_membership(db, group_id, caller, lock="shared")
+    group = await db.get(Group, group_id)
+    group.name = body.name
+    await db.commit()
+    return group
+
+
 @router.get("/{group_id}", response_model=GroupDetailOut)
 async def get_group(
     group_id: uuid.UUID,

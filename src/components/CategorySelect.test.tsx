@@ -37,6 +37,13 @@ describe("CategorySelect", () => {
     );
   });
 
+  it("lists General first so the picker always starts at the top", async () => {
+    renderWithProviders(<CategorySelect value="Water" onChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button"));
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("General");
+  });
+
   it("closes on Escape without changing the value", async () => {
     const onChange = vi.fn();
     renderWithProviders(<CategorySelect value="General" onChange={onChange} />);

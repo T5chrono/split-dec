@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   formatMoney,
+  fromMinorUnits,
   normalizeAmountInput,
   precisionFor,
   setMoneyLocale,
+  toMinorUnits,
   trimAmount,
 } from "./currency";
 
@@ -71,6 +73,33 @@ describe("normalizeAmountInput", () => {
 
   it("trims surrounding whitespace", () => {
     expect(normalizeAmountInput("  12,50  ")).toBe("12.50");
+  });
+});
+
+describe("toMinorUnits / fromMinorUnits", () => {
+  it("round-trips 2-decimal amounts through integer units", () => {
+    expect(toMinorUnits("12.50", "USD")).toBe(1250);
+    expect(toMinorUnits("12,50", "USD")).toBe(1250); // comma decimal accepted
+    expect(fromMinorUnits(1250, "USD")).toBe("12.50");
+  });
+
+  it("respects currency precision", () => {
+    expect(toMinorUnits("100", "JPY")).toBe(100);
+    expect(fromMinorUnits(100, "JPY")).toBe("100");
+    expect(toMinorUnits("10.334", "KWD")).toBe(10334);
+    expect(fromMinorUnits(10334, "KWD")).toBe("10.334");
+  });
+
+  it("pads sub-unit values when formatting", () => {
+    expect(fromMinorUnits(5, "USD")).toBe("0.05");
+  });
+
+  it("rejects invalid or over-precise input", () => {
+    expect(toMinorUnits("", "USD")).toBeNull();
+    expect(toMinorUnits("abc", "USD")).toBeNull();
+    expect(toMinorUnits("1.2.3", "USD")).toBeNull();
+    expect(toMinorUnits("10.123", "USD")).toBeNull(); // 3 decimals in a 2-decimal currency
+    expect(toMinorUnits("100.5", "JPY")).toBeNull(); // fractional yen
   });
 });
 
