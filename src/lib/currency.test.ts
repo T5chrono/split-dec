@@ -12,11 +12,16 @@ afterEach(() => setMoneyLocale("en"));
 describe("precisionFor", () => {
   it("defaults to 2 decimals", () => {
     expect(precisionFor("PLN")).toBe(2);
-    expect(precisionFor("usd")).toBe(2); // case-insensitive
   });
 
   it("knows 0-decimal currencies", () => {
     expect(precisionFor("JPY")).toBe(0);
+  });
+
+  it("is case-insensitive", () => {
+    // Lowercase must still hit the 0-decimal entry, not fall through to the
+    // ?? 2 default (which "usd"/"pln" would pass regardless of casing).
+    expect(precisionFor("jpy")).toBe(0);
   });
 
   it("knows 3-decimal currencies", () => {

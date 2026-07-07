@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDateOnly, parseLocalISO, toLocalISO, todayLocalISO } from "./dates";
 
 describe("toLocalISO / parseLocalISO", () => {
@@ -14,6 +14,8 @@ describe("toLocalISO / parseLocalISO", () => {
 });
 
 describe("todayLocalISO", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("matches the system clock's local calendar day, not UTC's", () => {
     // Pin the clock to a moment that is a different calendar day in UTC
     // than in a negative-UTC-offset timezone (this is the exact bug the
@@ -21,7 +23,6 @@ describe("todayLocalISO", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 20, 23, 30)); // June 20, 23:30 local
     expect(todayLocalISO()).toBe("2026-06-20");
-    vi.useRealTimers();
   });
 });
 
