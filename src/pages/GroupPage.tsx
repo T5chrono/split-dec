@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { api } from "../lib/api";
-import type { GroupDetail } from "../lib/types";
+import {
+  balancesQuery,
+  expensesQuery,
+  groupDetailQuery,
+  groupInvitationsQuery,
+  settlementsQuery,
+} from "../lib/queries";
 import { useI18n, type TKey } from "../lib/i18n";
 import ExpensesTab from "../components/ExpensesTab";
 import BalancesTab from "../components/BalancesTab";
@@ -23,11 +28,20 @@ export default function GroupPage() {
   const { t, membersLabel } = useI18n();
   const [tab, setTab] = useState("expenses");
 
+  const queryClient = useQueryClient();
   const { data: group, isLoading, error } = useQuery({
-    queryKey: ["group", groupId],
-    queryFn: () => api.get<GroupDetail>(`/groups/${groupId}`),
+    ...groupDetailQuery(groupId!),
     enabled: !!groupId,
   });
+
+  // Warm every tab's data in parallel so switching tabs is instant.
+  useEffect(() => {
+    if (!groupId) return;
+    queryClient.prefetchQuery(expensesQuery(groupId, 0));
+    queryClient.prefetchQuery(balancesQuery(groupId));
+    queryClient.prefetchQuery(settlementsQuery(groupId));
+    queryClient.prefetchQuery(groupInvitationsQuery(groupId));
+  }, [groupId, queryClient]);
 
   if (isLoading) return <Spinner label={t("loading")} />;
   if (error) return <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>;

@@ -3,10 +3,16 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, MailOpen, Plus, Users, X } from "lucide-react";
 import { api } from "../lib/api";
-import type { Group, MyInvitation } from "../lib/types";
+import type { Group } from "../lib/types";
+import {
+  expensesQuery,
+  groupDetailQuery,
+  groupsQuery,
+  myInvitationsQuery,
+} from "../lib/queries";
 import { useI18n } from "../lib/i18n";
 import Modal from "../components/Modal";
-import Spinner from "../components/Spinner";
+import ListSkeleton from "../components/ListSkeleton";
 
 export default function GroupsPage() {
   const queryClient = useQueryClient();
@@ -14,10 +20,13 @@ export default function GroupsPage() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
 
-  const { data: groups, isLoading, error } = useQuery({
-    queryKey: ["groups"],
-    queryFn: () => api.get<Group[]>("/groups"),
-  });
+  const { data: groups, isLoading, error } = useQuery(groupsQuery());
+
+  // Warm a group's data the moment the user shows intent to open it.
+  const prefetchGroup = (id: string) => {
+    queryClient.prefetchQuery(groupDetailQuery(id));
+    queryClient.prefetchQuery(expensesQuery(id, 0));
+  };
 
   const createGroup = useMutation({
     mutationFn: (groupName: string) => api.post<Group>("/groups", { name: groupName }),
@@ -28,10 +37,7 @@ export default function GroupsPage() {
     },
   });
 
-  const { data: myInvitations } = useQuery({
-    queryKey: ["my-invitations"],
-    queryFn: () => api.get<MyInvitation[]>("/invitations/mine"),
-  });
+  const { data: myInvitations } = useQuery(myInvitationsQuery());
 
   const respond = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "accept" | "decline" }) =>
@@ -89,7 +95,7 @@ export default function GroupsPage() {
         </div>
       )}
 
-      {isLoading && <Spinner label={t("loadingGroups")} />}
+      {isLoading && <ListSkeleton rows={3} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
 
       {groups && groups.length === 0 && (
@@ -104,6 +110,9 @@ export default function GroupsPage() {
           <li key={g.id}>
             <Link
               to={`/groups/${g.id}`}
+              onMouseEnter={() => prefetchGroup(g.id)}
+              onTouchStart={() => prefetchGroup(g.id)}
+              onFocus={() => prefetchGroup(g.id)}
               className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm hover:border-teal-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-teal-500"
             >
               <div className="flex items-center gap-3">

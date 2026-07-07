@@ -9,7 +9,10 @@ import "./index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, staleTime: 15_000 },
+    // Data stays "fresh" for a minute: navigating between views renders from
+    // cache instantly; mutations invalidate explicitly so nothing goes stale
+    // where it matters.
+    queries: { retry: 1, staleTime: 60_000 },
   },
 });
 

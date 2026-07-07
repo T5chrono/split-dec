@@ -1,17 +1,21 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import type { Expense, ExpenseList, GroupDetail } from "../lib/types";
 import { formatMoney } from "../lib/currency";
 import { formatDateOnly } from "../lib/dates";
 import { CategoryIcon } from "../lib/categories";
+import { expensesQuery, PAGE_SIZE } from "../lib/queries";
 import { useI18n } from "../lib/i18n";
 import ExpenseFormModal from "./ExpenseFormModal";
 import ConfirmDialog from "./ConfirmDialog";
-import Spinner from "./Spinner";
-
-const PAGE_SIZE = 20;
+import ListSkeleton from "./ListSkeleton";
 
 export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
@@ -26,9 +30,9 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["expenses", group.id, offset],
-    queryFn: () =>
-      api.get<ExpenseList>(`/groups/${group.id}/expenses?limit=${PAGE_SIZE}&offset=${offset}`),
+    ...expensesQuery(group.id, offset),
+    // Keep showing the current page while the next one loads.
+    placeholderData: keepPreviousData,
   });
 
   const invalidate = () => {
@@ -38,10 +42,23 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
 
   const deleteExpense = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/expenses/${id}`),
-    onSuccess: () => {
+    // Optimistic: the row disappears immediately; restored if the server says no.
+    onMutate: async (id: string) => {
       setDeleting(null);
-      invalidate();
+      await queryClient.cancelQueries({ queryKey: ["expenses", group.id] });
+      const previous = queryClient.getQueriesData<ExpenseList>({
+        queryKey: ["expenses", group.id],
+      });
+      queryClient.setQueriesData<ExpenseList>(
+        { queryKey: ["expenses", group.id] },
+        (old) => (old ? { ...old, items: old.items.filter((e) => e.id !== id) } : old),
+      );
+      return { previous };
     },
+    onError: (_err, _id, ctx) => {
+      ctx?.previous.forEach(([key, value]) => queryClient.setQueryData(key, value));
+    },
+    onSettled: invalidate,
   });
 
   return (
@@ -55,7 +72,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
         </button>
       </div>
 
-      {isLoading && <Spinner label={t("loadingExpenses")} />}
+      {isLoading && <ListSkeleton rows={4} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
       {deleteExpense.error && (
         <p className="mb-2 text-sm text-red-600 dark:text-red-400">

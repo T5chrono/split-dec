@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, HandCoins, Scale } from "lucide-react";
-import { api } from "../lib/api";
-import type { Balances, GroupDetail, SettlementPayload } from "../lib/types";
+import type { GroupDetail, SettlementPayload } from "../lib/types";
+import { balancesQuery } from "../lib/queries";
 import { formatMoney } from "../lib/currency";
 import { useI18n } from "../lib/i18n";
 import Avatar from "./Avatar";
@@ -17,10 +17,7 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
   const nameOf = (id: string) =>
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["balances", group.id],
-    queryFn: () => api.get<Balances>(`/groups/${group.id}/balances`),
-  });
+  const { data, isLoading, error } = useQuery(balancesQuery(group.id));
 
   const entries = Object.entries(data ?? {});
   const allSettled = entries.every(([, transfers]) => transfers.length === 0);
