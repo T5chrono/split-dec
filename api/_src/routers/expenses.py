@@ -93,15 +93,22 @@ async def create_expense(
     try:
         await db.commit()
     except IntegrityError:
-        # Idempotent replay: return the existing record with 200 OK.
+        # Idempotent replay: return the existing record with 200 OK — but
+        # only within this group, so a key colliding with (or copied from)
+        # another group's request can never expose that group's record.
         await db.rollback()
         existing = (
             await db.execute(
-                select(Expense).where(Expense.idempotency_key == idempotency_key)
+                select(Expense).where(
+                    Expense.idempotency_key == idempotency_key,
+                    Expense.group_id == group_id,
+                )
             )
         ).scalar_one_or_none()
         if existing is None:
-            raise HTTPException(status_code=400, detail="Expense could not be created")
+            raise HTTPException(
+                status_code=409, detail="Idempotency-Key is already in use"
+            )
         response.status_code = 200
         return ExpenseOut.model_validate(existing)
     return ExpenseOut.model_validate(expense)
@@ -172,6 +179,8 @@ async def delete_expense(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    expense = await get_expense_for_member(db, expense_id, caller)
+    # Soft-deleting changes balances, so it must take the shared lock like
+    # every other ledger mutation (serializes against member/group removal).
+    expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
     expense.deleted_at = datetime.now(timezone.utc)
     await db.commit()

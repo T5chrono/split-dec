@@ -1,4 +1,4 @@
-"""User search and account deletion."""
+"""Account deletion (the search endpoint was removed on security review)."""
 
 from sqlalchemy import select, text
 
@@ -6,16 +6,11 @@ from conftest import expense_payload, idem, make_user
 from _src.models import GroupMember, User
 
 
-async def test_search_case_insensitive(client, two_user_group):
-    r = await client.get("/api/users/search?email=BOB@test.dev")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["id"] == str(two_user_group["bob"].id)
-    assert set(body) == {"id", "full_name", "avatar_url"}  # no email leak
-
-
-async def test_search_no_match_404(client, two_user_group):
-    assert (await client.get("/api/users/search?email=nobody@test.dev")).status_code == 404
+async def test_search_endpoint_removed(client, two_user_group):
+    # Removed: it let any authenticated caller probe whether an email is
+    # registered and fetch the profile. Invitations cover the use case.
+    r = await client.get("/api/users/search?email=bob@test.dev")
+    assert r.status_code == 404
 
 
 async def test_delete_account_blocked_with_outstanding_balance(client, two_user_group):
@@ -57,6 +52,20 @@ async def test_delete_account_succeeds_when_settled(client, two_user_group, db_s
             )
         ).scalar_one()
         assert remaining == 0
+
+
+async def test_deleted_account_token_cannot_act(client, two_user_group, current_user):
+    """A JWT issued before deletion stays cryptographically valid until it
+    expires; endpoints not gated by membership must reject it explicitly."""
+    g = two_user_group
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    # Same caller id (same token) after deletion:
+    assert (await client.post("/api/groups", json={"name": "Zombie"})).status_code == 401
+    assert (await client.get("/api/invitations/mine")).status_code == 401
+    assert (await client.delete("/api/users/me")).status_code == 401
+    # Membership-gated endpoints are already safe (memberships were removed).
+    assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 403
 
 
 async def test_delete_account_keeps_history_for_others(client, two_user_group, current_user):

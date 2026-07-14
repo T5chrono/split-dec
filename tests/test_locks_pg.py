@@ -20,6 +20,7 @@ from sqlalchemy.pool import NullPool
 from _src.deps import (
     get_expense_for_member,
     get_settlement_for_member,
+    lock_groups_exclusive,
     require_membership,
 )
 from _src.models import Expense, ExpenseSplit, Group, GroupMember, Settlement, User
@@ -73,6 +74,14 @@ async def test_locked_authorization_queries_execute_on_postgres():
             db, settlement.id, user_id, lock="shared"
         )
         assert fetched_settlement.id == settlement.id
+
+        # Bulk multi-group exclusive lock (delete_account path): a second
+        # group makes the IN(...) + ORDER BY + FOR UPDATE shape real.
+        group2 = Group(name="lock-test-2", created_by=user_id)
+        db.add(group2)
+        await db.flush()
+        await lock_groups_exclusive(db, [group2.id, group.id])
+        await lock_groups_exclusive(db, [])  # no-op path
 
         await db.rollback()  # never persist test rows
     await engine.dispose()

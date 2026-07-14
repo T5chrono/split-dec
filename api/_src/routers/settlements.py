@@ -87,15 +87,22 @@ async def create_settlement(
     try:
         await db.commit()
     except IntegrityError:
-        # Idempotent replay: return the existing record with 200 OK.
+        # Idempotent replay: return the existing record with 200 OK — but
+        # only within this group, so a key colliding with (or copied from)
+        # another group's request can never expose that group's record.
         await db.rollback()
         existing = (
             await db.execute(
-                select(Settlement).where(Settlement.idempotency_key == idempotency_key)
+                select(Settlement).where(
+                    Settlement.idempotency_key == idempotency_key,
+                    Settlement.group_id == group_id,
+                )
             )
         ).scalar_one_or_none()
         if existing is None:
-            raise HTTPException(status_code=400, detail="Settlement could not be created")
+            raise HTTPException(
+                status_code=409, detail="Idempotency-Key is already in use"
+            )
         response.status_code = 200
         return existing
     return settlement
@@ -129,6 +136,8 @@ async def delete_settlement(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    settlement = await get_settlement_for_member(db, settlement_id, caller)
+    # Soft-deleting changes balances, so it must take the shared lock like
+    # every other ledger mutation (serializes against member/group removal).
+    settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
     settlement.deleted_at = datetime.now(timezone.utc)
     await db.commit()

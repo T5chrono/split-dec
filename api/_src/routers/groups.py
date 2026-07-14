@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..balances import greedy_simplify, net_balances
 from ..db import get_db
-from ..deps import raise_unless_member, require_membership
+from ..deps import get_active_user, raise_unless_member, require_membership
 from ..models import (
     Expense,
     ExpenseSplit,
@@ -50,6 +50,8 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
+    # Not membership-gated, so explicitly refuse tokens of deleted accounts.
+    await get_active_user(db, caller)
     group = Group(name=body.name, created_by=caller)
     db.add(group)
     await db.flush()
@@ -148,7 +150,10 @@ async def remove_member(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    await require_membership(db, group_id, caller)
+    # Exclusive lock, like delete_group: the zero-balance check below must
+    # not race a concurrent expense/settlement write (those take the shared
+    # lock), or a member could leave carrying fresh obligations.
+    await require_membership(db, group_id, caller, lock="exclusive")
     member = await db.get(GroupMember, (group_id, user_id))
     if member is None:
         raise HTTPException(status_code=404, detail="User is not a member of this group")
