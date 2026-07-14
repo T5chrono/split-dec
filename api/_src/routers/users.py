@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..balances import net_balances
 from ..db import get_db
-from ..deps import DELETED_EMAIL_SUFFIX, get_active_user
-from ..models import Group, GroupMember
+from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
+from ..models import GroupMember
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -39,16 +39,10 @@ async def delete_account(
             )
         ).scalars().all()
     )
-    if group_ids:
-        # Exclusive locks on every group, in deterministic (sorted) order to
-        # avoid deadlocks: no expense/settlement write (shared lock) can slip
-        # in between the zero-balance checks below and the membership removal.
-        await db.execute(
-            select(Group.id)
-            .where(Group.id.in_(group_ids))
-            .order_by(Group.id)
-            .with_for_update()
-        )
+    # Exclusive locks on every group: no expense/settlement write (shared
+    # lock) can slip in between the zero-balance checks below and the
+    # membership removal.
+    await lock_groups_exclusive(db, group_ids)
     unsettled: set[str] = set()
     for group_id in group_ids:
         buckets = await net_balances(db, group_id)

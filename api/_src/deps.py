@@ -38,6 +38,21 @@ def _with_group_lock(stmt: Select, lock: GroupLock) -> Select:
     return stmt.with_for_update(read=(lock == "shared"), of=Group)
 
 
+async def lock_groups_exclusive(db: AsyncSession, group_ids: list[uuid.UUID]) -> None:
+    """Exclusive locks on multiple groups at once, in deterministic (sorted)
+    order so concurrent multi-group lockers cannot deadlock each other. Used
+    by account deletion before its per-group zero-balance checks. (No-op on
+    SQLite, which ignores row-level locking clauses.)"""
+    if not group_ids:
+        return
+    await db.execute(
+        select(Group.id)
+        .where(Group.id.in_(group_ids))
+        .order_by(Group.id)
+        .with_for_update()
+    )
+
+
 def raise_unless_member(*, group_exists: bool, is_member: bool) -> None:
     """The single authorization decision for group access: 404 for a missing
     group, 403 for a non-member. Every code path that answers "may this
