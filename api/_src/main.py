@@ -44,12 +44,19 @@ async def health_db(
 ):
     """Round-trip through the database; used to measure connect+query latency.
 
-    Every call opens a fresh pooler connection (NullPool), so when
-    HEALTH_PROBE_KEY is configured the probe demands it — an unauthenticated
-    free lever on pooler slots otherwise. Read at call time for testability.
+    Every call opens a fresh pooler connection (NullPool), so this is never
+    open to the public: outside development it requires HEALTH_PROBE_KEY to
+    be configured AND presented — a missing key means 503, not open access.
+    Env read at call time for testability.
     """
     expected = os.getenv("HEALTH_PROBE_KEY", "")
-    if expected and x_health_key != expected:
+    if not expected:
+        if os.getenv("ENV", "production") != "development":
+            raise HTTPException(
+                status_code=503,
+                detail="Database probe disabled: HEALTH_PROBE_KEY is not configured",
+            )
+    elif x_health_key != expected:
         raise HTTPException(status_code=401, detail="Missing or invalid X-Health-Key")
     started = time.perf_counter()
     await db.execute(text("SELECT 1"))

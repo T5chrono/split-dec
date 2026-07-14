@@ -65,6 +65,70 @@ async def test_exact_split_mismatch_rejected(client, two_user_group):
     assert r.status_code == 422
 
 
+async def test_negative_exact_amount_rejected(client, two_user_group):
+    """Negative obligations would satisfy the sum check while shifting money
+    arbitrarily: [40, -10] sums to 30 but gives bob a negative debt."""
+    g = two_user_group
+    payload = expense_payload(
+        g["alice"], [g["alice"], g["bob"]],
+        split_type="EXACT",
+        total_amount="30.00",
+        splits=[
+            {"user_id": str(g["alice"].id), "amount": "40.00"},
+            {"user_id": str(g["bob"].id), "amount": "-10.00"},
+        ],
+    )
+    r = await client.post(f"/api/groups/{g['group'].id}/expenses", json=payload, headers=idem())
+    assert r.status_code == 422
+
+
+async def test_out_of_range_percentages_rejected(client, two_user_group):
+    g = two_user_group
+    for pcts in (("150", "-50"), ("-20", "120")):
+        payload = expense_payload(
+            g["alice"], [g["alice"], g["bob"]],
+            split_type="PERCENTAGE",
+            splits=[
+                {"user_id": str(g["alice"].id), "percentage": pcts[0]},
+                {"user_id": str(g["bob"].id), "percentage": pcts[1]},
+            ],
+        )
+        r = await client.post(
+            f"/api/groups/{g['group'].id}/expenses", json=payload, headers=idem()
+        )
+        assert r.status_code == 422, pcts
+
+
+async def test_amount_exceeding_numeric_range_rejected(client, two_user_group):
+    """NUMERIC(14,4) can hold at most 10 integer digits; larger inputs must
+    be a 422, not a database error."""
+    g = two_user_group
+    payload = expense_payload(g["alice"], [g["alice"]], total_amount="99999999999.00")
+    r = await client.post(f"/api/groups/{g['group'].id}/expenses", json=payload, headers=idem())
+    assert r.status_code == 422
+
+
+async def test_idempotency_replay_is_scoped_to_the_group(client, two_user_group):
+    """A key used in another group must 409, never return that group's record."""
+    g = two_user_group
+    key = idem()
+    first = await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=key,
+    )
+    assert first.status_code == 201
+
+    other = await client.post("/api/groups", json={"name": "Other group"})
+    r = await client.post(
+        f"/api/groups/{other.json()['id']}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=key,  # same Idempotency-Key, different group
+    )
+    assert r.status_code == 409
+    assert "Idempotency-Key" in r.json()["detail"]
+
+
 async def test_invalid_category_rejected(client, two_user_group):
     g = two_user_group
     r = await client.post(

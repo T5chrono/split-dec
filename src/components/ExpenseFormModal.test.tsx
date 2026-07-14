@@ -219,6 +219,74 @@ describe("ExpenseFormModal — delete from edit view", () => {
   });
 });
 
+describe("ExpenseFormModal — metadata-only edits never resubmit financials", () => {
+  const percentageExpense: Expense = {
+    id: "e9",
+    group_id: group.id,
+    description: "Rent",
+    category: "Rent",
+    split_type: "PERCENTAGE",
+    total_amount: "1000.0000",
+    currency: "PLN",
+    paid_by_user_id: alice.id,
+    expense_date: "2026-06-01",
+    created_at: "2026-06-01T00:00:00Z",
+    splits: [
+      // 333.33/666.67 does not reconstruct to exact percentages — the case
+      // where resubmitting financials would silently shift money.
+      { user_id: alice.id, owed_amount: "333.3300" },
+      { user_id: bob.id, owed_amount: "666.6700" },
+    ],
+  };
+  const twoMemberGroup: GroupDetail = { ...group, members: [alice, bob] };
+
+  it("sends only metadata when just the description changes", async () => {
+    vi.mocked(api.patch).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal
+        group={twoMemberGroup}
+        expense={percentageExpense}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const description = screen.getByPlaceholderText("Dinner at Nolio");
+    await user.clear(description);
+    await user.type(description, "Rent (June)");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(api.patch).toHaveBeenCalledTimes(1);
+    const [, body] = vi.mocked(api.patch).mock.calls[0];
+    expect(body).toEqual({
+      description: "Rent (June)",
+      category: "Rent",
+      expense_date: "2026-06-01",
+    });
+  });
+
+  it("sends the full payload when a financial field changes", async () => {
+    vi.mocked(api.patch).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal
+        group={twoMemberGroup}
+        expense={percentageExpense}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const amount = screen.getByPlaceholderText("120,50");
+    await user.clear(amount);
+    await user.type(amount, "1200.00");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    const [, body] = vi.mocked(api.patch).mock.calls[0];
+    expect(body).toHaveProperty("splits");
+    expect(body).toHaveProperty("total_amount", "1200.00");
+  });
+});
+
 describe("ExpenseFormModal — editing a percentage expense", () => {
   it("derives percentages from stored owed amounts, leaving the last for autofill", () => {
     const expense: Expense = {

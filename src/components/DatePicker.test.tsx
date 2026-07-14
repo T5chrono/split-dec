@@ -59,6 +59,17 @@ describe("DatePicker", () => {
     expect(onChange).toHaveBeenCalledWith("2026-06-15"); // system time is June 15
   });
 
+  it("does not skip short months when navigating from a long month's end", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DatePicker value="2026-01-31" onChange={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /January 31, 2026/i }));
+    // Jan 31 + 1 month used to overflow to "Feb 31" = March 3, skipping February.
+    await user.click(screen.getByRole("button", { name: /next month/i }));
+    expect(screen.getByText(/February 2026/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /next month/i }));
+    expect(screen.getByText(/March 2026/i)).toBeInTheDocument();
+  });
+
   it("closes on Escape without firing onChange", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

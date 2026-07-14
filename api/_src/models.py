@@ -3,6 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -84,7 +85,10 @@ class Expense(Base):
 
 class ExpenseSplit(Base):
     __tablename__ = "expense_splits"
-    __table_args__ = (UniqueConstraint("expense_id", "user_id"),)
+    __table_args__ = (
+        UniqueConstraint("expense_id", "user_id"),
+        CheckConstraint("owed_amount >= 0", name="expense_splits_owed_amount_nonnegative"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     expense_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("expenses.id"))

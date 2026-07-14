@@ -77,7 +77,11 @@ export default function DatePicker({
   };
 
   const shiftMonth = (delta: number) => {
-    showDate(new Date(view.y, view.m + delta, parseLocalISO(focusIso).getDate()));
+    // Clamp the carried day to the target month's length — otherwise
+    // Jan 31 → "Feb 31" overflows into March and skips February entirely.
+    const lastDay = new Date(view.y, view.m + delta + 1, 0).getDate();
+    const day = Math.min(parseLocalISO(focusIso).getDate(), lastDay);
+    showDate(new Date(view.y, view.m + delta, day));
   };
 
   const select = (d: Date) => {

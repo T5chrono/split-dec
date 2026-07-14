@@ -5,6 +5,7 @@ invitation is still recorded and the frontend offers a mailto draft instead.
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -33,23 +34,33 @@ def _post_resend(payload: dict) -> None:
             raise RuntimeError(f"Resend returned {resp.status}")
 
 
+def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, str]:
+    """Subject + HTML body. Inviter and group names are user-controlled and
+    MUST be escaped — otherwise a group named `<a href=...>` injects markup
+    into an official SplitDec email. APP_URL is deployment config, not user
+    input."""
+    safe_inviter = html.escape(inviter_name)
+    safe_group = html.escape(group_name)
+    return {
+        # Subject is plain text (no HTML rendering), so no entity escaping —
+        # the JSON transport already prevents header injection.
+        "subject": f"{inviter_name} invited you to split expenses on SplitDec",
+        "html": (
+            f"<p><strong>{safe_inviter}</strong> invited you to join the group "
+            f"<strong>{safe_group}</strong> on SplitDec — an app for splitting "
+            f"expenses with friends.</p>"
+            f'<p><a href="{html.escape(APP_URL, quote=True)}">Sign in with Google</a> '
+            f"using this email address and the invitation will be waiting for you.</p>"
+        ),
+    }
+
+
 async def send_invitation_email(to: str, inviter_name: str, group_name: str) -> bool:
     """Returns True only if an email was actually handed to the provider."""
     if not RESEND_API_KEY:
         logger.info("RESEND_API_KEY unset; skipping invitation email to %s", to)
         return False
-    payload = {
-        "from": RESEND_FROM,
-        "to": [to],
-        "subject": f"{inviter_name} invited you to split expenses on SplitDec",
-        "html": (
-            f"<p><strong>{inviter_name}</strong> invited you to join the group "
-            f"<strong>{group_name}</strong> on SplitDec — an app for splitting "
-            f"expenses with friends.</p>"
-            f'<p><a href="{APP_URL}">Sign in with Google</a> using this email '
-            f"address and the invitation will be waiting for you.</p>"
-        ),
-    }
+    payload = {"from": RESEND_FROM, "to": [to], **invitation_email_content(inviter_name, group_name)}
     try:
         await asyncio.to_thread(_post_resend, payload)
         return True

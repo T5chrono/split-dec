@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import require_membership
+from ..deps import get_active_user, require_membership
 from ..emailer import send_invitation_email
 from ..models import Group, GroupInvitation, GroupMember, User
 from ..schemas import (
@@ -34,10 +34,8 @@ async def _get_pending_for_invitee(
     ).scalar_one_or_none()
     if invitation is None:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    me = await db.get(User, caller)
-    if invitation.invited_user_id != caller and (
-        me is None or invitation.email != me.email.lower()
-    ):
+    me = await get_active_user(db, caller)  # deleted accounts must not respond
+    if invitation.invited_user_id != caller and invitation.email != me.email.lower():
         raise HTTPException(status_code=403, detail="This invitation is not addressed to you")
     return invitation
 
@@ -82,6 +80,17 @@ async def invite_to_group(
             email_sent=False,
         )
 
+    # Load everything the post-commit email needs BEFORE committing, so the
+    # (up to 10s) provider call never holds a checked-out pooler connection
+    # inside a fresh implicit transaction.
+    inviter_name: str | None = None
+    group_name: str | None = None
+    if invitee is None:
+        inviter = await db.get(User, caller)
+        group = await db.get(Group, group_id)
+        inviter_name = inviter.full_name or inviter.email
+        group_name = group.name
+
     invitation = GroupInvitation(
         group_id=group_id,
         email=email,
@@ -114,14 +123,11 @@ async def invite_to_group(
         )
 
     email_sent = False
-    if invitee is None:
+    if invitee is None and inviter_name is not None and group_name is not None:
         # Not on SplitDec yet: try to email them (best-effort; the frontend
-        # offers a mailto draft when this comes back False).
-        inviter = await db.get(User, caller)
-        group = await db.get(Group, group_id)
-        email_sent = await send_invitation_email(
-            email, inviter.full_name or inviter.email, group.name
-        )
+        # offers a mailto draft when this comes back False). The session's
+        # transaction is closed at this point — no connection is held.
+        email_sent = await send_invitation_email(email, inviter_name, group_name)
 
     return InvitationCreatedOut(
         **InvitationOut.model_validate(invitation).model_dump(),
@@ -175,9 +181,7 @@ async def my_invitations(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    me = await db.get(User, caller)
-    if me is None:
-        return []
+    me = await get_active_user(db, caller)  # deleted accounts see nothing
     rows = (
         await db.execute(
             select(GroupInvitation, Group.name, User.full_name)

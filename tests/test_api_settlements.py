@@ -78,6 +78,31 @@ async def test_amount_precision_validated(client, two_user_group):
     assert r.status_code == 422
 
 
+async def test_idempotency_replay_is_scoped_to_the_group(
+    client, two_user_group, db_session
+):
+    """A key used in another group must 409, never return that group's record."""
+    from conftest import make_group
+
+    g = two_user_group
+    key = idem()
+    first = await client.post(
+        f"/api/groups/{g['group'].id}/settlements",
+        json=settlement_payload(g["bob"], g["alice"]),
+        headers=key,
+    )
+    assert first.status_code == 201
+
+    other = await make_group(db_session, g["alice"], g["bob"], name="Other")
+    r = await client.post(
+        f"/api/groups/{other.id}/settlements",
+        json=settlement_payload(g["bob"], g["alice"]),
+        headers=key,  # same Idempotency-Key, different group
+    )
+    assert r.status_code == 409
+    assert "Idempotency-Key" in r.json()["detail"]
+
+
 async def test_update_settlement(client, two_user_group):
     g = two_user_group
     created = await client.post(

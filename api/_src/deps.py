@@ -5,7 +5,23 @@ from fastapi import HTTPException
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Expense, Group, GroupMember, Settlement
+from .models import Expense, Group, GroupMember, Settlement, User
+
+# Anonymized users keep their public.users row for ledger history but must
+# never act again (their auth.users row is gone, yet a JWT issued before
+# deletion stays cryptographically valid until it expires).
+DELETED_EMAIL_SUFFIX = "@users.splitdec.invalid"
+
+
+async def get_active_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+    """401 for callers whose account no longer exists or has been deleted.
+
+    Used by endpoints not already gated by group membership (membership rows
+    are removed on account deletion, so membership-guarded routes are safe)."""
+    user = await db.get(User, user_id)
+    if user is None or user.email.endswith(DELETED_EMAIL_SUFFIX):
+        raise HTTPException(status_code=401, detail="Account is no longer active")
+    return user
 
 # Row locks on the group serialize financial writes against a concurrent
 # group deletion: writers that add/increase obligations take a shared lock,

@@ -27,6 +27,24 @@ import CategorySelect from "./CategorySelect";
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
 
+/** Initial percentage fields when editing a PERCENTAGE expense: derived from
+ *  the stored owed amounts — all but the last, which the autofill
+ *  reconstructs so the total is exactly 100 despite rounding. Money strings
+ *  never pass through floats: both amounts have exactly 4 decimals from the
+ *  API, so stripping the dot yields exact integer minor units. */
+function derivePercentages(expense: Expense): Record<string, string> {
+  if (expense.split_type !== "PERCENTAGE") return {};
+  const toUnits = (s: string) => BigInt(s.replace(".", ""));
+  const total = toUnits(expense.total_amount);
+  return Object.fromEntries(
+    expense.splits.slice(0, -1).map((s) => {
+      // Percentage in hundredths, rounded half-up: owed / total * 100_00
+      const hundredths = (toUnits(s.owed_amount) * 10000n + total / 2n) / total;
+      return [s.user_id, String(Number(hundredths) / 100)];
+    }),
+  );
+}
+
 export default function ExpenseFormModal({
   group,
   expense,
@@ -66,23 +84,9 @@ export default function ExpenseFormModal({
       ]),
     ),
   );
-  // When editing a PERCENTAGE expense, derive percentages from the stored
-  // owed amounts — all but the last, which the autofill below reconstructs so
-  // the total is exactly 100 despite rounding. Money strings never pass
-  // through floats: both amounts have exactly 4 decimals from the API, so
-  // stripping the dot yields exact integer minor units for BigInt division.
-  const [percentages, setPercentages] = useState<Record<string, string>>(() => {
-    if (!expense || expense.split_type !== "PERCENTAGE") return {};
-    const toUnits = (s: string) => BigInt(s.replace(".", ""));
-    const total = toUnits(expense.total_amount);
-    return Object.fromEntries(
-      expense.splits.slice(0, -1).map((s) => {
-        // Percentage in hundredths, rounded half-up: owed / total * 100_00
-        const hundredths = (toUnits(s.owed_amount) * 10000n + total / 2n) / total;
-        return [s.user_id, String(Number(hundredths) / 100)];
-      }),
-    );
-  });
+  const [percentages, setPercentages] = useState<Record<string, string>>(() =>
+    expense ? derivePercentages(expense) : {},
+  );
 
   const toggleParticipant = (id: string) => {
     const next = new Set(participants);
@@ -155,8 +159,50 @@ export default function ExpenseFormModal({
       return { user_id: m.id };
     });
 
+  // True when none of the financial inputs differ from the expense being
+  // edited. Matters for PERCENTAGE splits especially: the form's percentages
+  // are *reconstructed* (rounded) from stored owed amounts, so resubmitting
+  // them on a metadata-only edit could silently shift money between members.
+  const financialsUnchanged = (): boolean => {
+    if (!expense) return false;
+    if (
+      splitType !== expense.split_type ||
+      currency !== expense.currency ||
+      paidBy !== expense.paid_by_user_id ||
+      normalizeAmountInput(totalAmount) !== trimAmount(expense.total_amount, expense.currency)
+    ) {
+      return false;
+    }
+    const initialIds = new Set(expense.splits.map((s) => s.user_id));
+    if (participants.size !== initialIds.size) return false;
+    for (const id of participants) if (!initialIds.has(id)) return false;
+    if (splitType === "EXACT") {
+      return expense.splits.every(
+        (s) =>
+          normalizeAmountInput(exactAmounts[s.user_id] ?? "") ===
+          trimAmount(s.owed_amount, expense.currency),
+      );
+    }
+    if (splitType === "PERCENTAGE") {
+      const initial = derivePercentages(expense);
+      return [...participants].every(
+        (id) => (percentages[id] ?? "").trim() === (initial[id] ?? ""),
+      );
+    }
+    return true; // EQUAL with same participants and total
+  };
+
   const save = useMutation({
     mutationFn: async () => {
+      if (expense && financialsUnchanged()) {
+        // Metadata-only PATCH: the backend leaves splits untouched, so a
+        // description/category/date edit can never move money.
+        return api.patch<Expense>(`/expenses/${expense.id}`, {
+          description: description.trim(),
+          category,
+          expense_date: expenseDate,
+        });
+      }
       const payload: ExpensePayload = {
         description: description.trim(),
         category,
