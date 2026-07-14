@@ -78,7 +78,22 @@ These were shared during development and should be rotated before launch:
   public launch add a Privacy Policy and Terms (also required to publish the
   Google OAuth app). Link them from the login page footer.
 
-## 9. Android app (Play Store) via TWA — ☐ (PWA prerequisite ☑)
+## 9. Funding: buycoffee.to — ☐
+SplitDec will be funded by voluntary payments via [buycoffee.to](https://buycoffee.to)
+rather than subscriptions or ads.
+- Create a **dedicated buycoffee.to profile for SplitDec** (not a personal
+  account) — separate name/avatar/description, its own payout destination,
+  and a clean transaction history if this ever needs accounting for.
+- Check the tax treatment of received "coffees" before relying on this
+  (Poland: occasional voluntary gifts vs. recurring/business-like income can
+  be treated differently — worth a quick check with an accountant rather
+  than assuming, since we're not qualified to give tax advice here).
+- Once the profile exists, add a support link/button in the app (footer
+  and/or the account menu) pointing at the SplitDec buycoffee.to page.
+- Depends on item 8 (Privacy/Terms) if the link or its landing page collects
+  any user data beyond what buycoffee.to itself handles.
+
+## 10. Android app (Play Store) via TWA — ☐ (PWA prerequisite ☑)
 The app is an installable PWA (manifest + service worker; Chrome → "Add to
 Home Screen"). To turn it into a Play Store app:
 1. `npx @bubblewrap/cli init --manifest https://split-dec.vercel.app/manifest.webmanifest`
@@ -90,7 +105,7 @@ Home Screen"). To turn it into a Play Store app:
    `.aab` to Google Play ($25 one-time developer account; privacy policy from
    item 8 is required for the listing).
 
-## 10. Nice-to-haves before launch — ☐
+## 11. Nice-to-haves before launch — ☐
 - Rate limiting on write endpoints (expense/settlement/invite creation).
 - Empty-state polish and a 404 page.
 - `robots.txt` / basic SEO meta if the marketing page is public.
@@ -99,5 +114,5 @@ Home Screen"). To turn it into a Play Store app:
 
 ---
 
-_Last updated: 2026-07-05. Maintained alongside the develop → PR → master
+_Last updated: 2026-07-09. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._
