@@ -23,6 +23,11 @@ npx vitest run src/components/ExpensesTab.test.tsx      # one file
 npm run build                                           # tsc -b && vite build (type-check lives here)
 ```
 
+`npm run api` boots uvicorn through `api/_src/dev_loop.py` (dev-only): it scrubs the
+`SSLKEYLOGFILE` env var Norton injects (hard-crashes the uv Python's static OpenSSL) and
+routes TLS verification through the Windows cert store via `truststore` (Norton MITMs
+outbound HTTPS, e.g. the JWKS fetch). Details in that module's docstring.
+
 There is no linter configured; `tsc` via `npm run build` is the frontend gate.
 Backend Postgres-only integration tests (`tests/test_balances_pg.py`, `tests/test_locks_pg.py`)
 skip unless `TEST_DATABASE_URL` is set — never point that at production.

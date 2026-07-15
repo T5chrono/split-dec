@@ -78,9 +78,28 @@ and the UI offers a pre-written mailto draft instead.
    - `SUPABASE_JWT_SECRET` — Dashboard → Project Settings → API → JWT Secret
      (only if the project signs tokens with legacy HS256; with asymmetric
      signing keys the backend verifies against JWKS automatically).
-2. Backend: `pip install -r requirements.txt`, then `npm run api`
-   (uvicorn on `:8000`; CORS for `localhost:5173` is enabled because `ENV=development`).
+2. Backend: `pip install -r requirements.txt -r requirements-dev.txt`, then
+   `npm run api` (uvicorn on `:8000`; CORS for `localhost:5173` is enabled
+   because `ENV=development`).
 3. Frontend: `npm install`, then `npm run dev` (Vite on `:5173`).
+
+### TLS-inspecting antivirus (Norton etc.)
+
+`npm run api` boots uvicorn through [api/_src/dev_loop.py](api/_src/dev_loop.py),
+a dev-only bootstrap that works around antivirus HTTPS inspection:
+
+- Norton injects `SSLKEYLOGFILE` into every process; Python's `ssl` module
+  honors it, and on a statically-linked OpenSSL build (uv-managed Pythons)
+  that **kills the process without a traceback** on the first TLS handshake —
+  the symptom is authenticated endpoints hanging forever while `/api/health`
+  works. The bootstrap drops the variable.
+- Antivirus MITM certificates can fail OpenSSL's strict validation even when
+  browsers accept them, breaking the Supabase JWKS fetch that JWT verification
+  needs. The bootstrap calls `truststore.inject_into_ssl()` so Python validates
+  TLS against the OS certificate store, like a browser would.
+
+If you run backend code outside `npm run api` (scripts, network-enabled tests)
+behind such antivirus, apply the same two steps first.
 
 ## One-time Supabase setup
 
