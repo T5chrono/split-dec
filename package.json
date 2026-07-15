@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "api": "uvicorn api.index:app --reload --port 8000"
+    "api": ".venv\\Scripts\\python -m uvicorn api.index:app --reload --port 8000 --loop api._src.dev_loop:dev_loop_factory"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",
