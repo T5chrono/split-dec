@@ -11,3 +11,9 @@ venv/
 
 .vercel
 *.tsbuildinfo
+
+# Local-only dev launcher (superseded by api/_src/dev_loop.py — safe to delete)
+run_local_api.py
+
+# Playwright MCP browser artifacts (screenshots, logs, profile with auth session)
+.playwright-mcp/
