@@ -1,6 +1,6 @@
-import { Split } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
+import { TileMark, Wordmark } from "../components/Logo";
 
 export default function LoginPage() {
   const { signInWithGoogle } = useAuth();
@@ -15,10 +15,10 @@ export default function LoginPage() {
         {lang === "en" ? "PL" : "EN"}
       </button>
       <div className="flex flex-col items-center gap-2">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-teal-600 text-white">
-          <Split className="h-8 w-8" />
-        </div>
-        <h1 className="text-3xl font-bold">SplitDec</h1>
+        <TileMark className="h-16 w-16" />
+        <h1 className="text-3xl">
+          <Wordmark />
+        </h1>
         <p className="text-slate-500 dark:text-slate-400">{t("tagline")}</p>
       </div>
       <button

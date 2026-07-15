@@ -1,6 +1,12 @@
 @import "tailwindcss";
+@import "@fontsource-variable/manrope";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Brand type: Manrope throughout (SplitDec design system). */
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+}
 
 :root {
   color-scheme: light;
