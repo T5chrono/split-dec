@@ -36,7 +36,7 @@ export default defineConfig({
         // API traffic must never be intercepted or served stale by the SW.
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
       },
     }),
   ],

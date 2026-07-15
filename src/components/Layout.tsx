@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
-import { Languages, Moon, Split, Sun, UserRound } from "lucide-react";
+import { Languages, Moon, Sun, UserRound } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useI18n } from "../lib/i18n";
 import AccountModal from "./AccountModal";
+import { CoinMark, Wordmark } from "./Logo";
 
 export default function Layout() {
   const { session } = useAuth();
@@ -21,12 +22,9 @@ export default function Layout() {
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-lg font-bold text-teal-700 dark:text-teal-400"
-          >
-            <Split className="h-5 w-5" />
-            SplitDec
+          <Link to="/" className="flex items-center gap-1.5 text-lg">
+            <CoinMark className="h-6 w-6" />
+            <Wordmark />
           </Link>
           <div className="flex items-center gap-1">
             <button

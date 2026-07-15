@@ -14,3 +14,9 @@ venv/
 
 # Playwright MCP browser artifacts (screenshots, logs, profile with auth session)
 .playwright-mcp/
+
+# Local brand/design-system workspace (assets are copied into the app as needed)
+SplitDec DesignSystem/
+
+# Local Claude Code tool config (dev-server launcher for the preview browser)
+.claude/
