@@ -49,7 +49,7 @@ def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, st
             f"<p><strong>{safe_inviter}</strong> invited you to join the group "
             f"<strong>{safe_group}</strong> on SplitDec — an app for splitting "
             f"expenses with friends.</p>"
-            f'<p><a href="{html.escape(APP_URL, quote=True)}">Sign in with Google</a> '
+            f'<p><a href="{html.escape(APP_URL, quote=True)}">Sign in</a> '
             f"using this email address and the invitation will be waiting for you.</p>"
         ),
     }

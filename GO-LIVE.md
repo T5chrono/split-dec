@@ -9,12 +9,17 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 
 ---
 
-## 1. Email deliverability (invitations) — ◐ blocked on a domain
+## 1. Email deliverability (invitations + auth emails) — ◐ blocked on a domain
 Invitation emails currently send from Resend's shared sandbox address
 `onboarding@resend.dev`. Consequences today:
 - Resend only **delivers to the account owner's own address** (`chrono5@wp.pl`);
   every other recipient is rejected with HTTP 403.
 - Even to the owner, mail lands in **spam** (no SPF/DKIM tied to a real domain).
+
+**Auth emails now depend on this too:** email/password sign-up confirmation and
+password-reset emails ride Supabase's built-in SMTP, which is dev-grade only
+(~2–4 emails/hour, delivery not guaranteed). Production needs custom SMTP on
+the same verified domain.
 
 **To fix (requires a domain you own):**
 1. Buy/choose a domain (e.g. `splitdec.app`).
@@ -23,7 +28,11 @@ Invitation emails currently send from Resend's shared sandbox address
    "Verified".
 3. Set `RESEND_FROM` on Vercel to e.g. `SplitDec <invites@yourdomain.com>`
    (ping Claude to wire it, or `vercel env add RESEND_FROM production`).
-4. Re-test: invite a non-owner address and confirm inbox delivery.
+4. Supabase → Auth → SMTP Settings: host `smtp.resend.com`, user `resend`,
+   password = the Resend API key, sender e.g. `auth@yourdomain.com` — moves
+   confirmation/reset emails off the built-in rate-limited SMTP.
+5. Re-test: invite a non-owner address and confirm inbox delivery; sign up a
+   non-owner address with a password and confirm the confirmation email lands.
 
 Until then: in-app invitations work for everyone (they appear on sign-in) and
 the "Open email draft" button covers manual sends. Consider hiding the
@@ -61,6 +70,10 @@ These were shared during development and should be rotated before launch:
   real users depend on it.
 - Confirm the DB connection uses the **Transaction Pooler (port 6543)** in
   production `DATABASE_URL` (it does today).
+- Email/password auth: enable **leaked-password protection** (HaveIBeenPwned
+  check, Pro-only) and review Auth rate limits once on Pro. Keep the dashboard
+  minimum password length in sync with `MIN_PASSWORD_LENGTH` in
+  `src/lib/authErrors.ts` (both 8 today).
 
 ## 6. Branch protection / CI gating — ☐
 - Enforcing "CI green before merge to `master`" needs GitHub Pro on a private
@@ -114,5 +127,5 @@ Home Screen"). To turn it into a Play Store app:
 
 ---
 
-_Last updated: 2026-07-09. Maintained alongside the develop → PR → master
+_Last updated: 2026-07-17. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._
