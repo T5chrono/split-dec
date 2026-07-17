@@ -27,6 +27,51 @@ const dict = {
     // login
     tagline: "Split expenses with friends, minus the spreadsheets.",
     continueWithGoogle: "Continue with Google",
+    // landing
+    signIn: "Sign in",
+    landingHeadline1: "Split expenses,",
+    landingHeadline2: "not friendships.",
+    landingSub:
+      "Track who paid what — on trips, with flatmates, at dinner — in any currency, and settle the whole group in the fewest transfers possible.",
+    landingSeeHow: "See how it works",
+    landingTrust: "Free · No ads · Installs like an app",
+    landingFeaturesKicker: "Why SplitDec",
+    landingFeaturesTitle: "Built for how groups actually spend",
+    featGroupsTitle: "Groups for everything",
+    featGroupsBody:
+      "Trips, flatmates, couples — a 1-on-1 is just a two-person group. Invite people by email and start adding expenses.",
+    featCurrencyTitle: "Any currency, exact math",
+    featCurrencyBody:
+      "From złoty to yen: every split is computed at the currency's real precision and always adds up to the total — to the last grosz.",
+    featSimplifyTitle: "Fewest possible transfers",
+    featSimplifyBody:
+      "Balances are simplified so the whole group settles up in a handful of payments instead of a tangle of IOUs.",
+    featSplitTitle: "Split your way",
+    featSplitBody:
+      "Equally, by exact amounts or by percentages — with the rounding handled for you, fairly.",
+    featPwaTitle: "An app when you want one",
+    featPwaBody:
+      "Install SplitDec on your phone or desktop straight from the browser — no app store required.",
+    featPrivateTitle: "Private by design",
+    featPrivateBody:
+      "Groups are invitation-only and your data stays yours: no ads, no tracking, no selling.",
+    landingHowKicker: "How it works",
+    landingHowTitle: "Settled up in three steps",
+    landingStep1Title: "Create a group",
+    landingStep1Body:
+      "Name it after the trip, the flat or the friend group, and invite people by email.",
+    landingStep2Title: "Add expenses",
+    landingStep2Body:
+      "Whoever pays logs it in seconds — pick a category, a currency and how to split it.",
+    landingStep3Title: "Settle up",
+    landingStep3Body:
+      "SplitDec shows who pays whom. Record the payment and everyone is even again.",
+    landingCtaTitle: "Ready to ditch the spreadsheet?",
+    landingCtaBody: "Sign in with Google and settle your first group tonight.",
+    landingFooterTag: "Split fairly. Stay friends.",
+    demoExpenseCable: "Cable car tickets",
+    demoExpenseGroceries: "Groceries",
+    demoToast: "Settled up!",
     // header / account
     signOut: "Sign out",
     account: "Account",
@@ -151,6 +196,50 @@ const dict = {
     unnamedUser: "Użytkownik bez nazwy",
     tagline: "Dziel wydatki ze znajomymi — bez arkuszy kalkulacyjnych.",
     continueWithGoogle: "Kontynuuj z Google",
+    signIn: "Zaloguj się",
+    landingHeadline1: "Dziel wydatki,",
+    landingHeadline2: "nie przyjaźnie.",
+    landingSub:
+      "Śledź, kto za co zapłacił — na wyjazdach, we wspólnym mieszkaniu, przy kolacji — w dowolnej walucie, i rozlicz całą grupę w jak najmniejszej liczbie przelewów.",
+    landingSeeHow: "Zobacz, jak to działa",
+    landingTrust: "Za darmo · Bez reklam · Instaluje się jak aplikacja",
+    landingFeaturesKicker: "Dlaczego SplitDec",
+    landingFeaturesTitle: "Stworzony do tego, jak grupy naprawdę wydają",
+    featGroupsTitle: "Grupy na wszystko",
+    featGroupsBody:
+      "Wyjazdy, współlokatorzy, pary — rozliczenie 1 na 1 to po prostu grupa dwuosobowa. Zaproś przez e-mail i dodawaj wydatki.",
+    featCurrencyTitle: "Każda waluta, dokładna matematyka",
+    featCurrencyBody:
+      "Od złotego po jena: każdy podział jest liczony z dokładnością danej waluty i zawsze sumuje się do całości — co do grosza.",
+    featSimplifyTitle: "Jak najmniej przelewów",
+    featSimplifyBody:
+      "Salda są upraszczane tak, aby cała grupa rozliczyła się kilkoma płatnościami zamiast plątaniną długów.",
+    featSplitTitle: "Dziel po swojemu",
+    featSplitBody:
+      "Po równo, dokładnymi kwotami albo procentami — zaokrągleniami zajmiemy się za Ciebie, uczciwie.",
+    featPwaTitle: "Aplikacja, gdy jej chcesz",
+    featPwaBody:
+      "Zainstaluj SplitDec na telefonie lub komputerze prosto z przeglądarki — bez sklepu z aplikacjami.",
+    featPrivateTitle: "Prywatność w standardzie",
+    featPrivateBody:
+      "Grupy działają wyłącznie na zaproszenia, a Twoje dane pozostają Twoje: bez reklam, bez śledzenia, bez sprzedawania.",
+    landingHowKicker: "Jak to działa",
+    landingHowTitle: "Rozliczeni w trzech krokach",
+    landingStep1Title: "Utwórz grupę",
+    landingStep1Body:
+      "Nazwij ją od wyjazdu, mieszkania albo paczki znajomych i zaproś ludzi przez e-mail.",
+    landingStep2Title: "Dodawaj wydatki",
+    landingStep2Body:
+      "Kto płaci, ten zapisuje — w kilka sekund wybierz kategorię, walutę i sposób podziału.",
+    landingStep3Title: "Rozliczcie się",
+    landingStep3Body:
+      "SplitDec pokazuje, kto komu płaci. Zarejestruj płatność i wszyscy znów są kwita.",
+    landingCtaTitle: "Gotowi porzucić arkusz kalkulacyjny?",
+    landingCtaBody: "Zaloguj się przez Google i rozlicz pierwszą grupę jeszcze dziś.",
+    landingFooterTag: "Dzielcie uczciwie. Zostańcie przyjaciółmi.",
+    demoExpenseCable: "Bilety na kolejkę",
+    demoExpenseGroceries: "Zakupy spożywcze",
+    demoToast: "Rozliczone!",
     signOut: "Wyloguj się",
     account: "Konto",
     signedInAs: "Zalogowano jako",
@@ -361,8 +450,12 @@ function detectLang(): Lang {
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(detectLang);
 
+  // Set during render, not in an effect: consumers re-rendering on a language
+  // switch call formatMoney immediately, and an effect would leave that first
+  // render with the previous decimal separator. Idempotent module state.
+  setMoneyLocale(lang);
+
   useEffect(() => {
-    setMoneyLocale(lang);
     document.documentElement.lang = lang;
   }, [lang]);
 

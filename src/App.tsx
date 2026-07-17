@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import GroupsPage from "./pages/GroupsPage";
 import GroupPage from "./pages/GroupPage";
@@ -18,8 +19,11 @@ export default function App() {
   }
 
   if (!session) {
+    // Marketing landing at the root; deep links (e.g. from invitation emails)
+    // keep the focused sign-in screen instead of the pitch.
     return (
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route path="*" element={<LoginPage />} />
       </Routes>
     );
