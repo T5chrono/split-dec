@@ -24,14 +24,59 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Review this pull request for the SplitDec app (FastAPI + React
-            Splitwise clone; see README.md and "SplitDec - specification.md").
-            Focus on:
-            - Correctness bugs, especially in money/balance math (NUMERIC(14,4),
-              banker's rounding, amounts serialized as strings)
-            - Authorization gaps (FastAPI is the sole authz boundary; RLS is off)
-            - Missing or weakened test coverage
-            - Split-second issues: idempotency, soft-delete filtering, transactions
-            Leave concise inline comments on real problems only; do not comment
-            on style. Finish with a short overall verdict posted as a PR
-            comment (use `gh pr comment`).
-          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
+            Splitwise clone). Read README.md, CLAUDE.md, and
+            "SplitDec - specification.md" for architecture and invariants,
+            and read any other source files you need for real context — do
+            not review the diff in isolation; verify claims against how the
+            surrounding code and existing tests actually behave.
+
+            ## Correctness
+            - Money/balance math: NUMERIC(14,4) precision, banker's rounding
+              at the currency's own precision (currencies.py), remainder
+              distribution, amounts serialized as strings end-to-end (never
+              floats).
+            - Concurrency: the group-row-lock protocol (FOR SHARE / FOR
+              UPDATE via deps.py) — does every new balance-changing endpoint
+              join it, and is the lock taken before balances are read?
+            - Idempotency: Idempotency-Key replay scoping (must be scoped to
+              the path group — cross-group key reuse was a real prior bug
+              class here).
+            - Soft-deletes: are deleted expenses/settlements excluded from
+              balance queries and listings, independently of each other?
+            - Test coverage: are new endpoints/branches covered, especially
+              anything that only breaks under concurrent access (Postgres-
+              only tests) or at currency-precision edges (JPY=0, KWD=3, ...).
+
+            ## Security — review this as if it will face hostile input
+            - Authorization: FastAPI is the SOLE authz boundary (RLS is
+              intentionally disabled). Check every new/changed endpoint for
+              missing or wrong membership checks, and for IDOR — can a user
+              reach another user's group, expense, settlement, or account
+              data by supplying an id they don't own?
+            - Mass assignment: do request schemas let a client set fields it
+              shouldn't (ids, ownership, timestamps, soft-delete flags)?
+            - Auth/JWT: for anything touching auth.py, confirm the signature
+              algorithm is pinned (no algorithm-confusion / "alg: none"),
+              JWKS is fetched over verified TLS, and expiry/audience/issuer
+              checks aren't weakened.
+            - Injection: string-built SQL, or command/shell injection in any
+              subprocess usage.
+            - Secrets & disclosure: no secrets, tokens, or raw stack traces
+              in responses, logs, or error messages; no PII in log lines.
+            - Email: invitation content must stay HTML-escaped
+              (invitation_email_content) — check any new user-controlled
+              field that flows into an email body.
+            - Frontend: flag dangerouslySetInnerHTML, unescaped user content,
+              or open-redirect risk in auth/redirect flows.
+            - Dependencies: flag any new dependency that's unusual, unpinned,
+              or unnecessary for the change.
+            - Config: dev-only relaxations (CORS, debug flags) must stay
+              gated on ENV=development and never leak into production.
+
+            Leave concise inline comments only on problems you're actually
+            confident about — do not comment on style, naming, or
+            formatting. Mark any security finding's severity (blocking vs.
+            minor). You MUST finish by posting an overall verdict as a PR
+            comment (use `gh pr comment`) — even "reviewed, no issues found"
+            is required output, not optional.
+          claude_args: '--allowed-tools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
