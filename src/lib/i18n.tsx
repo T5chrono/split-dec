@@ -70,6 +70,7 @@ const dict = {
     landingCtaBody: "Sign in with Google and settle your first group tonight.",
     landingFooterTag: "Split fairly. Stay friends.",
     demoExpenseCable: "Cable car tickets",
+    demoExpenseHotel: "Mountain hostel, 2 nights",
     demoExpenseGroceries: "Groceries",
     demoToast: "Settled up!",
     // header / account
@@ -238,6 +239,7 @@ const dict = {
     landingCtaBody: "Zaloguj się przez Google i rozlicz pierwszą grupę jeszcze dziś.",
     landingFooterTag: "Dzielcie uczciwie. Zostańcie przyjaciółmi.",
     demoExpenseCable: "Bilety na kolejkę",
+    demoExpenseHotel: "Schronisko, 2 noce",
     demoExpenseGroceries: "Zakupy spożywcze",
     demoToast: "Rozliczone!",
     signOut: "Wyloguj się",

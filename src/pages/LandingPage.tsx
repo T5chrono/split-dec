@@ -10,7 +10,9 @@ import {
   ArrowRight,
   Check,
   Coins,
+  Hotel,
   Languages,
+  Lock,
   MonitorSmartphone,
   Moon,
   Percent,
@@ -130,8 +132,9 @@ function FloatingChip({
   );
 }
 
-/** Static mockup of a group ledger — the product, as the hero illustration. */
-function DemoCard() {
+/** Static mockup of the app in a desktop browser window — SplitDec is a
+ *  web app first, so the hero shows it the way laptops see it. */
+function DemoWindow() {
   const { t, membersLabel } = useI18n();
   const tilt = useTilt();
 
@@ -142,9 +145,12 @@ function DemoCard() {
     amount: string;
   }> = [
     { icon: UtensilsCrossed, desc: t("descriptionPlaceholder"), payer: "Ala", amount: "245.0000" },
+    { icon: Hotel, desc: t("demoExpenseHotel"), payer: "Ala", amount: "320.0000" },
     { icon: TrainFront, desc: t("demoExpenseCable"), payer: "Tomek", amount: "180.0000" },
     { icon: ShoppingCart, desc: t("demoExpenseGroceries"), payer: "Kuba", amount: "96.5000" },
   ];
+
+  const tabs: TKey[] = ["tabExpenses", "tabBalances", "tabSettlements", "tabMembers"];
 
   const badge =
     "rounded-xl border border-slate-200/80 bg-white/90 px-3 py-1.5 text-sm font-bold text-teal-700 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-800/90 dark:text-teal-300";
@@ -159,13 +165,13 @@ function DemoCard() {
       <FloatingChip animation="animate-float" className="-left-4 -top-5 sm:-left-8">
         <span className={badge}>zł PLN</span>
       </FloatingChip>
-      <FloatingChip animation="animate-float-late" className="-right-3 top-12 sm:-right-8">
+      <FloatingChip animation="animate-float-late" className="-right-3 top-40 sm:-right-7">
         <span className={badge}>€ EUR</span>
       </FloatingChip>
-      <FloatingChip animation="animate-float-later" className="-right-2 -bottom-6 sm:-right-6">
+      <FloatingChip animation="animate-float-later" className="-bottom-6 -right-2 sm:-right-5">
         <span className={badge}>¥ JPY</span>
       </FloatingChip>
-      <FloatingChip animation="animate-float-late" className="-bottom-7 left-6">
+      <FloatingChip animation="animate-float-late" className="-bottom-7 left-8">
         <span className="flex items-center gap-2 rounded-xl bg-teal-600 px-3.5 py-2 text-sm font-semibold text-white shadow-xl shadow-teal-600/30">
           <Check className="h-4 w-4" />
           {t("demoToast")}
@@ -173,21 +179,61 @@ function DemoCard() {
       </FloatingChip>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/85 shadow-2xl shadow-teal-900/10 backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/85 dark:shadow-black/40">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-          <div>
-            <p className="font-bold">{t("groupNamePlaceholder")}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{membersLabel(3)}</p>
+        {/* Browser chrome: this is the product's native habitat. */}
+        <div className="flex items-center gap-3 border-b border-slate-200/80 bg-slate-100/80 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/50">
+          <span className="flex gap-1.5">
+            <span className="h-3 w-3 rounded-full bg-rose-400/90" />
+            <span className="h-3 w-3 rounded-full bg-amber-400/90" />
+            <span className="h-3 w-3 rounded-full bg-emerald-400/90" />
+          </span>
+          <span className="mx-auto flex items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+            <Lock className="h-3 w-3" />
+            split-dec.vercel.app
+          </span>
+          <span aria-hidden className="w-12" />
+        </div>
+
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-2.5 dark:border-slate-800">
+          <span className="flex items-center gap-1.5 text-sm">
+            <CoinMark className="h-4.5 w-4.5" />
+            <Wordmark />
+          </span>
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-100 text-[0.65rem] font-bold text-teal-700 dark:bg-teal-900 dark:text-teal-200">
+            T
+          </span>
+        </div>
+
+        <div className="px-5 pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-lg font-bold">{t("groupNamePlaceholder")}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{membersLabel(3)}</p>
+            </div>
+            <div className="flex -space-x-2">
+              <DemoAvatar initial="A" className="bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-200" />
+              <DemoAvatar initial="T" className="bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-200" />
+              <DemoAvatar initial="K" className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200" />
+            </div>
           </div>
-          <div className="flex -space-x-2">
-            <DemoAvatar initial="A" className="bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-200" />
-            <DemoAvatar initial="T" className="bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-200" />
-            <DemoAvatar initial="K" className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200" />
+          <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-100 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+            {tabs.map((tab, i) => (
+              <span
+                key={tab}
+                className={`whitespace-nowrap px-2.5 pb-2 text-xs font-semibold sm:px-3 sm:text-sm ${
+                  i === 0
+                    ? "border-b-2 border-teal-600 text-teal-700 dark:border-teal-400 dark:text-teal-300"
+                    : "text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                {t(tab)}
+              </span>
+            ))}
           </div>
         </div>
 
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {rows.map(({ icon: Icon, desc, payer, amount }) => (
-            <li key={desc} className="flex items-center gap-3 px-5 py-3.5">
+            <li key={desc} className="flex items-center gap-3 px-5 py-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-600/10 text-teal-700 dark:bg-teal-400/10 dark:text-teal-300">
                 <Icon className="h-4.5 w-4.5" />
               </span>
@@ -271,7 +317,7 @@ export default function LandingPage() {
   return (
     <div className="landing relative">
       <header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200/60 bg-white/70 backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-950/60">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <span className="flex items-center gap-1.5 text-lg">
             <CoinMark className="h-6 w-6" />
             <Wordmark />
@@ -304,7 +350,7 @@ export default function LandingPage() {
 
       <section className="relative overflow-hidden pb-16 pt-32 sm:pt-40">
         <AuroraBackdrop />
-        <div className="mx-auto grid max-w-6xl items-center gap-16 px-4 lg:grid-cols-2">
+        <div className="mx-auto grid max-w-7xl items-center gap-16 px-4 lg:grid-cols-[1fr_1.2fr] lg:gap-12 xl:gap-16">
           <div>
             <h1
               className="animate-fade-up text-5xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl"
@@ -315,7 +361,7 @@ export default function LandingPage() {
               <span className="text-shimmer animate-shimmer">{t("landingHeadline2")}</span>
             </h1>
             <p
-              className="mt-6 max-w-xl animate-fade-up text-lg text-slate-600 dark:text-slate-300"
+              className="mt-6 max-w-xl animate-fade-up text-lg text-slate-600 xl:text-xl dark:text-slate-300"
               style={{ animationDelay: "220ms" }}
             >
               {t("landingSub")}
@@ -351,19 +397,19 @@ export default function LandingPage() {
 
           <div
             aria-hidden
-            className="mx-auto w-full max-w-md animate-fade-up px-4 sm:px-0 lg:max-w-none"
+            className="mx-auto w-full min-w-0 max-w-lg animate-fade-up px-4 sm:px-0 lg:max-w-none"
             style={{ animationDelay: "300ms" }}
           >
-            <DemoCard />
+            <DemoWindow />
           </div>
         </div>
-        <div className="mx-auto mt-20 max-w-5xl px-4">
+        <div className="mx-auto mt-20 max-w-6xl px-4">
           <CurrencyMarquee />
         </div>
       </section>
 
       <section id="features" className="py-20 sm:py-28">
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto max-w-7xl px-4">
           <Reveal className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-bold uppercase tracking-widest text-teal-600 dark:text-teal-400">
               {t("landingFeaturesKicker")}
@@ -392,7 +438,7 @@ export default function LandingPage() {
       </section>
 
       <section id="how" className="scroll-mt-24 py-20 sm:py-28">
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto max-w-7xl px-4">
           <Reveal className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-bold uppercase tracking-widest text-teal-600 dark:text-teal-400">
               {t("landingHowKicker")}
@@ -422,7 +468,7 @@ export default function LandingPage() {
       </section>
 
       <section className="pb-24 pt-4">
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto max-w-7xl px-4">
           <Reveal>
             <div className="relative overflow-hidden rounded-3xl bg-slate-900 px-6 py-16 text-center sm:px-16 dark:bg-slate-900">
               <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -449,7 +495,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-slate-200 py-10 dark:border-slate-800">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 sm:flex-row">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 sm:flex-row">
           <span className="flex items-center gap-1.5">
             <CoinMark className="h-5 w-5" />
             <Wordmark />
