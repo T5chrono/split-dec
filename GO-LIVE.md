@@ -9,34 +9,21 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 
 ---
 
-## 1. Email deliverability (invitations + auth emails) — ◐ blocked on a domain
-Invitation emails currently send from Resend's shared sandbox address
-`onboarding@resend.dev`. Consequences today:
-- Resend only **delivers to the account owner's own address** (`chrono5@wp.pl`);
-  every other recipient is rejected with HTTP 403.
-- Even to the owner, mail lands in **spam** (no SPF/DKIM tied to a real domain).
+## 1. Email deliverability (invitations + auth emails) — ◐ nearly done
+Domain **`split-dec.app`** purchased (2026-07-17), added in Resend, and the
+DKIM/SPF/return-path DNS records are live (verified via DNS lookup;
+region eu-west-1). `RESEND_FROM` is set on Vercel production to
+`SplitDec <invites@split-dec.app>` and production was redeployed — invitation
+emails now send from the verified domain.
 
-**Auth emails now depend on this too:** email/password sign-up confirmation and
-password-reset emails ride Supabase's built-in SMTP, which is dev-grade only
-(~2–4 emails/hour, delivery not guaranteed). Production needs custom SMTP on
-the same verified domain.
-
-**To fix (requires a domain you own):**
-1. Buy/choose a domain (e.g. `splitdec.app`).
-2. In [resend.com/domains](https://resend.com/domains) → Add Domain → add the
-   SPF/DKIM/return-path DNS records it shows at your registrar → wait for
-   "Verified".
-3. Set `RESEND_FROM` on Vercel to e.g. `SplitDec <invites@yourdomain.com>`
-   (ping Claude to wire it, or `vercel env add RESEND_FROM production`).
-4. Supabase → Auth → SMTP Settings: host `smtp.resend.com`, user `resend`,
-   password = the Resend API key, sender e.g. `auth@yourdomain.com` — moves
-   confirmation/reset emails off the built-in rate-limited SMTP.
-5. Re-test: invite a non-owner address and confirm inbox delivery; sign up a
+**Remaining:**
+1. Supabase → Auth → SMTP Settings (dashboard-only): host `smtp.resend.com`,
+   port 465, user `resend`, password = the Resend API key, sender
+   `SplitDec <auth@split-dec.app>` — moves email/password confirmation and
+   password-reset emails off Supabase's built-in dev-grade SMTP
+   (~2–4 emails/hour).
+2. Re-test: invite a non-owner address and confirm inbox delivery; sign up a
    non-owner address with a password and confirm the confirmation email lands.
-
-Until then: in-app invitations work for everyone (they appear on sign-in) and
-the "Open email draft" button covers manual sends. Consider hiding the
-auto-email path or messaging it as best-effort.
 
 ## 2. Google OAuth consent screen — ☐
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
@@ -46,11 +33,23 @@ auto-email path or messaging it as best-effort.
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
-## 3. Custom domain for the app — ☐ (optional but recommended)
-- Point a domain at the Vercel project (Vercel → Project → Domains).
-- Update Supabase Auth → URL Configuration (Site URL + Redirect URLs) and the
-  Google OAuth redirect/authorized origins to the new domain.
-- Update `APP_URL` (backend, used in invite emails) if set.
+## 3. Custom domain for the app — ◐ live at split-dec.app
+- ☑ `https://split-dec.app` is attached to the Vercel project and serves the
+  app + API (the `.vercel.app` alias still works too).
+- ☑ `APP_URL=https://split-dec.app` set on Vercel production (invite email
+  links point at the new domain).
+- ☐ **Supabase Auth → URL Configuration (do this before sharing the new
+  domain):** set Site URL to `https://split-dec.app` and add it (plus
+  `https://split-dec.app/reset-password`) to Redirect URLs, keeping the
+  `.vercel.app` entries. Until then, Google sign-in initiated FROM
+  split-dec.app falls back to the old origin and fails PKCE (the code
+  verifier lives in the initiating origin's localStorage).
+- ☐ Add `www.split-dec.app` in Vercel → Project → Domains (DNS already points
+  at Vercel; without the attachment TLS fails on www) and set it to redirect
+  to the apex.
+- ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
+  (the OAuth callback itself stays on the Supabase domain — no redirect URI
+  change needed).
 
 ## 4. Rotate secrets that passed through chat/tooling — ☐
 These were shared during development and should be rotated before launch:

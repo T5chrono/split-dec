@@ -20,6 +20,16 @@ from _src.main import app  # noqa: E402
 from _src.models import Base, Group, GroupMember, User  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    # config.py's load_dotenv() pulls the developer's .env into os.environ at
+    # import time; the app reads ENV and HEALTH_PROBE_KEY per-request, so local
+    # values (e.g. ENV=development) would flip test behavior. Scrub them; tests
+    # that need a specific value set it with monkeypatch themselves.
+    monkeypatch.delenv("ENV", raising=False)
+    monkeypatch.delenv("HEALTH_PROBE_KEY", raising=False)
+
+
 class CurrentUser:
     """Mutable holder so tests can switch the authenticated caller."""
 
