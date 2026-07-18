@@ -9,21 +9,18 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 
 ---
 
-## 1. Email deliverability (invitations + auth emails) — ◐ nearly done
-Domain **`split-dec.app`** purchased (2026-07-17), added in Resend, and the
-DKIM/SPF/return-path DNS records are live (verified via DNS lookup;
-region eu-west-1). `RESEND_FROM` is set on Vercel production to
-`SplitDec <invites@split-dec.app>` and production was redeployed — invitation
-emails now send from the verified domain.
-
-**Remaining:**
-1. Supabase → Auth → SMTP Settings (dashboard-only): host `smtp.resend.com`,
-   port 465, user `resend`, password = the Resend API key, sender
-   `SplitDec <auth@split-dec.app>` — moves email/password confirmation and
-   password-reset emails off Supabase's built-in dev-grade SMTP
-   (~2–4 emails/hour).
-2. Re-test: invite a non-owner address and confirm inbox delivery; sign up a
-   non-owner address with a password and confirm the confirmation email lands.
+## 1. Email deliverability (invitations + auth emails) — ☑ done (2026-07-18)
+Domain **`split-dec.app`** verified in Resend (DKIM/SPF/return-path live,
+region eu-west-1). `RESEND_FROM=SplitDec <invites@split-dec.app>` and
+`APP_URL=https://www.split-dec.app` set on Vercel production. Supabase custom
+SMTP configured (smtp.resend.com:465, user `resend`, dedicated sending-only
+API key, sender `auth@split-dec.app`) and **verified end-to-end**: a test
+signup dispatched its confirmation email through Resend successfully
+(Resend rejects recipients at reserved domains like example.com — use
+`delivered@resend.dev` for tests). Custom SMTP also raised the auth email
+rate limit to 30/hour. Auth email templates still use Supabase defaults
+(EN-only) — bilingual PL+EN templates are a nice-to-have follow-up under
+Authentication → Emails → Templates.
 
 ## 2. Google OAuth consent screen — ☐
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
@@ -33,20 +30,24 @@ emails now send from the verified domain.
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
-## 3. Custom domain for the app — ◐ live at split-dec.app
-- ☑ `https://split-dec.app` is attached to the Vercel project and serves the
-  app + API (the `.vercel.app` alias still works too).
-- ☑ `APP_URL=https://split-dec.app` set on Vercel production (invite email
-  links point at the new domain).
-- ☐ **Supabase Auth → URL Configuration (do this before sharing the new
-  domain):** set Site URL to `https://split-dec.app` and add it (plus
-  `https://split-dec.app/reset-password`) to Redirect URLs, keeping the
-  `.vercel.app` entries. Until then, Google sign-in initiated FROM
-  split-dec.app falls back to the old origin and fails PKCE (the code
-  verifier lives in the initiating origin's localStorage).
-- ☐ Add `www.split-dec.app` in Vercel → Project → Domains (DNS already points
-  at Vercel; without the attachment TLS fails on www) and set it to redirect
-  to the apex.
+## 3. Custom domain for the app — ◐ apex is canonical
+- ☑ **`https://split-dec.app` (apex) is the primary domain.** A brief
+  www-primary configuration (2026-07-18) caused a production incident:
+  service workers registered on the apex kept serving the app shell from
+  cache while `/api/*` 308-redirected to www — a cross-origin hop the
+  CORS-less API correctly refuses → "Failed to fetch". SW update fetches
+  also reject redirects, so apex-origin installs could never self-heal.
+  **Lesson: never turn a previously-serving origin into a redirect** —
+  the PWA pins its install origin.
+- ☑ www → apex 308 is enforced in `vercel.json` (host-conditional redirect,
+  versioned in git — the dashboard-level redirect toggle did not persist).
+  `APP_URL=https://split-dec.app`.
+- ☐ **Supabase Auth → URL Configuration:** Site URL is still
+  `https://split-dec.vercel.app` (verified by probing the verify-endpoint
+  fallback). Sign-in works today because the apex + `/reset-password` are
+  allow-listed and the app always passes an explicit redirect, but the
+  fallback should be `https://split-dec.app`. (Dashboard was erroring when
+  this was attempted — retry.)
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
   change needed).
