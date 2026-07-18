@@ -9,18 +9,24 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 
 ---
 
-## 1. Email deliverability (invitations + auth emails) — ☑ done (2026-07-18)
+## 1. Email deliverability (invitations + auth emails) — ◐ SMTP done, templates pending
 Domain **`split-dec.app`** verified in Resend (DKIM/SPF/return-path live,
 region eu-west-1). `RESEND_FROM=SplitDec <invites@split-dec.app>` and
-`APP_URL=https://www.split-dec.app` set on Vercel production. Supabase custom
+`APP_URL=https://split-dec.app` set on Vercel production. Supabase custom
 SMTP configured (smtp.resend.com:465, user `resend`, dedicated sending-only
 API key, sender `auth@split-dec.app`) and **verified end-to-end**: a test
 signup dispatched its confirmation email through Resend successfully
 (Resend rejects recipients at reserved domains like example.com — use
 `delivered@resend.dev` for tests). Custom SMTP also raised the auth email
-rate limit to 30/hour. Auth email templates still use Supabase defaults
-(EN-only) — bilingual PL+EN templates are a nice-to-have follow-up under
-Authentication → Emails → Templates.
+rate limit to 30/hour.
+- ☐ **Bilingual PL+EN email templates** (Authentication → Emails →
+  Templates → "Confirm sign up" and "Reset password") — still Supabase's
+  EN-only defaults; the dashboard Templates page was returning an internal
+  error during a Supabase incident on 2026-07-18 (Site URL config on the same
+  dashboard worked fine, so this looks incident-specific, not a lasting
+  problem) — retry when the page loads. Suggested copy (subjects + bilingual
+  HTML bodies, `{{ .ConfirmationURL }}` placeholder) was drafted in-session;
+  ask Claude to regenerate it if not saved.
 
 ## 2. Google OAuth consent screen — ☐
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
@@ -30,7 +36,7 @@ Authentication → Emails → Templates.
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
-## 3. Custom domain for the app — ◐ apex is canonical
+## 3. Custom domain for the app — ◐ apex is canonical, one routing gap
 - ☑ **`https://split-dec.app` (apex) is the primary domain.** A brief
   www-primary configuration (2026-07-18) caused a production incident:
   service workers registered on the apex kept serving the app shell from
@@ -42,12 +48,22 @@ Authentication → Emails → Templates.
 - ☑ www → apex 308 is enforced in `vercel.json` (host-conditional redirect,
   versioned in git — the dashboard-level redirect toggle did not persist).
   `APP_URL=https://split-dec.app`.
-- ☐ **Supabase Auth → URL Configuration:** Site URL is still
-  `https://split-dec.vercel.app` (verified by probing the verify-endpoint
-  fallback). Sign-in works today because the apex + `/reset-password` are
-  allow-listed and the app always passes an explicit redirect, but the
-  fallback should be `https://split-dec.app`. (Dashboard was erroring when
-  this was attempted — retry.)
+- ☑ **Supabase Auth → URL Configuration: Site URL fixed** to
+  `https://split-dec.app` (was `https://split-dec.vercel.app`) — confirmed
+  by probing the verify-endpoint fallback, which now lands on the apex.
+- ☐ **Known bug: the `vercel.json` www→apex redirect does not fire for the
+  bare root `/`.** Confirmed with a real browser + cache-busting query
+  string (not a caching artifact): `www.split-dec.app/groups/abc` correctly
+  308s to the apex, but `www.split-dec.app/` (and `/?query`) serves 200
+  directly from www instead of redirecting. Likely a Vercel routing-
+  precedence quirk specific to the exact root path (framework/static-file
+  handling may be short-circuiting the redirect check for `/` only) rather
+  than a `vercel.json` syntax issue — the `has: [{type: "host", ...}]` rule
+  itself is proven correct by the nested-path case. Needs investigation
+  (try an explicit `/` redirect rule ahead of the `/:path*` one, or check
+  Vercel's routing debug output) — low severity since anyone landing on
+  `www.split-dec.app/` still gets a fully working app, just on the
+  non-canonical origin.
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
   change needed).
@@ -127,5 +143,5 @@ Home Screen"). To turn it into a Play Store app:
 
 ---
 
-_Last updated: 2026-07-17. Maintained alongside the develop → PR → master
+_Last updated: 2026-07-18. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._
