@@ -48,8 +48,10 @@ One Vercel project, path-routed same-origin (no CORS in production; dev-only COR
 on `ENV=development`):
 
 - **Frontend**: Vite/React SPA at repo root. `vercel.json` rewrites `/api/*` to the function,
-  everything else to `index.html`, and pins `regions: ["cdg1"]` — the function is deliberately
-  collocated with the database (Paris); moving it re-adds ~500ms/request.
+  everything else to `index.html`, 308-redirects `www.split-dec.app` to the apex (the apex must
+  stay the serving origin — installed PWAs pin their origin and a redirecting apex strands their
+  service workers and breaks same-origin `/api` calls), and pins `regions: ["cdg1"]` — the
+  function is deliberately collocated with the database (Paris); moving it re-adds ~500ms/request.
 - **Backend**: FastAPI in `api/index.py` (single Vercel function; code lives in `api/_src/` —
   the underscore prevents Vercel treating those files as separate functions).
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the

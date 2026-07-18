@@ -30,23 +30,27 @@ Authentication → Emails → Templates.
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
-## 3. Custom domain for the app — ◐ live, one auth-config gap
-- ☑ **`https://www.split-dec.app` is the primary domain** (apex 308-redirects
-  to www; `.vercel.app` still serves). App + same-origin API verified on the
-  www origin. `APP_URL` points at www.
-- ☐ **Supabase Auth → URL Configuration — the one remaining gap.** Verified
-  empirically (2026-07-18): the allow-list has the apex entries but NOT www,
-  and Site URL is still `https://split-dec.vercel.app`. Because the app runs
-  on www, Google sign-in from www falls back to the vercel.app origin and
-  breaks PKCE (this is the "why am I on vercel.app?" symptom). Fix: Site URL
-  → `https://www.split-dec.app`; add `https://www.split-dec.app` and
-  `https://www.split-dec.app/reset-password` to Redirect URLs (keep apex,
-  vercel.app and localhost entries).
+## 3. Custom domain for the app — ◐ apex is canonical
+- ☑ **`https://split-dec.app` (apex) is the primary domain.** A brief
+  www-primary configuration (2026-07-18) caused a production incident:
+  service workers registered on the apex kept serving the app shell from
+  cache while `/api/*` 308-redirected to www — a cross-origin hop the
+  CORS-less API correctly refuses → "Failed to fetch". SW update fetches
+  also reject redirects, so apex-origin installs could never self-heal.
+  **Lesson: never turn a previously-serving origin into a redirect** —
+  the PWA pins its install origin.
+- ☑ www → apex 308 is enforced in `vercel.json` (host-conditional redirect,
+  versioned in git — the dashboard-level redirect toggle did not persist).
+  `APP_URL=https://split-dec.app`.
+- ☐ **Supabase Auth → URL Configuration:** Site URL is still
+  `https://split-dec.vercel.app` (verified by probing the verify-endpoint
+  fallback). Sign-in works today because the apex + `/reset-password` are
+  allow-listed and the app always passes an explicit redirect, but the
+  fallback should be `https://split-dec.app`. (Dashboard was erroring when
+  this was attempted — retry.)
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
   change needed).
-- Note: previously installed PWAs pin the origin they were installed from —
-  reinstall from www.split-dec.app to migrate.
 
 ## 4. Rotate secrets that passed through chat/tooling — ☐
 These were shared during development and should be rotated before launch:
