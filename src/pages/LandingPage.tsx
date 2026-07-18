@@ -25,6 +25,7 @@ import {
   UtensilsCrossed,
   type LucideIcon,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useI18n, type TKey } from "../lib/i18n";
@@ -313,6 +314,7 @@ export default function LandingPage() {
   const { signInWithGoogle } = useAuth();
   const { theme, toggle } = useTheme();
   const { t, lang, setLang } = useI18n();
+  const navigate = useNavigate();
 
   return (
     <div className="landing relative">
@@ -339,7 +341,7 @@ export default function LandingPage() {
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             <button
-              onClick={signInWithGoogle}
+              onClick={() => navigate("/login")}
               className="ml-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
             >
               {t("signIn")}
@@ -386,6 +388,14 @@ export default function LandingPage() {
               >
                 {t("landingSeeHow")}
               </a>
+            </div>
+            <div className="mt-4 animate-fade-up" style={{ animationDelay: "420ms" }}>
+              <button
+                onClick={() => navigate("/login")}
+                className="text-sm font-medium text-teal-700 hover:underline dark:text-teal-300"
+              >
+                {t("signInWithEmail")}
+              </button>
             </div>
             <p
               className="mt-6 animate-fade-up text-sm text-slate-500 dark:text-slate-400"

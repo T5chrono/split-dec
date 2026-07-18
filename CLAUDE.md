@@ -55,10 +55,18 @@ on `ENV=development`):
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
   transaction pooler (port 6543, `postgresql+asyncpg://`) with `NullPool` and
   `statement_cache_size=0` (`api/_src/db.py`) — never per-request engines, never the session pooler.
-- **Auth**: Supabase Google OAuth (PKCE) on the frontend; backend verifies JWTs statelessly
-  (`auth.py`: ES256 via JWKS, HS256 fallback). **RLS is intentionally disabled** — the FastAPI
-  layer is the sole authorization boundary; the Data API's anon/authenticated grants were
-  revoked by migration. Do not enable RLS and do not weaken the FastAPI checks.
+- **Auth**: Supabase Auth (PKCE) on the frontend — Google OAuth **plus email/password** (signup
+  with confirmation required, forgot/reset flow); backend verifies JWTs statelessly
+  (`auth.py`: ES256 via JWKS, HS256 fallback) and reads only the `sub` claim — provider-neutral.
+  **RLS is intentionally disabled** — the FastAPI layer is the sole authorization boundary; the
+  Data API's anon/authenticated grants were revoked by migration. Do not enable RLS and do not
+  weaken the FastAPI checks. Password-auth specifics: `signUp` must pass `full_name` in metadata
+  (the `handle_new_user` trigger reads it); the client's `MIN_PASSWORD_LENGTH`
+  (`src/lib/authErrors.ts`) must match the dashboard's minimum length; signup/reset responses
+  stay deliberately enumeration-safe (don't distinguish existing emails). `/reset-password` is
+  registered in **both** auth branches of `App.tsx` — the recovery link lands signed-out, the SDK
+  exchanges the code, and the app re-renders signed-in on the same path (screen sits outside
+  `Layout`). Production auth emails need Supabase custom SMTP via Resend (GO-LIVE item 1).
 
 ### Money invariants (the core of this codebase)
 
