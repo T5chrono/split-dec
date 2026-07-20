@@ -99,7 +99,14 @@ These were shared during development and should be rotated before launch:
 ## 7. Observability & error handling — ◐
 - The invitation emailer now logs send failures (no more silent swallow), but
   there's no aggregated error tracking. Consider Sentry (frontend + FastAPI)
-  or at least periodic review of Vercel runtime logs.
+  or at least periodic review of Vercel runtime logs. Failures are logged by
+  invitation id with a status code only — recipient addresses and provider
+  response bodies are deliberately kept out of the retained logs, so
+  diagnosing a specific delivery means looking it up in Resend.
+- Invitation sending is quota-limited in `api/_src/routers/invitations.py`
+  (per inviter / per recipient / global, 24h windows). The numbers there are
+  a guess at ordinary usage — revisit once there is real traffic, and note
+  that a legitimate power user hitting a 429 has no self-service escape.
 - Add a lightweight uptime check on `/api/health`.
 
 ## 8. Legal / privacy — ☐

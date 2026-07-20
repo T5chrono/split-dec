@@ -55,20 +55,32 @@ def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, st
     }
 
 
-async def send_invitation_email(to: str, inviter_name: str, group_name: str) -> bool:
-    """Returns True only if an email was actually handed to the provider."""
+async def send_invitation_email(
+    to: str, inviter_name: str, group_name: str, *, correlator: object
+) -> bool:
+    """Returns True only if an email was actually handed to the provider.
+
+    `correlator` (the invitation id) is what gets logged — never the
+    recipient address. Log lines end up in Vercel's retained function logs,
+    which is not a place to accumulate the email addresses of people who are
+    not even users yet. Provider responses are logged as a status code only:
+    Resend echoes the payload (recipient, sender, sometimes the key prefix)
+    in its error bodies.
+    """
     if not RESEND_API_KEY:
-        logger.info("RESEND_API_KEY unset; skipping invitation email to %s", to)
+        logger.info("RESEND_API_KEY unset; skipping invitation email %s", correlator)
         return False
     payload = {"from": RESEND_FROM, "to": [to], **invitation_email_content(inviter_name, group_name)}
     try:
         await asyncio.to_thread(_post_resend, payload)
         return True
     except urllib.error.HTTPError as e:
-        # Surface Resend's reason (e.g. 403 sandbox restriction) in the logs.
-        body = e.read().decode(errors="replace") if hasattr(e, "read") else ""
-        logger.warning("Resend rejected email to %s: HTTP %s %s", to, e.code, body)
+        # The status code alone distinguishes the cases worth acting on
+        # (403 sandbox restriction, 422 bad sender, 429 provider throttle).
+        logger.warning("Resend rejected invitation email %s: HTTP %s", correlator, e.code)
         return False
     except Exception as e:  # noqa: BLE001 — best-effort; must not fail the request
-        logger.warning("Failed to send invitation email to %s: %r", to, e)
+        logger.warning(
+            "Failed to send invitation email %s: %s", correlator, type(e).__name__
+        )
         return False

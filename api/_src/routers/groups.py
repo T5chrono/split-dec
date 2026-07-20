@@ -51,7 +51,9 @@ async def create_group(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     # Not membership-gated, so explicitly refuse tokens of deleted accounts.
-    await get_active_user(db, caller)
+    # The shared lock holds until commit, so a concurrent account deletion
+    # cannot snapshot this caller's groups before the membership below exists.
+    await get_active_user(db, caller, lock="shared")
     group = Group(name=body.name, created_by=caller)
     db.add(group)
     await db.flush()

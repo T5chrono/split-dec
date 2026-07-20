@@ -19,17 +19,26 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
+    # Per the documented baseline (anthropics/claude-code-action
+    # examples/claude.yml), with one deliberate tightening: this job exists to
+    # *answer* @claude mentions, so it needs write on the conversation
+    # surfaces (read-only means it can't post its reply at all), but never
+    # pushes code — PRs here come from local `develop` — so `contents` stays
+    # read. `id-token: write` backs OIDC token exchange and `actions: read`
+    # lets Claude read CI results on a PR; both are required by the action.
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      # SHA-pinned for the same reason as claude-code-review.yml: the job
+      # carries an OAuth token, and a tag is a mutable pointer.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 1
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

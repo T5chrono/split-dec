@@ -1,14 +1,14 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..balances import net_balances
 from ..db import get_db
 from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
-from ..models import GroupMember
+from ..models import GroupInvitation, GroupMember
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -30,7 +30,12 @@ async def delete_account(
     for the other members, so the public.users row is anonymized rather than
     deleted; the auth.users row is removed, which revokes all sign-in.
     """
-    user = await get_active_user(db, caller)
+    # Taken before the membership snapshot below and held to commit: group
+    # creation and invitation acceptance take the matching shared lock, so a
+    # membership created concurrently cannot slip past the balance checks or
+    # outlive the unscoped delete. See deps.get_active_user.
+    user = await get_active_user(db, caller, lock="exclusive")
+    old_email = user.email.lower()
 
     group_ids = sorted(
         (
@@ -58,8 +63,26 @@ async def delete_account(
             ),
         )
 
-    # Single transaction: leave groups, anonymize PII, revoke sign-in.
+    # Single transaction: leave groups, drop invitations, anonymize PII,
+    # revoke sign-in.
     await db.execute(delete(GroupMember).where(GroupMember.user_id == caller))
+    # Pending invitations are capabilities that never expire and are matched
+    # by email (invitations.my_invitations), so leaving them behind would
+    # hand group access to whoever registers this address next.
+    await db.execute(
+        delete(GroupInvitation).where(
+            GroupInvitation.status == "PENDING",
+            (GroupInvitation.invited_user_id == caller)
+            | (func.lower(GroupInvitation.email) == old_email),
+        )
+    )
+    # Answered invitations stay as group history, but must not keep the
+    # address on file — the users row is being anonymized for the same reason.
+    await db.execute(
+        update(GroupInvitation)
+        .where(func.lower(GroupInvitation.email) == old_email)
+        .values(email=f"deleted-{caller}{DELETED_EMAIL_SUFFIX}")
+    )
     user.email = f"deleted-{caller}{DELETED_EMAIL_SUFFIX}"
     user.full_name = "Deleted user"
     user.avatar_url = None

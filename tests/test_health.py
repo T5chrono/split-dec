@@ -27,3 +27,9 @@ async def test_health_db_gated_by_probe_key(client, db_engine, monkeypatch):
     assert wrong.status_code == 401
     ok = await client.get("/api/health/db", headers={"X-Health-Key": "s3cret"})
     assert ok.status_code == 200
+    # Non-ASCII must be rejected, not crash: secrets.compare_digest refuses
+    # non-ASCII str, so the comparison runs on bytes.
+    weird = await client.get(
+        "/api/health/db", headers={"X-Health-Key": "nöpe".encode("latin-1")}
+    )
+    assert weird.status_code == 401

@@ -1,4 +1,5 @@
 import os
+import secrets
 import time
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -56,7 +57,12 @@ async def health_db(
                 status_code=503,
                 detail="Database probe disabled: HEALTH_PROBE_KEY is not configured",
             )
-    elif x_health_key != expected:
+    # Constant-time: a plain `!=` leaks the shared secret one character at a
+    # time. Compared as bytes because compare_digest rejects non-ASCII str,
+    # and header values arrive latin-1 decoded.
+    elif not secrets.compare_digest(
+        (x_health_key or "").encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Missing or invalid X-Health-Key")
     started = time.perf_counter()
     await db.execute(text("SELECT 1"))

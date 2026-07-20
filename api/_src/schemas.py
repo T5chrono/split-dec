@@ -50,19 +50,23 @@ class InvitationCreate(BaseModel):
 
 
 class InvitationOut(BaseModel):
+    """No field here may depend on whether `email` belongs to a registered
+    account. `invited_user_id` did, which turned every group into an email
+    enumeration oracle; the frontend never needed it."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     group_id: uuid.UUID
     email: str
     status: str
-    invited_user_id: uuid.UUID | None
     created_at: datetime
 
 
 class InvitationCreatedOut(InvitationOut):
-    user_exists: bool
-    email_sent: bool
+    """Same shape as InvitationOut, and deliberately so — the earlier
+    `user_exists` / `email_sent` flags reported the invitee's registration
+    status and whether an email went out, both derived from it."""
 
 
 class MyInvitationOut(BaseModel):

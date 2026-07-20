@@ -13,12 +13,46 @@ from .models import Expense, Group, GroupMember, Settlement, User
 DELETED_EMAIL_SUFFIX = "@users.splitdec.invalid"
 
 
-async def get_active_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+# Row locks on the *user* serialize account deletion against the endpoints
+# that hand the caller a new membership. Deletion snapshots the caller's
+# groups, checks their balances and then removes the memberships; without
+# this, a group creation or invitation acceptance committing in between
+# leaves the deleted account a member of a group — and membership-gated
+# routes don't re-check liveness, so an unexpired JWT would keep working.
+#
+# "exclusive" is FOR NO KEY UPDATE, not FOR UPDATE, on purpose: FOR UPDATE
+# conflicts with the FOR KEY SHARE that Postgres takes on users rows for
+# every FK insert (expense_splits, settlements, ...). A concurrent expense
+# write already holds the group's shared lock while doing those inserts, so
+# FOR UPDATE here would deadlock against the group-lock protocol. FOR NO KEY
+# UPDATE still conflicts with the FOR SHARE taken below, which is all the
+# mutual exclusion this needs.
+UserLock = Literal["shared", "exclusive"] | None
+
+
+async def get_active_user(
+    db: AsyncSession, user_id: uuid.UUID, *, lock: UserLock = None
+) -> User:
     """401 for callers whose account no longer exists or has been deleted.
 
     Used by endpoints not already gated by group membership (membership rows
-    are removed on account deletion, so membership-guarded routes are safe)."""
-    user = await db.get(User, user_id)
+    are removed on account deletion, so membership-guarded routes are safe).
+
+    Pass `lock="shared"` before creating a membership and `lock="exclusive"`
+    in account deletion: the liveness check is then re-read under the lock,
+    so a membership either lands before the snapshot or is refused with 401.
+    """
+    if lock is None:
+        user = await db.get(User, user_id)
+    else:
+        user = (
+            await db.execute(
+                select(User)
+                .where(User.id == user_id)
+                .with_for_update(read=(lock == "shared"), key_share=(lock == "exclusive"))
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
     if user is None or user.email.endswith(DELETED_EMAIL_SUFFIX):
         raise HTTPException(status_code=401, detail="Account is no longer active")
     return user

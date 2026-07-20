@@ -198,10 +198,8 @@ const dict = {
     removeMemberTip: "Remove from group (must be fully settled)",
     searchFailed: "Search failed",
     invite: "Invite",
-    invitationSentInApp: "Invitation sent — they can accept it next time they open SplitDec.",
-    invitationEmailSent: "Invitation email sent.",
-    inviteeNotOnSplitDec:
-      "This person isn't on SplitDec yet. The invitation is saved and will greet them when they sign up with this email — you can also invite them yourself:",
+    invitationSent:
+      "Invitation saved. We've emailed this address; it will also be waiting in SplitDec for whoever signs in with it. You can send your own note too:",
     openEmailDraft: "Open email draft",
     pendingInvitations: "Pending invitations",
     cancelInvitation: "Cancel invitation",
@@ -398,11 +396,8 @@ const dict = {
     removeMemberTip: "Usuń z grupy (wymaga pełnego rozliczenia)",
     searchFailed: "Wyszukiwanie nie powiodło się",
     invite: "Zaproś",
-    invitationSentInApp:
-      "Zaproszenie wysłane — będzie można je zaakceptować przy następnym otwarciu SplitDec.",
-    invitationEmailSent: "E-mail z zaproszeniem został wysłany.",
-    inviteeNotOnSplitDec:
-      "Ta osoba nie korzysta jeszcze ze SplitDec. Zaproszenie zostało zapisane i pojawi się po rejestracji na ten adres — możesz też zaprosić ją samodzielnie:",
+    invitationSent:
+      "Zaproszenie zapisane. Wysłaliśmy e-mail na ten adres; będzie też czekać w SplitDec na osobę, która się na niego zaloguje. Możesz również napisać od siebie:",
     openEmailDraft: "Otwórz szkic e-maila",
     pendingInvitations: "Oczekujące zaproszenia",
     cancelInvitation: "Anuluj zaproszenie",
