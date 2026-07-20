@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +20,57 @@ from ..schemas import (
 
 router = APIRouter(tags=["invitations"])
 
+# Every invitation to a non-member triggers an outbound email, and cancelling
+# one frees its (group, email) slot immediately — so without quotas a single
+# account can drive an unbounded invite/cancel loop at any address and burn
+# the sending domain's reputation. Cancelled invitations are kept (status
+# CANCELLED) precisely so they still count against these windows.
+INVITE_WINDOW = timedelta(hours=24)
+INVITE_MAX_PER_INVITER = 20  # one person inviting, across all their groups
+INVITE_MAX_PER_RECIPIENT = 3  # one address, however many accounts aim at it
+INVITE_MAX_GLOBAL = 300  # whole-deployment brake on a compromised account
+
+
+def _window_cutoff(db: AsyncSession) -> datetime:
+    """Start of the rate-limit window, in the flavour the bound dialect
+    stores `created_at` as. Postgres keeps TIMESTAMPTZ; SQLite (tests) keeps
+    the naive UTC text CURRENT_TIMESTAMP produces, and comparing that against
+    an offset-aware bind parameter compares wrong."""
+    cutoff = datetime.now(timezone.utc) - INVITE_WINDOW
+    if db.get_bind().dialect.name == "sqlite":
+        return cutoff.replace(tzinfo=None)
+    return cutoff
+
+
+async def _enforce_invite_quota(db: AsyncSession, caller: uuid.UUID, email: str) -> None:
+    """429 once any of the three windows is exhausted. One round trip."""
+    by_caller, by_recipient, overall = (
+        await db.execute(
+            select(
+                func.sum(case((GroupInvitation.invited_by == caller, 1), else_=0)),
+                func.sum(case((GroupInvitation.email == email, 1), else_=0)),
+                func.count(),
+            ).where(GroupInvitation.created_at >= _window_cutoff(db))
+        )
+    ).one()
+    exceeded = (
+        (by_caller or 0) >= INVITE_MAX_PER_INVITER
+        or (by_recipient or 0) >= INVITE_MAX_PER_RECIPIENT
+        or overall >= INVITE_MAX_GLOBAL
+    )
+    if exceeded:
+        # Deliberately one message for all three limits: which limit was hit
+        # would tell the caller whether someone else has been inviting this
+        # address, and the global one would report deployment-wide activity.
+        raise HTTPException(
+            status_code=429,
+            detail="Too many invitations sent recently. Please try again later.",
+            headers={"Retry-After": str(int(INVITE_WINDOW.total_seconds()))},
+        )
+
 
 async def _get_pending_for_invitee(
-    db: AsyncSession, invitation_id: uuid.UUID, caller: uuid.UUID
+    db: AsyncSession, invitation_id: uuid.UUID, caller: uuid.UUID, *, lock_user: bool = False
 ) -> GroupInvitation:
     invitation = (
         await db.execute(
@@ -34,7 +82,9 @@ async def _get_pending_for_invitee(
     ).scalar_one_or_none()
     if invitation is None:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    me = await get_active_user(db, caller)  # deleted accounts must not respond
+    # Deleted accounts must not respond. Accepting also creates a membership,
+    # so that path holds the shared user lock against account deletion.
+    me = await get_active_user(db, caller, lock="shared" if lock_user else None)
     if invitation.invited_user_id != caller and invitation.email != me.email.lower():
         raise HTTPException(status_code=403, detail="This invitation is not addressed to you")
     return invitation
@@ -52,16 +102,35 @@ async def invite_to_group(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
+    """Invite an email address to the group.
+
+    The response is deliberately uniform: it never says whether the address
+    belongs to a registered account, and the endpoint behaves the same either
+    way (same email attempt, same latency, same stored row). Any member can
+    create a group and invite arbitrary addresses, so a response that varied
+    would be an account-registration oracle open to anyone — the same reason
+    GET /users/search was removed (see users.py).
+    """
     await require_membership(db, group_id, caller)
     email = body.email.lower()
 
-    invitee = (
-        await db.execute(select(User).where(func.lower(User.email) == email))
-    ).scalar_one_or_none()
-    if invitee is not None:
-        member = await db.get(GroupMember, (group_id, invitee.id))
-        if member is not None:
-            raise HTTPException(status_code=400, detail="User is already a member of this group")
+    # Whether the address is registered, and whether it is already in this
+    # group, in one round trip — so the registered and unregistered paths
+    # don't even differ by a query.
+    row = (
+        await db.execute(
+            select(User.id, GroupMember.user_id.label("member_id"))
+            .outerjoin(
+                GroupMember,
+                (GroupMember.user_id == User.id) & (GroupMember.group_id == group_id),
+            )
+            .where(func.lower(User.email) == email)
+        )
+    ).first()
+    invitee_id = row.id if row is not None else None
+    if row is not None and row.member_id is not None:
+        # Not a leak: the caller is a member and can already list members.
+        raise HTTPException(status_code=400, detail="User is already a member of this group")
 
     existing = (
         await db.execute(
@@ -73,29 +142,25 @@ async def invite_to_group(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        # Replay: no new row, no second email, no quota consumed.
         response.status_code = 200
-        return InvitationCreatedOut(
-            **InvitationOut.model_validate(existing).model_dump(),
-            user_exists=invitee is not None,
-            email_sent=False,
-        )
+        return InvitationCreatedOut.model_validate(existing)
+
+    await _enforce_invite_quota(db, caller, email)
 
     # Load everything the post-commit email needs BEFORE committing, so the
     # (up to 10s) provider call never holds a checked-out pooler connection
     # inside a fresh implicit transaction.
-    inviter_name: str | None = None
-    group_name: str | None = None
-    if invitee is None:
-        inviter = await db.get(User, caller)
-        group = await db.get(Group, group_id)
-        inviter_name = inviter.full_name or inviter.email
-        group_name = group.name
+    inviter = await db.get(User, caller)
+    group = await db.get(Group, group_id)
+    inviter_name = inviter.full_name or inviter.email
+    group_name = group.name
 
     invitation = GroupInvitation(
         group_id=group_id,
         email=email,
         invited_by=caller,
-        invited_user_id=invitee.id if invitee else None,
+        invited_user_id=invitee_id,
     )
     db.add(invitation)
     try:
@@ -116,24 +181,17 @@ async def invite_to_group(
         if existing is None:
             raise HTTPException(status_code=400, detail="Invitation could not be created")
         response.status_code = 200
-        return InvitationCreatedOut(
-            **InvitationOut.model_validate(existing).model_dump(),
-            user_exists=invitee is not None,
-            email_sent=False,
-        )
+        return InvitationCreatedOut.model_validate(existing)
 
-    email_sent = False
-    if invitee is None and inviter_name is not None and group_name is not None:
-        # Not on SplitDec yet: try to email them (best-effort; the frontend
-        # offers a mailto draft when this comes back False). The session's
-        # transaction is closed at this point — no connection is held.
-        email_sent = await send_invitation_email(email, inviter_name, group_name)
-
-    return InvitationCreatedOut(
-        **InvitationOut.model_validate(invitation).model_dump(),
-        user_exists=invitee is not None,
-        email_sent=email_sent,
+    # Emailed whether or not the address is registered: registered invitees
+    # get a nudge, and unregistered ones cannot be distinguished by the
+    # caller through latency or a missing side effect. Best-effort — the
+    # session's transaction is closed here, so no connection is held.
+    await send_invitation_email(
+        email, inviter_name, group_name, correlator=invitation.id
     )
+
+    return InvitationCreatedOut.model_validate(invitation)
 
 
 @router.get("/groups/{group_id}/invitations", response_model=list[InvitationOut])
@@ -172,7 +230,11 @@ async def cancel_invitation(
     if invitation is None:
         raise HTTPException(status_code=404, detail="Invitation not found")
     await require_membership(db, invitation.group_id, caller)
-    await db.delete(invitation)
+    # Marked, not deleted: a deleted row would let an invite/cancel loop
+    # reset the send quotas in _enforce_invite_quota. The partial unique
+    # index only covers PENDING rows, so re-inviting still works.
+    invitation.status = "CANCELLED"
+    invitation.responded_at = datetime.now(timezone.utc)
     await db.commit()
 
 
@@ -213,7 +275,7 @@ async def accept_invitation(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    invitation = await _get_pending_for_invitee(db, invitation_id, caller)
+    invitation = await _get_pending_for_invitee(db, invitation_id, caller, lock_user=True)
     if await db.get(GroupMember, (invitation.group_id, caller)) is None:
         db.add(GroupMember(group_id=invitation.group_id, user_id=caller))
     invitation.status = "ACCEPTED"

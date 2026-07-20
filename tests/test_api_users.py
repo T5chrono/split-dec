@@ -1,9 +1,11 @@
 """Account deletion (the search endpoint was removed on security review)."""
 
+import uuid
+
 from sqlalchemy import select, text
 
-from conftest import expense_payload, idem, make_user
-from _src.models import GroupMember, User
+from conftest import expense_payload, idem, make_group, make_user
+from _src.models import GroupInvitation, GroupMember, User
 
 
 async def test_search_endpoint_removed(client, two_user_group):
@@ -66,6 +68,70 @@ async def test_deleted_account_token_cannot_act(client, two_user_group, current_
     assert (await client.delete("/api/users/me")).status_code == 401
     # Membership-gated endpoints are already safe (memberships were removed).
     assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 403
+
+
+async def test_delete_account_drops_pending_invitations_addressed_to_it(
+    client, db_session, two_user_group, current_user
+):
+    """A pending invitation is an unexpiring capability matched by email, so
+    it must not survive to be inherited by the next holder of the address."""
+    g = two_user_group
+    carol = await make_user(db_session, "carol@test.dev", "Carol")
+    await client.post(
+        f"/api/groups/{g['group'].id}/invitations", json={"email": "carol@test.dev"}
+    )
+
+    current_user.id = carol.id
+    assert len((await client.get("/api/invitations/mine")).json()) == 1
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        rows = (await s.execute(select(GroupInvitation))).scalars().all()
+        assert rows == []
+
+    # Someone who registers carol@test.dev later starts with a clean slate.
+    reused = await make_user(db_session, "carol@test.dev", "Different Carol")
+    current_user.id = reused.id
+    assert (await client.get("/api/invitations/mine")).json() == []
+
+
+async def test_delete_account_anonymizes_answered_invitations(
+    client, db_session, two_user_group, current_user
+):
+    g = two_user_group
+    carol = await make_user(db_session, "carol@test.dev", "Carol")
+    inv = (
+        await client.post(
+            f"/api/groups/{g['group'].id}/invitations", json={"email": "carol@test.dev"}
+        )
+    ).json()
+
+    current_user.id = carol.id
+    assert (await client.post(f"/api/invitations/{inv['id']}/decline")).status_code == 204
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+        assert row.status == "DECLINED"  # history kept for the group
+        assert row.email == f"deleted-{carol.id}@users.splitdec.invalid"
+
+
+async def test_delete_account_removes_invitations_across_groups(
+    client, db_session, two_user_group, current_user
+):
+    g = two_user_group
+    dave = await make_user(db_session, "dave@test.dev", "Dave")
+    other = await make_group(db_session, g["bob"], name="Other")
+    for group_id in (g["group"].id, other.id):
+        current_user.id = g["alice"].id if group_id == g["group"].id else g["bob"].id
+        await client.post(
+            f"/api/groups/{group_id}/invitations", json={"email": "dave@test.dev"}
+        )
+
+    current_user.id = dave.id
+    assert (await client.delete("/api/users/me")).status_code == 204
+    async with db_session() as s:
+        assert (await s.execute(select(GroupInvitation))).scalars().all() == []
 
 
 async def test_delete_account_keeps_history_for_others(client, two_user_group, current_user):

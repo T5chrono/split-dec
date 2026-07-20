@@ -83,14 +83,12 @@ export interface Invitation {
   group_id: string;
   email: string;
   status: string;
-  invited_user_id: string | null;
   created_at: string;
 }
 
-export interface InvitationCreated extends Invitation {
-  user_exists: boolean;
-  email_sent: boolean;
-}
+// The API answers identically whether or not the address has an account, so
+// there is nothing extra to read back on create (see schemas.InvitationOut).
+export type InvitationCreated = Invitation;
 
 export interface MyInvitation {
   id: string;

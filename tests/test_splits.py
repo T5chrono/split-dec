@@ -103,6 +103,40 @@ class TestPercentage:
         )
         assert sum(shares.values()) == D("200.00")
 
+    def test_payer_share_never_goes_negative(self):
+        # Rounding up four shares of USD 0.02 overshoots by a cent; the payer
+        # is first in line to absorb it but owes 0, so the unit must come off
+        # someone who actually has one (splits are CHECK-constrained >= 0).
+        shares = compute_splits(
+            "PERCENTAGE", D("0.02"), "USD", U1,
+            [
+                si(U1, percentage=D("0")),
+                si(U2, percentage=D("33.33")),
+                si(U3, percentage=D("33.33")),
+                si(uuid.UUID(int=4), percentage=D("33.34")),
+            ],
+        )
+        assert sum(shares.values()) == D("0.02")
+        assert all(v >= 0 for v in shares.values())
+        assert shares[U1] == D("0.00")
+
+    def test_no_negative_shares_across_zero_percentage_cases(self):
+        users = [uuid.UUID(int=i) for i in range(1, 6)]
+        for cents in range(1, 60):
+            total = D(cents) / D(100)
+            shares = compute_splits(
+                "PERCENTAGE", total, "USD", users[0],
+                [
+                    si(users[0], percentage=D("0")),
+                    si(users[1], percentage=D("0")),
+                    si(users[2], percentage=D("33.33")),
+                    si(users[3], percentage=D("33.33")),
+                    si(users[4], percentage=D("33.34")),
+                ],
+            )
+            assert sum(shares.values()) == total, total
+            assert all(v >= 0 for v in shares.values()), (total, shares)
+
     def test_not_100_rejected(self):
         with pytest.raises(HTTPException) as e:
             compute_splits(

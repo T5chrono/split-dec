@@ -100,22 +100,18 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
           </p>
         )}
         {result && (
-          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
-            {result.user_exists ? (
-              <p className="text-emerald-700 dark:text-emerald-400">{t("invitationSentInApp")}</p>
-            ) : result.email_sent ? (
-              <p className="text-emerald-700 dark:text-emerald-400">{t("invitationEmailSent")}</p>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-slate-600 dark:text-slate-300">{t("inviteeNotOnSplitDec")}</p>
-                <a
-                  href={mailtoHref(result.email)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
-                >
-                  <Mail className="h-3.5 w-3.5" /> {t("openEmailDraft")}
-                </a>
-              </div>
-            )}
+          // One outcome for every address: the API deliberately doesn't say
+          // whether the invitee already has an account, so the UI can't
+          // either — that difference was an email enumeration oracle. The
+          // manual draft is always offered rather than only as a fallback.
+          <div className="mt-3 space-y-2 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+            <p className="text-emerald-700 dark:text-emerald-400">{t("invitationSent")}</p>
+            <a
+              href={mailtoHref(result.email)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
+            >
+              <Mail className="h-3.5 w-3.5" /> {t("openEmailDraft")}
+            </a>
           </div>
         )}
       </form>

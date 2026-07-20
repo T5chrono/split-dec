@@ -8,6 +8,12 @@ on:
 jobs:
   claude-review:
     runs-on: ubuntu-latest
+    # Already below the documented baseline (which is contents/issues write):
+    # the reviewer only reads the diff and posts a verdict, so `pull-requests:
+    # write` is the only write scope it gets. `id-token: write` (OIDC token
+    # exchange) and `actions: read` (reading CI results on the PR) are both
+    # required by claude-code-action — dropping them breaks the action, it
+    # doesn't harden it.
     permissions:
       contents: read
       pull-requests: write
@@ -15,11 +21,15 @@ jobs:
       id-token: write
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      # Pinned to commit SHAs, not tags: this job holds a Claude OAuth token
+      # and write access to pull requests, and a mutable tag lets whoever
+      # controls the action repo re-point it at new code without a PR here.
+      # Bump deliberately (the tag each SHA matched is in the trailing note).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 1
       - name: Run Claude Code Review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |

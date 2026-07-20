@@ -50,8 +50,12 @@ on `ENV=development`):
 - **Frontend**: Vite/React SPA at repo root. `vercel.json` rewrites `/api/*` to the function,
   everything else to `index.html`, 308-redirects `www.split-dec.app` to the apex (the apex must
   stay the serving origin — installed PWAs pin their origin and a redirecting apex strands their
-  service workers and breaks same-origin `/api` calls), and pins `regions: ["cdg1"]` — the
-  function is deliberately collocated with the database (Paris); moving it re-adds ~500ms/request.
+  service workers and breaks same-origin `/api` calls), pins `regions: ["cdg1"]` — the
+  function is deliberately collocated with the database (Paris); moving it re-adds
+  ~500ms/request — and sets the security headers (HSTS, nosniff, `frame-ancestors 'none'` +
+  `X-Frame-Options: DENY`, referrer and permissions policy), asserted by
+  `tests/test_vercel_config.py`. The CSP is intentionally framing-only; a `default-src`
+  policy would need the Supabase endpoints and the PWA's generated SW audited first.
 - **Backend**: FastAPI in `api/index.py` (single Vercel function; code lives in `api/_src/` —
   the underscore prevents Vercel treating those files as separate functions).
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
@@ -78,7 +82,8 @@ on `ENV=development`):
 - Split computation (`api/_src/splits.py`): banker's rounding at the currency's precision
   (`currencies.py`: JPY=0, most=2, KWD=3), remainder distributed one smallest unit at a time
   starting with the payer, so splits always sum exactly to the total. Splits are non-negative
-  (Pydantic + DB CHECK).
+  (Pydantic + DB CHECK) — when the remainder is *removed*, participants whose share is
+  already under one unit are skipped, or a 0%-share payer would go negative.
 - Balances (`api/_src/balances.py`): one CTE statement built with SQLAlchemy Core (portable to
   SQLite for tests), then per-currency greedy matching in Python. **Deviation from spec v6**:
   the spec's settlement signs (`+received −sent`) are inverted; the code uses `+sent −received`
@@ -93,6 +98,15 @@ query (`deps.py`: `require_membership`/`get_*_for_member` with `lock=`, `lock_gr
 for multi-group in sorted order). Any new balance-changing endpoint must join this protocol.
 SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
+A second, narrower lock covers *membership creation* against account deletion:
+`get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
+the caller a new membership (group create, invitation accept), `"exclusive"` in
+`delete_account`, taken **before** the group snapshot and held to commit. Otherwise a
+membership committed mid-deletion escapes both the balance check and the unscoped delete, and
+membership-gated routes don't re-check liveness. `"exclusive"` is `FOR NO KEY UPDATE`, not
+`FOR UPDATE`, on purpose: `FOR UPDATE` conflicts with the `FOR KEY SHARE` that FK inserts take
+on `users` rows, which deadlocks against an expense write already holding the group lock.
+
 ### API contracts worth knowing
 
 - `POST .../expenses` and `.../settlements` require an `Idempotency-Key` UUID header; replays
@@ -105,9 +119,18 @@ SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 - Membership is invitation-based (`group_invitations`, matched by lowercased email so people
   who sign up later see their invites). The direct add-member endpoint and `GET /users/search`
   were removed (the latter was an email-registration oracle — deliberate spec deviation).
+  **The invite endpoint must stay uniform for the same reason**: same response shape, same
+  email attempt, same latency whether or not the address has an account (anyone can create a
+  group and invite arbitrary addresses). Never reintroduce `user_exists`/`email_sent`/
+  `invited_user_id` in a response. Sending is quota-limited (per inviter / per recipient /
+  global, 24h) and cancelling sets `status='CANCELLED'` rather than deleting, so an
+  invite/cancel loop can't reset the quotas.
 - Account deletion anonymizes `public.users` (email gets `DELETED_EMAIL_SUFFIX` from `deps.py`)
   and deletes the `auth.users` row; endpoints not gated by membership must call
-  `get_active_user` because old JWTs stay valid until expiry.
+  `get_active_user` because old JWTs stay valid until expiry. It also drops pending
+  invitations addressed to that email (they are unexpiring capabilities matched by email —
+  the next holder of the address would inherit them) and anonymizes the address on answered
+  ones.
 - Expense splits rewrite pattern: clear the collection and `flush()` **before** assigning
   replacements, or `UNIQUE(expense_id, user_id)` fires (inserts flush before deletes).
 
