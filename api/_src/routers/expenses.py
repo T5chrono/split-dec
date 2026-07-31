@@ -40,15 +40,23 @@ async def list_expenses(
     group_id: uuid.UUID,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    paid_by: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
+    """`paid_by` narrows the page to one payer. It is deliberately not
+    validated against the membership: expenses of members who have since left
+    must stay filterable, and an unknown id simply matches nothing (the group
+    scope is what keeps other groups' rows out)."""
     await require_membership(db, group_id, caller)
+    query = select(Expense).where(
+        Expense.group_id == group_id, Expense.deleted_at.is_(None)
+    )
+    if paid_by is not None:
+        query = query.where(Expense.paid_by_user_id == paid_by)
     expenses = (
         await db.execute(
-            select(Expense)
-            .where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
-            .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+            query.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
             .limit(limit)
             .offset(offset)
         )

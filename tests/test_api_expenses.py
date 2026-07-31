@@ -222,6 +222,73 @@ async def test_pagination_and_ordering(client, two_user_group):
     assert len(rest.json()["items"]) == 1
 
 
+async def test_filter_by_payer(client, two_user_group):
+    g = two_user_group
+    for payer, description in ((g["alice"], "a1"), (g["bob"], "b1"), (g["alice"], "a2")):
+        await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(payer, [g["alice"], g["bob"]], description=description),
+            headers=idem(),
+        )
+
+    mine = await client.get(f"/api/groups/{g['group'].id}/expenses?paid_by={g['alice'].id}")
+    assert {e["description"] for e in mine.json()["items"]} == {"a1", "a2"}
+    assert all(e["paid_by_user_id"] == str(g["alice"].id) for e in mine.json()["items"])
+
+    theirs = await client.get(f"/api/groups/{g['group'].id}/expenses?paid_by={g['bob'].id}")
+    assert [e["description"] for e in theirs.json()["items"]] == ["b1"]
+
+    # Unfiltered still returns everything; an id nobody paid under matches none.
+    assert len((await client.get(f"/api/groups/{g['group'].id}/expenses")).json()["items"]) == 3
+    stranger = await client.get(
+        f"/api/groups/{g['group'].id}/expenses?paid_by={uuid.uuid4()}"
+    )
+    assert stranger.json()["items"] == []
+
+
+async def test_filter_by_payer_paginates_within_the_filter(client, two_user_group):
+    """The filter is applied before limit/offset — a page of Alice's expenses
+    must not be diluted by Bob's rows that only the unfiltered query sees."""
+    g = two_user_group
+    for i in range(3):
+        for payer in (g["alice"], g["bob"]):
+            await client.post(
+                f"/api/groups/{g['group'].id}/expenses",
+                json=expense_payload(
+                    payer, [g["alice"], g["bob"]], description=f"{payer.email}-{i}"
+                ),
+                headers=idem(),
+            )
+
+    page = await client.get(
+        f"/api/groups/{g['group'].id}/expenses?paid_by={g['alice'].id}&limit=2&offset=0"
+    )
+    rest = await client.get(
+        f"/api/groups/{g['group'].id}/expenses?paid_by={g['alice'].id}&limit=2&offset=2"
+    )
+    assert len(page.json()["items"]) == 2 and len(rest.json()["items"]) == 1
+    assert all(
+        e["paid_by_user_id"] == str(g["alice"].id)
+        for e in page.json()["items"] + rest.json()["items"]
+    )
+
+
+async def test_filter_by_payer_rejects_non_uuid(client, two_user_group):
+    g = two_user_group
+    r = await client.get(f"/api/groups/{g['group'].id}/expenses?paid_by=not-a-uuid")
+    assert r.status_code == 422
+
+
+async def test_filter_by_payer_still_requires_membership(client, two_user_group, db_session, current_user):
+    from conftest import make_user
+
+    g = two_user_group
+    outsider = await make_user(db_session, "peeker@test.dev")
+    current_user.id = outsider.id
+    r = await client.get(f"/api/groups/{g['group'].id}/expenses?paid_by={g['alice'].id}")
+    assert r.status_code == 403
+
+
 async def test_non_member_cannot_touch_expense(client, two_user_group, db_session, current_user):
     from conftest import make_user
 

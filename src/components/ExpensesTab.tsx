@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -12,6 +12,7 @@ import { formatMoney } from "../lib/currency";
 import { parseLocalISO } from "../lib/dates";
 import { expensesQuery, PAGE_SIZE } from "../lib/queries";
 import { useI18n } from "../lib/i18n";
+import { useAuth } from "../hooks/useAuth";
 import ExpenseFormModal from "./ExpenseFormModal";
 import ConfirmDialog from "./ConfirmDialog";
 import CategoryIconButton from "./CategoryIconButton";
@@ -20,7 +21,11 @@ import ListSkeleton from "./ListSkeleton";
 export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
   const { t, dateLocale } = useI18n();
+  const { session } = useAuth();
+  const myId = session?.user.id;
+  const payerFilterId = useId();
   const [offset, setOffset] = useState(0);
+  const [paidBy, setPaidBy] = useState<string | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<Expense | null>(null);
@@ -32,7 +37,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const monthFmt = new Intl.DateTimeFormat(dateLocale, { month: "short" });
 
   const { data, isLoading, error } = useQuery({
-    ...expensesQuery(group.id, offset),
+    ...expensesQuery(group.id, offset, paidBy),
     // Keep showing the current page while the next one loads.
     placeholderData: keepPreviousData,
   });
@@ -65,10 +70,36 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
 
   return (
     <div>
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <label
+            htmlFor={payerFilterId}
+            className="shrink-0 text-sm text-slate-500 dark:text-slate-400"
+          >
+            {t("filterByPayer")}
+          </label>
+          <select
+            id={payerFilterId}
+            value={paidBy ?? ""}
+            onChange={(ev) => {
+              // A different payer means a different result set — the current
+              // page index would point into the wrong list.
+              setPaidBy(ev.target.value || null);
+              setOffset(0);
+            }}
+            className="min-w-0 max-w-[45vw] rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-teal-500 sm:max-w-none dark:border-slate-600 dark:bg-slate-800"
+          >
+            <option value="">{t("everyone")}</option>
+            {group.members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id === myId ? t("you") : (m.full_name ?? m.email)}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           onClick={() => setAdding(true)}
-          className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+          className="flex shrink-0 items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
         >
           <Plus className="h-4 w-4" /> {t("addExpense")}
         </button>
@@ -84,7 +115,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
 
       {data && data.items.length === 0 && offset === 0 && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          {t("noExpenses")}
+          {paidBy ? t("noExpensesForMember") : t("noExpenses")}
         </div>
       )}
 
