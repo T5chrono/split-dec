@@ -219,6 +219,71 @@ describe("ExpenseFormModal — delete from edit view", () => {
   });
 });
 
+describe("ExpenseFormModal — category guessed from the description", () => {
+  // The picker's accessible name is its aria-label ("Category"), so the
+  // selected value has to be read off its text content.
+  const selectedCategory = () =>
+    screen.getByRole("button", { name: "Category" }).textContent;
+
+  it("follows the description while the category is untouched", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    const description = screen.getByPlaceholderText("Dinner at Nolio");
+
+    await user.type(description, "Parking");
+    expect(selectedCategory()).toBe("Parking");
+
+    // Refining the description re-guesses rather than sticking on the first hit.
+    await user.clear(description);
+    await user.type(description, "Pizza");
+    expect(selectedCategory()).toBe("Dining out");
+
+    await user.clear(description);
+    expect(selectedCategory()).toBe("General");
+  });
+
+  it("stops guessing once the user picks a category", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Category" }));
+    await user.click(screen.getByRole("option", { name: "Gifts" }));
+    expect(selectedCategory()).toBe("Gifts");
+
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Parking");
+    expect(selectedCategory()).toBe("Gifts");
+  });
+
+  it("leaves an already-categorized expense alone while editing", async () => {
+    const expense: Expense = {
+      id: "e2",
+      group_id: group.id,
+      description: "Hotel",
+      category: "Hotel",
+      split_type: "EQUAL",
+      total_amount: "100.0000",
+      currency: "PLN",
+      paid_by_user_id: alice.id,
+      expense_date: "2026-06-01",
+      created_at: "2026-06-01T00:00:00Z",
+      splits: [{ user_id: alice.id, owed_amount: "100.0000" }],
+    };
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={expense} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+
+    const description = screen.getByPlaceholderText("Dinner at Nolio");
+    await user.clear(description);
+    await user.type(description, "Parking");
+    expect(selectedCategory()).toBe("Hotel");
+  });
+});
+
 describe("ExpenseFormModal — accidental dismissal", () => {
   it("survives a click on the backdrop but still closes via the X button", async () => {
     const onClose = vi.fn();

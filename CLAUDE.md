@@ -143,6 +143,11 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   `staleTime` 60s but balances override to 15s (other members' actions change it).
 - Date-only strings (`expense_date`) must never round-trip through UTC
   (`new Date("YYYY-MM-DD")`/`toISOString` shift the calendar day) — use `src/lib/dates.ts`.
+- The expense form guesses the category from the description (`src/lib/categoryGuess.ts`):
+  a bilingual keyword-stem table, earliest matching word wins, longest stem wins within a
+  word. It stops the moment the user picks a category themselves, and never touches an
+  expense that already has one. Keep the table's category values in sync with
+  `CATEGORY_GROUPS` — a test asserts that.
 - All user-visible strings go through `src/lib/i18n.tsx` (EN + PL, including category names);
   money formatting is locale-aware via `setMoneyLocale`. Dark mode = Tailwind `dark:` variants
   on everything plus `color-scheme` on `.dark`.
