@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, MailPlus, Trash2, UserMinus, X } from "lucide-react";
+import { Mail, MailPlus, UserMinus, X } from "lucide-react";
 import { api } from "../lib/api";
 import type { GroupDetail, Invitation, InvitationCreated, User } from "../lib/types";
 import { useI18n } from "../lib/i18n";
@@ -13,12 +12,10 @@ const inputCls =
 
 export default function MembersTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [result, setResult] = useState<InvitationCreated | null>(null);
   const [removing, setRemoving] = useState<User | null>(null);
-  const [deletingGroup, setDeletingGroup] = useState(false);
 
   const { data: invitations } = useQuery({
     queryKey: ["invitations", group.id],
@@ -51,14 +48,6 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     onSuccess: () => {
       setRemoving(null);
       invalidate();
-    },
-  });
-
-  const deleteGroup = useMutation({
-    mutationFn: () => api.delete<void>(`/groups/${group.id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
-      navigate("/");
     },
   });
 
@@ -174,26 +163,6 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
         </p>
       )}
 
-      <div className="rounded-xl border border-red-200 p-4 dark:border-red-900">
-        <div className="mb-1 text-sm font-semibold text-red-600 dark:text-red-400">
-          {t("dangerZone")}
-        </div>
-        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-          {t("deleteGroupHint")}
-        </p>
-        <button
-          onClick={() => setDeletingGroup(true)}
-          className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-        >
-          <Trash2 className="h-4 w-4" /> {t("deleteGroup")}
-        </button>
-        {deleteGroup.error && (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            {(deleteGroup.error as Error).message}
-          </p>
-        )}
-      </div>
-
       {removing && (
         <ConfirmDialog
           title={t("removeMemberTitle")}
@@ -201,17 +170,6 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
           busy={removeMember.isPending}
           onConfirm={() => removeMember.mutate(removing.id)}
           onCancel={() => setRemoving(null)}
-        />
-      )}
-
-      {deletingGroup && (
-        <ConfirmDialog
-          title={t("deleteGroupTitle")}
-          message={`${group.name} — ${t("deleteGroupMsg")}`}
-          confirmLabel={t("deleteGroup")}
-          busy={deleteGroup.isPending}
-          onConfirm={() => deleteGroup.mutate()}
-          onCancel={() => setDeletingGroup(false)}
         />
       )}
     </div>

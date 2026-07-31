@@ -133,7 +133,11 @@ export default function GroupsPage() {
       </ul>
 
       {creating && (
-        <Modal title={t("newGroup")} onClose={() => setCreating(false)}>
+        <Modal
+          title={t("newGroup")}
+          onClose={() => setCreating(false)}
+          dismissOnBackdrop={false}
+        >
           <form
             onSubmit={(e) => {
               e.preventDefault();

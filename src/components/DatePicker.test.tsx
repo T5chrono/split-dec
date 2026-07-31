@@ -70,6 +70,22 @@ describe("DatePicker", () => {
     expect(screen.getByText(/March 2026/i)).toBeInTheDocument();
   });
 
+  it("starts the week on Monday", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DatePicker value="2026-06-15" onChange={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /June 15, 2026/i }));
+
+    const dialog = screen.getByRole("dialog");
+    // The first seven grid children are the weekday labels.
+    const headers = [...dialog.querySelector(".grid")!.children]
+      .slice(0, 7)
+      .map((el) => el.textContent);
+    expect(headers).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+    // June 1, 2026 is a Monday, so it must sit in the very first cell —
+    // a Sunday-first grid would open the month with May 31.
+    expect(dialog.querySelectorAll("[data-iso]")[0]).toHaveAttribute("data-iso", "2026-06-01");
+  });
+
   it("closes on Escape without firing onChange", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
