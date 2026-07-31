@@ -20,6 +20,7 @@ import {
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
+import { guessCategory } from "../lib/categoryGuess";
 import Modal from "./Modal";
 import DatePicker from "./DatePicker";
 import CategorySelect from "./CategorySelect";
@@ -64,6 +65,12 @@ export default function ExpenseFormModal({
 
   const [description, setDescription] = useState(expense?.description ?? "");
   const [category, setCategory] = useState(expense?.category ?? "General");
+  // Once the category is deliberately set — picked here, or carried in on an
+  // already-categorized expense — the description stops driving it. Guessing
+  // over someone's explicit choice would be worse than not guessing at all.
+  const [categoryPinned, setCategoryPinned] = useState(
+    expense != null && expense.category !== "General",
+  );
   const [totalAmount, setTotalAmount] = useState(
     expense ? trimAmount(expense.total_amount, expense.currency) : "",
   );
@@ -87,6 +94,18 @@ export default function ExpenseFormModal({
   const [percentages, setPercentages] = useState<Record<string, string>>(() =>
     expense ? derivePercentages(expense) : {},
   );
+
+  // Re-guessed on every keystroke rather than only on the first match, so the
+  // category keeps up as the description is refined ("park" → "party food").
+  const onDescriptionChange = (value: string) => {
+    setDescription(value);
+    if (!categoryPinned) setCategory(guessCategory(value) ?? "General");
+  };
+
+  const onCategoryChange = (value: string) => {
+    setCategory(value);
+    setCategoryPinned(true);
+  };
 
   const toggleParticipant = (id: string) => {
     const next = new Set(participants);
@@ -249,7 +268,7 @@ export default function ExpenseFormModal({
             autoFocus
             required
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => onDescriptionChange(e.target.value)}
             placeholder={t("descriptionPlaceholder")}
             className={inputCls}
           />
@@ -290,7 +309,7 @@ export default function ExpenseFormModal({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-sm font-medium">{t("category")}</label>
-            <CategorySelect value={category} onChange={setCategory} />
+            <CategorySelect value={category} onChange={onCategoryChange} />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">{t("paidBy")}</label>
