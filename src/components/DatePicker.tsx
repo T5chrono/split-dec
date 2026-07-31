@@ -12,7 +12,7 @@ export default function DatePicker({
   value: string; // YYYY-MM-DD
   onChange: (v: string) => void;
 }) {
-  const { t, dateLocale, lang } = useI18n();
+  const { t, dateLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const selected = parseLocalISO(value);
   const [view, setView] = useState({ y: selected.getFullYear(), m: selected.getMonth() });
@@ -43,7 +43,7 @@ export default function DatePicker({
       ?.focus();
   }, [open, focusIso]);
 
-  const weekStart = lang === "pl" ? 1 : 0; // Monday-first in Polish
+  const weekStart = 1; // Monday-first in every language (product decision)
   const monthFmt = new Intl.DateTimeFormat(dateLocale, { month: "long", year: "numeric" });
   const weekdayFmt = new Intl.DateTimeFormat(dateLocale, { weekday: "short" });
   const cellFmt = new Intl.DateTimeFormat(dateLocale, {

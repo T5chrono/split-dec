@@ -148,6 +148,11 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   on everything plus `color-scheme` on `.dark`.
 - Custom pickers (`DatePicker`, `CategorySelect`) are keyboard-accessible by prior review
   mandate; category list order is user-specified (General first, list opens at top).
+  `DatePicker` weeks start on Monday in every language (user-specified, not locale-derived).
+- `Modal` dismisses on a backdrop click by default; anything holding unsaved input
+  (expense/settlement forms, group create, group settings) passes `dismissOnBackdrop={false}`
+  so a stray click can't discard it. Renaming and deleting a group live in
+  `GroupSettingsModal` behind the gear next to the group title — not in the members tab.
 - `vitest.config.ts` is separate from `vite.config.ts` on purpose (the PWA plugin must not run
   in tests). `.env.test` holds dummy Supabase values so importing `useAuth` doesn't throw;
   tests mock `../lib/api` / `../lib/supabase` per-file.

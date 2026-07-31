@@ -17,6 +17,7 @@ const dict = {
     // common
     loading: "Loading…",
     cancel: "Cancel",
+    close: "Close",
     delete: "Delete",
     edit: "Edit",
     saving: "Saving…",
@@ -136,6 +137,8 @@ const dict = {
     createGroup: "Create group",
     creating: "Creating…",
     groupNamePlaceholder: "Trip to Zakopane",
+    groupSettings: "Group settings",
+    groupName: "Group name",
     // group page tabs
     tabExpenses: "Expenses",
     tabBalances: "Balances",
@@ -210,7 +213,6 @@ const dict = {
     inviteEmailBody:
       'I\'d like to split expenses with you in the group "{group}" on SplitDec. Sign in using this email address and the invitation will be waiting for you.',
     deleteExpense: "Delete expense",
-    renameGroup: "Rename group",
     save: "Save",
     youOwe: "you pay",
     owedToYou: "you receive",
@@ -224,6 +226,7 @@ const dict = {
   pl: {
     loading: "Wczytywanie…",
     cancel: "Anuluj",
+    close: "Zamknij",
     delete: "Usuń",
     edit: "Edytuj",
     saving: "Zapisywanie…",
@@ -339,6 +342,8 @@ const dict = {
     createGroup: "Utwórz grupę",
     creating: "Tworzenie…",
     groupNamePlaceholder: "Wyjazd do Zakopanego",
+    groupSettings: "Ustawienia grupy",
+    groupName: "Nazwa grupy",
     tabExpenses: "Wydatki",
     tabBalances: "Salda",
     tabSettlements: "Rozliczenia",
@@ -408,7 +413,6 @@ const dict = {
     inviteEmailBody:
       "Chcę dzielić z Tobą wydatki w grupie „{group}” w SplitDec. Zaloguj się, używając tego adresu e-mail, a zaproszenie będzie na Ciebie czekać.",
     deleteExpense: "Usuń wydatek",
-    renameGroup: "Zmień nazwę grupy",
     save: "Zapisz",
     youOwe: "płacisz",
     owedToYou: "otrzymujesz",

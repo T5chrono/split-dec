@@ -74,7 +74,11 @@ export default function SettleUpModal({
   };
 
   return (
-    <Modal title={editing ? t("editSettlement") : t("settleUp")} onClose={onClose}>
+    <Modal
+      title={editing ? t("editSettlement") : t("settleUp")}
+      onClose={onClose}
+      dismissOnBackdrop={false}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();

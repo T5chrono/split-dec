@@ -231,7 +231,11 @@ export default function ExpenseFormModal({
   const pctSum = Math.round((filledPctSum + (autoPct ?? 0)) * 100) / 100;
 
   return (
-    <Modal title={expense ? t("editExpense") : t("addExpense")} onClose={onClose}>
+    <Modal
+      title={expense ? t("editExpense") : t("addExpense")}
+      onClose={onClose}
+      dismissOnBackdrop={false}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();

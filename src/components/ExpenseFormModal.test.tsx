@@ -219,6 +219,22 @@ describe("ExpenseFormModal — delete from edit view", () => {
   });
 });
 
+describe("ExpenseFormModal — accidental dismissal", () => {
+  it("survives a click on the backdrop but still closes via the X button", async () => {
+    const onClose = vi.fn();
+    const { container } = renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={onClose} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    // A stray click outside the panel must not discard a half-filled form.
+    await user.click(container.querySelector(".fixed")!);
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("ExpenseFormModal — metadata-only edits never resubmit financials", () => {
   const percentageExpense: Expense = {
     id: "e9",
