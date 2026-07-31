@@ -36,7 +36,7 @@ rate limit to 30/hour.
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
-## 3. Custom domain for the app — ◐ apex is canonical, one routing gap
+## 3. Custom domain for the app — ◐ apex is canonical and routing is closed
 - ☑ **`https://split-dec.app` (apex) is the primary domain.** A brief
   www-primary configuration (2026-07-18) caused a production incident:
   service workers registered on the apex kept serving the app shell from
@@ -51,8 +51,9 @@ rate limit to 30/hour.
 - ☑ **Supabase Auth → URL Configuration: Site URL fixed** to
   `https://split-dec.app` (was `https://split-dec.vercel.app`) — confirmed
   by probing the verify-endpoint fallback, which now lands on the apex.
-- ◐ **Fixed pending deploy — the www→apex redirect did not fire for the bare
-  root `/`, and it was a full outage, not a cosmetic one.** `/` served the
+- ☑ **Fixed and verified in production (PR #26, merged 2026-07-31) — the
+  www→apex redirect did not fire for the bare root `/`, and it was a full
+  outage, not a cosmetic one.** `/` served the
   SPA shell from www (200) while *every* other path — `/api/*`, `/sw.js`,
   `/manifest.webmanifest` — 308'd to the apex. So the app booted on www and
   its same-origin `/api/*` calls became a cross-origin hop; requests carry an
@@ -69,11 +70,14 @@ rate limit to 30/hour.
   - Safe to redirect www because nothing was ever *installed* from it:
     `/sw.js` 308s cross-origin, so service-worker registration always failed
     there. No www-pinned PWA exists to strand (unlike the apex on 07-18).
-  - ☐ Verify on production after merge: `curl -sSI https://www.split-dec.app/`
-    must return 308 to the apex. If Vercel still short-circuits `/`, set the
-    redirect at the domain level instead (Settings → Domains →
-    `www.split-dec.app` → redirect to `split-dec.app`); it previously did not
-    persist, so re-check it afterwards.
+  - ☑ Verified in production post-deploy: `https://www.split-dec.app/` now
+    308s to the apex (query string preserved), as do `/groups/*`, `/api/*`
+    and `/sw.js`; a real browser lands on `https://split-dec.app/` in one hop
+    with no console errors. `split-dec.vercel.app` is untouched and still
+    serves its own API same-origin. The domain-level redirect (Settings →
+    Domains) was therefore not needed — `vercel.json` alone covers `/`.
+    Note when re-probing: Vercel's CDN caches the old root response, so a
+    stale `200` right after deploy is not proof of failure — cache-bust.
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
   change needed).
