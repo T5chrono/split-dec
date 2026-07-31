@@ -34,9 +34,33 @@ def test_security_headers_applied_to_every_response():
     assert headers.get("Referrer-Policy")
 
 
+def _www_redirects() -> list[dict]:
+    return [
+        r
+        for r in CONFIG["redirects"]
+        if any(h["type"] == "host" and h["value"] == "www.split-dec.app" for h in r.get("has", []))
+    ]
+
+
 def test_www_still_redirects_to_apex():
     # Installed PWAs pin their origin: the apex must stay the serving origin.
-    redirect = CONFIG["redirects"][0]
-    assert redirect["has"][0]["value"] == "www.split-dec.app"
-    assert redirect["destination"].startswith("https://split-dec.app")
-    assert redirect["permanent"] is True
+    redirects = _www_redirects()
+    assert redirects
+    for redirect in redirects:
+        assert redirect["destination"].startswith("https://split-dec.app")
+        assert redirect["permanent"] is True
+
+
+def test_www_redirect_covers_the_bare_root():
+    """`/:path*` alone does not match `/` on Vercel's router.
+
+    That gap served the SPA shell from www while every other path — including
+    `/api/*` — 308'd to the apex, so the app booted on an origin whose API
+    calls were a cross-origin hop the CORS-less API refuses. Users typing the
+    domain landed there, logged in, and got "Failed to fetch". The explicit
+    root rule must stay, and must stay ahead of the catch-all.
+    """
+    sources = [r["source"] for r in _www_redirects()]
+    assert "/" in sources
+    if "/:path*" in sources:
+        assert sources.index("/") < sources.index("/:path*")

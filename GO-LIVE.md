@@ -51,19 +51,29 @@ rate limit to 30/hour.
 - ☑ **Supabase Auth → URL Configuration: Site URL fixed** to
   `https://split-dec.app` (was `https://split-dec.vercel.app`) — confirmed
   by probing the verify-endpoint fallback, which now lands on the apex.
-- ☐ **Known bug: the `vercel.json` www→apex redirect does not fire for the
-  bare root `/`.** Confirmed with a real browser + cache-busting query
-  string (not a caching artifact): `www.split-dec.app/groups/abc` correctly
-  308s to the apex, but `www.split-dec.app/` (and `/?query`) serves 200
-  directly from www instead of redirecting. Likely a Vercel routing-
-  precedence quirk specific to the exact root path (framework/static-file
-  handling may be short-circuiting the redirect check for `/` only) rather
-  than a `vercel.json` syntax issue — the `has: [{type: "host", ...}]` rule
-  itself is proven correct by the nested-path case. Needs investigation
-  (try an explicit `/` redirect rule ahead of the `/:path*` one, or check
-  Vercel's routing debug output) — low severity since anyone landing on
-  `www.split-dec.app/` still gets a fully working app, just on the
-  non-canonical origin.
+- ◐ **Fixed pending deploy — the www→apex redirect did not fire for the bare
+  root `/`, and it was a full outage, not a cosmetic one.** `/` served the
+  SPA shell from www (200) while *every* other path — `/api/*`, `/sw.js`,
+  `/manifest.webmanifest` — 308'd to the apex. So the app booted on www and
+  its same-origin `/api/*` calls became a cross-origin hop; requests carry an
+  `Authorization` header, so they preflight, and a redirected preflight is a
+  hard network error. Anyone typing the domain and getting autocompleted to
+  www loaded the UI, logged in, and hit "Failed to fetch" on the first data
+  request (reported by a tester, 2026-07-31). The earlier "low severity,
+  still gets a fully working app" note was wrong.
+  - ☑ Explicit `/` redirect rule added ahead of `/:path*` in `vercel.json`
+    (`/:path*` does not match the bare root on Vercel's router), asserted by
+    `tests/test_vercel_config.py::test_www_redirect_covers_the_bare_root`.
+  - ☑ Client-side backstop `src/lib/canonicalHost.ts`, called from
+    `main.tsx` before the app mounts, in case edge routing still misses `/`.
+  - Safe to redirect www because nothing was ever *installed* from it:
+    `/sw.js` 308s cross-origin, so service-worker registration always failed
+    there. No www-pinned PWA exists to strand (unlike the apex on 07-18).
+  - ☐ Verify on production after merge: `curl -sSI https://www.split-dec.app/`
+    must return 308 to the apex. If Vercel still short-circuits `/`, set the
+    redirect at the domain level instead (Settings → Domains →
+    `www.split-dec.app` → redirect to `split-dec.app`); it previously did not
+    persist, so re-check it afterwards.
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
   change needed).
