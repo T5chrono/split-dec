@@ -12,6 +12,7 @@ vi.mock("../lib/api", async (importOriginal) => {
 });
 
 const alice = { id: "alice-id", email: "alice@test.dev", full_name: "Alice", avatar_url: null };
+const bob = { id: "bob-id", email: "bob@test.dev", full_name: "Bob", avatar_url: null };
 const group: GroupDetail = {
   id: "group-id",
   name: "Trip",
@@ -20,7 +21,7 @@ const group: GroupDetail = {
   members: [alice],
 };
 
-function expense(id: string, description: string): Expense {
+function expense(id: string, description: string, payer = alice.id): Expense {
   return {
     id,
     group_id: group.id,
@@ -29,7 +30,7 @@ function expense(id: string, description: string): Expense {
     split_type: "EQUAL",
     total_amount: "10.0000",
     currency: "PLN",
-    paid_by_user_id: alice.id,
+    paid_by_user_id: payer,
     expense_date: "2026-06-01",
     created_at: "2026-06-01T00:00:00Z",
     splits: [{ user_id: alice.id, owed_amount: "10.0000" }],
@@ -138,6 +139,93 @@ describe("ExpensesTab — optimistic delete", () => {
   });
 });
 
+describe("ExpensesTab — filter by payer", () => {
+  const twoMemberGroup: GroupDetail = { ...group, members: [alice, bob] };
+  const all = [
+    expense("e1", "Groceries", alice.id),
+    expense("e2", "Cinema", bob.id),
+  ];
+
+  /** Serves the filtered page the server would: `paid_by` is applied before
+   *  limit/offset, so the client never filters a page itself. */
+  function serve(items: Expense[] = all) {
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      const payer = params.get("paid_by");
+      const offset = Number(params.get("offset") ?? 0);
+      const matching = payer ? items.filter((e) => e.paid_by_user_id === payer) : items;
+      return {
+        items: matching.slice(offset, offset + 20),
+        limit: 20,
+        offset,
+      } satisfies ExpenseList;
+    });
+  }
+
+  const lastGetUrl = () =>
+    vi.mocked(api.get).mock.calls[vi.mocked(api.get).mock.calls.length - 1][0] as string;
+
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+  });
+
+  it("defaults to every member and sends no paid_by", async () => {
+    serve();
+    renderWithProviders(<ExpensesTab group={twoMemberGroup} />);
+    await screen.findByText("Groceries");
+
+    expect(screen.getByText("Cinema")).toBeInTheDocument();
+    expect(screen.getByLabelText("Paid by")).toHaveValue("");
+    expect(lastGetUrl()).not.toContain("paid_by");
+  });
+
+  it("requests only the selected member's expenses", async () => {
+    serve();
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={twoMemberGroup} />);
+    await screen.findByText("Groceries");
+
+    await user.selectOptions(screen.getByLabelText("Paid by"), bob.id);
+
+    await waitFor(() => expect(lastGetUrl()).toContain(`paid_by=${bob.id}`));
+    await waitFor(() => expect(screen.queryByText("Groceries")).not.toBeInTheDocument());
+    expect(screen.getByText("Cinema")).toBeInTheDocument();
+  });
+
+  it("goes back to the first page when the filter changes", async () => {
+    // A full page so the "Older" button is enabled and offset can advance.
+    const page = Array.from({ length: 25 }, (_, i) =>
+      expense(`e${i}`, `Item ${i}`, i === 24 ? bob.id : alice.id),
+    );
+    serve(page);
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={twoMemberGroup} />);
+    await screen.findByText("Item 0");
+
+    await user.click(screen.getByRole("button", { name: /older/i }));
+    await waitFor(() => expect(lastGetUrl()).toContain("offset=20"));
+
+    await user.selectOptions(screen.getByLabelText("Paid by"), bob.id);
+
+    // Page 2 of everyone's expenses is not page 2 of Bob's — offset resets.
+    await waitFor(() => expect(lastGetUrl()).toContain("offset=0"));
+    expect(lastGetUrl()).toContain(`paid_by=${bob.id}`);
+    expect(await screen.findByText("Item 24")).toBeInTheDocument();
+  });
+
+  it("shows a filter-specific empty state instead of the onboarding one", async () => {
+    serve([expense("e1", "Groceries", alice.id)]);
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={twoMemberGroup} />);
+    await screen.findByText("Groceries");
+
+    await user.selectOptions(screen.getByLabelText("Paid by"), bob.id);
+
+    expect(await screen.findByText("No expenses paid by this member.")).toBeInTheDocument();
+    expect(screen.queryByText(/Add the first one/)).not.toBeInTheDocument();
+  });
+});
+
 describe("ExpensesTab — row interactions", () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({
@@ -172,8 +260,9 @@ describe("ExpensesTab — row interactions", () => {
     // Quick picker open, edit view NOT open.
     expect(screen.getByRole("listbox")).toBeInTheDocument();
     expect(screen.queryByText("Edit expense")).not.toBeInTheDocument();
-    // General leads the list (first option at the top).
-    const options = screen.getAllByRole("option");
+    // General leads the list (first option at the top). Scoped to the picker:
+    // the payer filter is a native <select> and contributes options too.
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
     expect(options[0]).toHaveTextContent("General");
   });
 
