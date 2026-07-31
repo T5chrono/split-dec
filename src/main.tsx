@@ -5,7 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { AuthProvider } from "./hooks/useAuth";
 import { I18nProvider } from "./lib/i18n";
+import { enforceCanonicalOrigin } from "./lib/canonicalHost";
 import "./index.css";
+
+// Before anything mounts: on a non-canonical origin the API is a cross-origin
+// hop away and every request fails, so leave without firing one.
+const leaving = enforceCanonicalOrigin();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -16,16 +21,18 @@ const queryClient = new QueryClient({
   },
 });
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <AuthProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </AuthProvider>
-      </I18nProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+if (!leaving) {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <AuthProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </AuthProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
