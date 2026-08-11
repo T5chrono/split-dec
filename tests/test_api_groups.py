@@ -222,6 +222,55 @@ async def test_balances_shape_and_math(client, two_user_group):
     }
 
 
+async def test_totals_per_currency_ignore_settlements_and_soft_deletes(
+    client, two_user_group
+):
+    g = two_user_group
+    gid = g["group"].id
+    assert (await client.get(f"/api/groups/{gid}/totals")).json() == []
+
+    e = await client.post(
+        f"/api/groups/{gid}/expenses",
+        json=expense_payload(g["alice"], [g["alice"], g["bob"]], total_amount="90.00"),
+        headers=idem(),
+    )
+    await client.post(
+        f"/api/groups/{gid}/expenses",
+        json=expense_payload(
+            g["bob"], [g["alice"]], total_amount="5.00", currency="EUR",
+            splits=[{"user_id": str(g["alice"].id)}],
+        ),
+        headers=idem(),
+    )
+    # Moving money between members is not spending.
+    await client.post(
+        f"/api/groups/{gid}/settlements",
+        json={
+            "paid_by_user_id": str(g["bob"].id),
+            "paid_to_user_id": str(g["alice"].id),
+            "amount": "20.00",
+            "currency": "PLN",
+        },
+        headers=idem(),
+    )
+    assert (await client.get(f"/api/groups/{gid}/totals")).json() == [
+        {"currency": "EUR", "total": "5.0000"},
+        {"currency": "PLN", "total": "90.0000"},
+    ]
+
+    await client.delete(f"/api/expenses/{e.json()['id']}")
+    assert (await client.get(f"/api/groups/{gid}/totals")).json() == [
+        {"currency": "EUR", "total": "5.0000"},
+    ]
+
+
+async def test_totals_403_for_non_member(client, db_session, current_user, two_user_group):
+    outsider = await make_user(db_session, "totals-outsider@test.dev")
+    current_user.id = outsider.id
+    r = await client.get(f"/api/groups/{two_user_group['group'].id}/totals")
+    assert r.status_code == 403
+
+
 async def test_balances_include_settlements_and_soft_deletes(client, two_user_group):
     g = two_user_group
     await client.post(

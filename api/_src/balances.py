@@ -88,6 +88,26 @@ async def net_balances(
     return buckets
 
 
+async def expense_totals(db: AsyncSession, group_id: uuid.UUID) -> dict[str, Decimal]:
+    """Total spent per currency: the sum of the group's live expenses.
+
+    Settlements are excluded on purpose — they move money between members
+    without adding to what the group spent. Currencies are never summed
+    together (no exchange rates anywhere in this codebase)."""
+    rows = (
+        await db.execute(
+            select(Expense.currency, func.sum(Expense.total_amount))
+            .where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
+            .group_by(Expense.currency)
+            .order_by(Expense.currency)
+        )
+    ).all()
+    return {
+        currency: total if isinstance(total, Decimal) else Decimal(str(total))
+        for currency, total in rows
+    }
+
+
 def greedy_simplify(
     buckets: dict[str, dict[uuid.UUID, Decimal]],
 ) -> dict[str, list[dict]]:

@@ -61,6 +61,13 @@ export interface BalanceTransfer {
 
 export type Balances = Record<string, BalanceTransfer[]>;
 
+/** Total spent by the group, one entry per currency (never summed across
+ *  currencies — there are no exchange rates in the app). */
+export interface CurrencyTotal {
+  currency: string;
+  total: string;
+}
+
 export interface SplitInput {
   user_id: string;
   amount?: string;

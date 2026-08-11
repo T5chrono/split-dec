@@ -8,7 +8,9 @@ import {
   groupDetailQuery,
   groupInvitationsQuery,
   settlementsQuery,
+  totalsQuery,
 } from "../lib/queries";
+import { formatMoney } from "../lib/currency";
 import { useI18n, type TKey } from "../lib/i18n";
 import ExpensesTab from "../components/ExpensesTab";
 import BalancesTab from "../components/BalancesTab";
@@ -35,6 +37,8 @@ export default function GroupPage() {
     ...groupDetailQuery(groupId!),
     enabled: !!groupId,
   });
+
+  const { data: totals } = useQuery({ ...totalsQuery(groupId!), enabled: !!groupId });
 
   // Warm every tab's data in parallel so switching tabs is instant.
   useEffect(() => {
@@ -70,6 +74,16 @@ export default function GroupPage() {
       </h1>
       <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
         {membersLabel(group.members.length)}
+        {totals && totals.length > 0 && (
+          <>
+            {" · "}
+            {t("totalSpent")}:{" "}
+            {/* One entry per currency, joined — never summed (no exchange rates). */}
+            <span className="font-semibold text-slate-700 dark:text-slate-200">
+              {totals.map((tt) => formatMoney(tt.total, tt.currency)).join(" · ")}
+            </span>
+          </>
+        )}
       </p>
 
       <div className="mb-5 flex gap-1 rounded-lg bg-slate-200/60 p-1 dark:bg-slate-800">

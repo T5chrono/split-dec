@@ -139,6 +139,7 @@ const dict = {
     groupNamePlaceholder: "Trip to Zakopane",
     groupSettings: "Group settings",
     groupName: "Group name",
+    totalSpent: "Total spent",
     // group page tabs
     tabExpenses: "Expenses",
     tabBalances: "Balances",
@@ -347,6 +348,7 @@ const dict = {
     groupNamePlaceholder: "Wyjazd do Zakopanego",
     groupSettings: "Ustawienia grupy",
     groupName: "Nazwa grupy",
+    totalSpent: "Łącznie wydano",
     tabExpenses: "Wydatki",
     tabBalances: "Salda",
     tabSettlements: "Rozliczenia",
