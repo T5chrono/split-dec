@@ -190,6 +190,18 @@ class SettlementOut(BaseModel):
 
 # ---------- Balances ----------
 
+class CurrencyTotalOut(BaseModel):
+    """One currency bucket of the group's total spend (never summed across
+    currencies — the app holds no exchange rates)."""
+
+    currency: str
+    total: Decimal
+
+    @field_serializer("total")
+    def _ser_total(self, v: Decimal) -> str:
+        return money(v)
+
+
 class BalanceTransfer(BaseModel):
     from_user_id: uuid.UUID
     to_user_id: uuid.UUID

@@ -4,6 +4,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
   Balances,
+  CurrencyTotal,
   ExpenseList,
   Group,
   GroupDetail,
@@ -47,6 +48,15 @@ export const balancesQuery = (groupId: string) =>
     queryFn: () => api.get<Balances>(`/groups/${groupId}/balances`),
     // Other members' expenses/settlements change this view and there is no
     // cross-client invalidation — keep it fresher than the global 60s.
+    staleTime: 15_000,
+  });
+
+export const totalsQuery = (groupId: string) =>
+  queryOptions({
+    queryKey: ["totals", groupId],
+    queryFn: () => api.get<CurrencyTotal[]>(`/groups/${groupId}/totals`),
+    // Sits in the group header alongside the balances tab and moves for the
+    // same reason (other members adding expenses) — same freshness.
     staleTime: 15_000,
   });
 

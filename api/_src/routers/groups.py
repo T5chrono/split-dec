@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
-from ..balances import greedy_simplify, net_balances
+from ..balances import expense_totals, greedy_simplify, net_balances
 from ..db import get_db
 from ..deps import get_active_user, raise_unless_member, require_membership
 from ..models import (
@@ -19,6 +19,7 @@ from ..models import (
 )
 from ..schemas import (
     BalanceTransfer,
+    CurrencyTotalOut,
     GroupCreate,
     GroupDetailOut,
     GroupOut,
@@ -173,6 +174,21 @@ async def remove_member(
         )
     await db.delete(member)
     await db.commit()
+
+
+@router.get("/{group_id}/totals", response_model=list[CurrencyTotalOut])
+async def get_totals(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    caller: uuid.UUID = Depends(verify_jwt),
+):
+    """How much the group has spent, one entry per currency used."""
+    await require_membership(db, group_id, caller)
+    totals = await expense_totals(db, group_id)
+    return [
+        CurrencyTotalOut(currency=currency, total=total)
+        for currency, total in totals.items()
+    ]
 
 
 @router.get("/{group_id}/balances", response_model=dict[str, list[BalanceTransfer]])

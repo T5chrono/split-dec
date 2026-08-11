@@ -45,6 +45,9 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["expenses", group.id] });
     queryClient.invalidateQueries({ queryKey: ["balances", group.id] });
+    // Group-header total: expense writes are the only thing that moves it
+    // (settlements shuffle money between members, they aren't spending).
+    queryClient.invalidateQueries({ queryKey: ["totals", group.id] });
   };
 
   const deleteExpense = useMutation({
