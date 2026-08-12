@@ -117,6 +117,11 @@ const dict = {
     termsOfService: "Terms of Service",
     lastUpdated: "Last updated:",
     backToApp: "Back to SplitDec",
+    // not found
+    notFoundTitle: "Page not found",
+    notFoundBody:
+      "That link doesn't lead anywhere. The group may have been deleted, or the address may be mistyped.",
+    backToGroups: "Back to your groups",
     // header / account
     signOut: "Sign out",
     account: "Account",
@@ -332,6 +337,10 @@ const dict = {
     termsOfService: "Regulamin",
     lastUpdated: "Ostatnia aktualizacja:",
     backToApp: "Powrót do SplitDec",
+    notFoundTitle: "Nie znaleziono strony",
+    notFoundBody:
+      "Ten link donikąd nie prowadzi. Grupa mogła zostać usunięta albo adres zawiera literówkę.",
+    backToGroups: "Wróć do swoich grup",
     signOut: "Wyloguj się",
     account: "Konto",
     signedInAs: "Zalogowano jako",

@@ -9,6 +9,7 @@ import { useI18n } from "../lib/i18n";
 import SettleUpModal from "./SettleUpModal";
 import ConfirmDialog from "./ConfirmDialog";
 import Spinner from "./Spinner";
+import EmptyState from "./EmptyState";
 
 export default function SettlementsTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
@@ -65,10 +66,7 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
       )}
 
       {data && data.length === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          <HandCoins className="mx-auto mb-3 h-8 w-8 text-slate-400 dark:text-slate-500" />
-          {t("noPayments")}
-        </div>
+        <EmptyState icon={HandCoins} message={t("noPayments")} />
       )}
 
       <ul className="space-y-2">

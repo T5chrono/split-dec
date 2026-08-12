@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, ReceiptText } from "lucide-react";
 import { api } from "../lib/api";
 import type { Expense, ExpenseList, GroupDetail } from "../lib/types";
 import { formatMoney } from "../lib/currency";
@@ -17,6 +17,7 @@ import ExpenseFormModal from "./ExpenseFormModal";
 import ConfirmDialog from "./ConfirmDialog";
 import CategoryIconButton from "./CategoryIconButton";
 import ListSkeleton from "./ListSkeleton";
+import EmptyState from "./EmptyState";
 
 export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient();
@@ -117,9 +118,15 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
       )}
 
       {data && data.items.length === 0 && offset === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          {paidBy ? t("noExpensesForMember") : t("noExpenses")}
-        </div>
+        <EmptyState
+          icon={ReceiptText}
+          message={paidBy ? t("noExpensesForMember") : t("noExpenses")}
+          // No CTA while a payer filter is on: the list is empty because of
+          // the filter, so "add an expense" answers a question nobody asked.
+          action={
+            paidBy ? undefined : { label: t("addExpense"), onClick: () => setAdding(true) }
+          }
+        />
       )}
 
       <ul className="space-y-2">

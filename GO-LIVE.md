@@ -250,7 +250,13 @@ Home Screen"). To turn it into a Play Store app:
     ~50 that shouldn't bite, and the failure is a temporary 429, not data loss.
   - The 429 `detail` reaches the UI as-is (English only), like the existing
     invitation quota message. Worth localizing if these start firing.
-- Empty-state polish and a 404 page.
+- ☑ **Empty-state polish and a 404 page.** Unmatched signed-in routes render
+  `NotFoundPage` instead of redirecting to `/` — a stale or mistyped link used
+  to look like it had worked. Signed-out unmatched routes still fall through to
+  the login screen on purpose, so a deep link from an invitation email survives
+  sign-in. The four "nothing here yet" cards now share `EmptyState`, and the
+  groups/expenses ones offer the action that fills them (suppressed on the
+  expenses tab when a payer filter is what emptied the list).
 - `robots.txt` / basic SEO meta if the marketing page is public.
 - Bundle size: the SPA is a single ~670 kB chunk (~195 kB gzipped); consider
   route-level code splitting if load time matters. The legal documents are

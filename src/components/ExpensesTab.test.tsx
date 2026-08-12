@@ -280,3 +280,33 @@ describe("ExpensesTab — row interactions", () => {
     expect(screen.queryByText("Edit expense")).not.toBeInTheDocument();
   });
 });
+
+describe("ExpensesTab — empty state", () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [],
+      limit: 20,
+      offset: 0,
+    } satisfies ExpenseList);
+  });
+
+  it("offers 'Add expense' from the empty state as well as the toolbar", async () => {
+    renderWithProviders(<ExpensesTab group={group} />);
+
+    expect(await screen.findByText(/no expenses yet/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /add expense/i })).toHaveLength(2);
+  });
+
+  it("drops the call to action when the list is empty because of the payer filter", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText(/no expenses yet/i);
+
+    await user.selectOptions(screen.getByLabelText(/paid by/i), alice.id);
+
+    // "Add an expense" answers a question nobody asked when the emptiness is
+    // the filter's doing — only the toolbar button survives.
+    expect(await screen.findByText(/no expenses paid by this member/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /add expense/i })).toHaveLength(1);
+  });
+});

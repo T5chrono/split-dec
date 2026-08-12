@@ -4,6 +4,7 @@ import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import LegalPage from "./pages/LegalPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import GroupsPage from "./pages/GroupsPage";
 import GroupPage from "./pages/GroupPage";
 import Layout from "./components/Layout";
@@ -57,7 +58,11 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<GroupsPage />} />
         <Route path="/groups/:groupId" element={<GroupPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* A real 404 rather than a redirect to "/": silently landing on the
+            groups list made a stale or mistyped link look like it had worked.
+            Signed-out unmatched routes still fall through to LoginPage above,
+            so a deep link from an invitation email survives sign-in. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );
