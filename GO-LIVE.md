@@ -279,6 +279,15 @@ Home Screen"). To turn it into a Play Store app:
     404 page would cost more than the page.
   - `GroupsPage` warms the `GroupPage` chunk from the same hover/focus intent
     that already prefetches group data, so opening a group never waits on it.
+  - Splitting routes created a failure mode the single bundle could not have:
+    a client on an old app shell whose next lazy import 404s after a deploy
+    replaced the chunk hashes. `Suspense` covers a *pending* import, never a
+    rejected one, so that would unmount the tree to a blank page. A top-level
+    `ErrorBoundary` (`src/components/ErrorBoundary.tsx`, in `main.tsx`) reloads
+    once on a chunk-load error — the thing that actually fixes a stale
+    reference — with a cooldown so a genuinely missing chunk can't become a
+    refresh loop, and a translated fallback otherwise. Ordinary render errors
+    skip the reload; repeating a crash doesn't help.
   - Remaining weight is vendor (React, Supabase, TanStack Query, lucide).
     Splitting that into its own chunk would help repeat visits across deploys —
     the obvious next step if load time still matters.

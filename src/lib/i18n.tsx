@@ -122,6 +122,10 @@ const dict = {
     notFoundBody:
       "That link doesn't lead anywhere. The group may have been deleted, or the address may be mistyped.",
     backToGroups: "Back to your groups",
+    errorBoundaryTitle: "Something went wrong",
+    errorBoundaryBody:
+      "SplitDec couldn't finish loading this screen. Reloading usually fixes it — your data is safe.",
+    errorBoundaryReload: "Reload",
     // header / account
     signOut: "Sign out",
     account: "Account",
@@ -341,6 +345,10 @@ const dict = {
     notFoundBody:
       "Ten link donikąd nie prowadzi. Grupa mogła zostać usunięta albo adres zawiera literówkę.",
     backToGroups: "Wróć do swoich grup",
+    errorBoundaryTitle: "Coś poszło nie tak",
+    errorBoundaryBody:
+      "SplitDec nie zdołał wczytać tego ekranu. Zwykle pomaga odświeżenie — Twoje dane są bezpieczne.",
+    errorBoundaryReload: "Odśwież",
     signOut: "Wyloguj się",
     account: "Konto",
     signedInAs: "Zalogowano jako",
