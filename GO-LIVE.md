@@ -257,7 +257,17 @@ Home Screen"). To turn it into a Play Store app:
   sign-in. The four "nothing here yet" cards now share `EmptyState`, and the
   groups/expenses ones offer the action that fills them (suppressed on the
   expenses tab when a payer filter is what emptied the list).
-- `robots.txt` / basic SEO meta if the marketing page is public.
+- ☑ **`robots.txt` / basic SEO meta.** `public/robots.txt` (assets left
+  crawlable on purpose — the landing page is client-rendered, so a blocked JS
+  bundle means an empty `<div id="root">`), `public/sitemap.xml` covering the
+  only three public routes, and description/Open Graph/Twitter tags in
+  `index.html`. **No `<link rel="canonical">`**: every route is rewritten to
+  one `index.html`, so a static canonical would declare `/privacy` and
+  `/terms` duplicates of the landing page. Cross-host duplication with
+  `split-dec.vercel.app` is handled by a host-scoped `X-Robots-Tag: noindex`
+  in `vercel.json` instead, asserted by `tests/test_vercel_config.py`.
+  Neither file is service-worker precached (`globPatterns` covers no
+  `.txt`/`.xml`), so crawlers always get the live copy.
 - Bundle size: the SPA is a single ~670 kB chunk (~195 kB gzipped); consider
   route-level code splitting if load time matters. The legal documents are
   ~35 kB of that and are needed on two rarely-visited routes — a natural first

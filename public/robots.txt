@@ -1,0 +1,16 @@
+# SplitDec — https://split-dec.app
+#
+# Only three routes are worth crawling: the marketing landing and the two
+# legal documents. Everything else is behind sign-in and serves the same
+# app shell, so indexing it would produce a pile of identical thin pages.
+#
+# Assets are deliberately NOT blocked: the landing page is client-rendered,
+# and a crawler that cannot fetch the JS and CSS sees an empty <div id="root">.
+
+User-agent: *
+Disallow: /api/
+Disallow: /groups/
+Disallow: /login
+Disallow: /reset-password
+
+Sitemap: https://split-dec.app/sitemap.xml
