@@ -38,17 +38,22 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 1
+      # Anchor for the check below. Taken before the reviewer runs so that a
+      # comment left on an earlier run can't be mistaken for this one's.
+      - name: Record start time
+        run: echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Run Claude Code Review
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # The action owns a tracking comment instead of the review depending
-          # on the model remembering to call `gh pr comment` as its last act.
-          # It did not on PR #29: the job finished clean (13 turns, no error)
-          # having posted nothing, the step summary was empty, and the review
-          # was simply lost behind a green tick.
-          track_progress: true
-          use_sticky_comment: true
+          # Do NOT set track_progress/use_sticky_comment here. They force the
+          # action into *tag* mode, which still requires a tag-mode trigger
+          # (an @claude mention, an assignee, or the label) — a plain
+          # pull_request event satisfies none of those, so the whole run is
+          # skipped and nothing is reviewed at all. Tried on PR #30: the run
+          # step reported `outcome=skipped` in 11s with MODE empty. Supplying
+          # `prompt` keeps this job in agent mode, which is what makes it fire
+          # on the pull_request event without a mention.
           prompt: |
             Review this pull request for the SplitDec app (FastAPI + React
             Splitwise clone). Read README.md, CLAUDE.md, and
@@ -105,10 +110,14 @@ jobs:
             formatting. Mark any security finding's severity (blocking vs.
             minor).
 
-            Your final message MUST be the overall verdict — even "reviewed,
-            no issues found" is required output, not optional. The action
-            surfaces that message in its tracking comment, so end with the
-            verdict rather than with a tool call.
+            You MUST finish by posting an overall verdict as a PR comment
+            (`gh pr comment`) — even "reviewed, no issues found" is required
+            output, not optional. Nothing else surfaces your findings: a
+            final message that is only prose is discarded when the job ends,
+            and the job then reports success having said nothing. Post the
+            comment even if you were denied tools, ran short of context, or
+            are unsure — say so in the comment. A step after this one fails
+            the build if no comment appears.
           # Wider than the reviewer strictly needs to *read* the diff, because
           # the prompt asks it to verify claims against surrounding code and
           # history — and every call outside this list costs a turn to be
@@ -119,3 +128,30 @@ jobs:
           # continuations with spaces, and " Bash(git log:*)" is not the same
           # tool name as "Bash(git log:*)".
           claude_args: '--allowed-tools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git blame:*)"'
+
+      # The action reports success even when it reviews nothing and posts
+      # nothing — that is exactly what happened on PR #29, and a green tick
+      # with no review behind it is worse than a red one, because it reads as
+      # "reviewed, no issues". Turn that silence into a failure.
+      #
+      # Only runs when the reviewer step itself succeeded: if it failed, the
+      # job is already red and a second error adds nothing.
+      - name: Fail if no review was posted
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # `since` is the API's own filter, so this asks only for comments
+          # newer than the anchor. Note: no --paginate — combined with --jq it
+          # prints one count per page, and `[ "$posted" -eq 0 ]` would then be
+          # comparing a multi-line string. `since` keeps the result to a
+          # handful, well inside one page.
+          posted=$(gh api \
+            "repos/${{ github.repository }}/issues/$PR/comments?since=$REVIEW_STARTED_AT&per_page=100" \
+            --jq '[.[] | select(.user.login == "claude[bot]")] | length')
+          if [ "$posted" -eq 0 ]; then
+            echo "::error::Claude Code Review posted no comment. Failing rather than showing a green check that looks like a clean review — see PR #29 for this exact failure mode."
+            exit 1
+          fi
+          echo "Review posted ($posted comment(s) since $REVIEW_STARTED_AT)."
