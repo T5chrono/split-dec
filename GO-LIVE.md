@@ -9,6 +9,43 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 
 ---
 
+## Remaining before launch, in dependency order
+
+An index into the items below — the detail stays in each section. The app
+itself is feature-complete and green (backend + frontend suites, build);
+everything here is ops, config or legal, with two exceptions marked *code*.
+
+**Critical path — these gate a public launch:**
+
+1. **Inbound mail for `privacy@split-dec.app`** (item 8). It is the contact
+   point published in both legal documents. Nothing else can be true until
+   mail to it is delivered somewhere a human reads.
+2. **Publish the Google OAuth consent screen** (items 2 + 3). Until then you
+   are capped at 100 hand-added test users and everyone sees an "unverified
+   app" warning. Needs the `/privacy` and `/terms` URLs (done, item 8) and
+   `split-dec.app` added to authorized domains. **Longest lead time —
+   verification can take days, so start it first once item 1 is done.**
+3. **Rotate the secrets that passed through chat/tooling** (item 4) — Supabase
+   DB password and the Resend API key.
+4. **Supabase Pro** (item 5). The free tier pauses after ~1 week of inactivity
+   and has **no point-in-time recovery**. This is the item with the worst
+   failure mode: holding other people's shared ledgers with no backups.
+5. **Bilingual PL+EN auth email templates** (item 1). SMTP is verified
+   end-to-end; only the Supabase default templates remain.
+
+**Should land before real traffic, but not blocking:**
+
+6. Uptime check on `/api/health` and some error aggregation (item 7).
+7. *Code:* rate limiting on write endpoints (item 11).
+8. Branch protection, if the repo goes public or onto GitHub Pro (item 6).
+9. Legal review of the text drafted in item 8.
+
+**After launch:** buycoffee.to profile and its tax treatment (item 9), the
+TWA/Play Store path (item 10), 404 page, `robots.txt`, and route-level code
+splitting (item 11).
+
+---
+
 ## 1. Email deliverability (invitations + auth emails) — ◐ SMTP done, templates pending
 Domain **`split-dec.app`** verified in Resend (DKIM/SPF/return-path live,
 region eu-west-1). `RESEND_FROM=SplitDec <invites@split-dec.app>` and
@@ -32,7 +69,8 @@ rate limit to 30/hour.
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
   caps at 100 hand-added test users and shows an "unverified app" warning).
 - Complete the OAuth consent screen (app name, logo, support email, privacy
-  policy + terms URLs, authorized domains).
+  policy + terms URLs, authorized domains). The URLs now exist:
+  `https://split-dec.app/privacy` and `https://split-dec.app/terms` (item 8).
 - Google verification may be required for the app to avoid the warning screen
   once published — plan for a few days' review.
 
@@ -123,10 +161,32 @@ These were shared during development and should be rotated before launch:
   that a legitimate power user hitting a 429 has no self-service escape.
 - Add a lightweight uptime check on `/api/health`.
 
-## 8. Legal / privacy — ☐
-- The app stores names, emails, avatars, and financial split data. Before a
-  public launch add a Privacy Policy and Terms (also required to publish the
-  Google OAuth app). Link them from the login page footer.
+## 8. Legal / privacy — ◐ pages live, contact mailbox + review pending
+- ☑ **Privacy Policy at `/privacy` and Terms of Service at `/terms`**, bilingual
+  EN+PL, in `src/lib/legal.ts` (document bodies) rendered by
+  `src/pages/LegalPage.tsx`. Both routes are registered in **both** auth
+  branches of `App.tsx` — like `/reset-password` — so they resolve for
+  signed-out visitors instead of being swallowed by the catch-all, and they
+  render identically whether or not you are signed in. Linked from the landing
+  footer, the login screen and the account modal via `LegalLinks`.
+- The documents assert facts that are checked against the implementation:
+  processors and their regions (Supabase eu-west-3, Vercel cdg1, Resend
+  eu-west-1, Google only for OAuth), what account deletion actually erases vs.
+  anonymizes, what group members can see, and that no analytics/ad cookies
+  exist. **If any of that changes, `src/lib/legal.ts` changes with it** — and
+  bump `LEGAL_UPDATED`.
+- ☐ **Make `privacy@split-dec.app` actually receive mail** before launch — it
+  is the contact point in both documents and for GDPR requests. Resend inbound
+  or a registrar-level forward to a real inbox. An address that bounces is
+  worse than none.
+- ☐ Have the text reviewed. It was drafted to be accurate about this specific
+  app, not run past a lawyer; the liability, consumer-rights and governing-law
+  clauses in particular are the ones worth a professional eye if usage grows
+  beyond friends. Both documents state that the Polish version prevails.
+- Note: these are SPA routes, so the served HTML is the app shell and the text
+  is rendered by JS. Google's OAuth reviewers render pages, so this is normally
+  fine — but if the review bounces on "policy not found", the fallback is a
+  prerendered static `public/privacy.html` / `terms.html`.
 
 ## 9. Funding: buycoffee.to — ☐
 SplitDec will be funded by voluntary payments via [buycoffee.to](https://buycoffee.to)
@@ -142,12 +202,19 @@ rather than subscriptions or ads.
   and/or the account menu) pointing at the SplitDec buycoffee.to page.
 - Depends on item 8 (Privacy/Terms) if the link or its landing page collects
   any user data beyond what buycoffee.to itself handles.
+- The Terms already carry a forward-compatible clause ("What SplitDec costs"):
+  voluntary contributions buy no features, guarantees or priority, are not
+  refundable, and are handled by the payment provider. Adding the link needs
+  no Terms change — but if contributions ever unlock anything, that clause and
+  the consumer-withdrawal position both have to be revisited.
 
 ## 10. Android app (Play Store) via TWA — ☐ (PWA prerequisite ☑)
 The app is an installable PWA (manifest + service worker; Chrome → "Add to
 Home Screen"). To turn it into a Play Store app:
-1. `npx @bubblewrap/cli init --manifest https://split-dec.vercel.app/manifest.webmanifest`
+1. `npx @bubblewrap/cli init --manifest https://split-dec.app/manifest.webmanifest`
    (Bubblewrap offers to install JDK/Android SDK; it generates a signing key).
+   Use the **apex**, not `split-dec.vercel.app` — a TWA pins the origin it was
+   built against, the same way an installed PWA does (item 3).
 2. Serve `/.well-known/assetlinks.json` with the signing key's SHA-256
    fingerprint (drop the file in `public/.well-known/`) so the TWA runs
    fullscreen without the browser bar.
@@ -159,10 +226,12 @@ Home Screen"). To turn it into a Play Store app:
 - Rate limiting on write endpoints (expense/settlement/invite creation).
 - Empty-state polish and a 404 page.
 - `robots.txt` / basic SEO meta if the marketing page is public.
-- Bundle size: the SPA is a single ~570 kB chunk; consider route-level code
-  splitting if load time matters.
+- Bundle size: the SPA is a single ~670 kB chunk (~195 kB gzipped); consider
+  route-level code splitting if load time matters. The legal documents are
+  ~35 kB of that and are needed on two rarely-visited routes — a natural first
+  split.
 
 ---
 
-_Last updated: 2026-07-18. Maintained alongside the develop → PR → master
+_Last updated: 2026-08-12. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._

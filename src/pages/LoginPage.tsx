@@ -4,6 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useI18n, type TKey } from "../lib/i18n";
 import { TileMark, Wordmark } from "../components/Logo";
 import GoogleIcon from "../components/GoogleIcon";
+import LegalLinks from "../components/LegalLinks";
 import { MIN_PASSWORD_LENGTH, mapAuthError } from "../lib/authErrors";
 
 const inputCls =
@@ -302,6 +303,8 @@ export default function LoginPage() {
           </>
         )}
       </div>
+
+      <LegalLinks className="text-slate-500 dark:text-slate-400" />
     </div>
   );
 }

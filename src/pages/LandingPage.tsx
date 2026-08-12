@@ -32,6 +32,7 @@ import { useI18n, type TKey } from "../lib/i18n";
 import { formatMoney } from "../lib/currency";
 import { CoinMark, Wordmark } from "../components/Logo";
 import GoogleIcon from "../components/GoogleIcon";
+import LegalLinks from "../components/LegalLinks";
 
 /** Fades content in from below the first time it scrolls into view. */
 function Reveal({
@@ -511,6 +512,7 @@ export default function LandingPage() {
             <Wordmark />
           </span>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t("landingFooterTag")}</p>
+          <LegalLinks className="text-slate-500 dark:text-slate-400" />
           <p className="text-sm text-slate-400 dark:text-slate-500">
             © {new Date().getFullYear()} SplitDec
           </p>
