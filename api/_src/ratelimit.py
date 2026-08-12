@@ -6,9 +6,16 @@ several concurrent instances and cold-starts constantly, so in-process state
 would be both unshared and routinely lost. The database is the only counter
 all instances agree on.
 
-Deleted rows still count. Expenses and settlements are soft-deleted and
-cancelled invitations are kept for exactly this reason — a create/delete loop
-must not be able to reset a window.
+Soft-deleted rows still count, so deleting an expense or a settlement does not
+free its slot — the same reason cancelled invitations are kept rather than
+deleted.
+
+What these limits do NOT stop: deleting a *group* is a hard delete that takes
+its expenses and settlements with it (groups.py), so a caller willing to
+create a group, fill it and delete it can loop indefinitely. These are brakes
+on runaway volume — a retrying client, a buggy script, an account writing
+flat out — not a defence against a determined attacker. Closing that hole
+needs a tombstone surviving group deletion; see GO-LIVE item 11.
 """
 
 import uuid
@@ -25,14 +32,13 @@ WRITE_WINDOW = timedelta(hours=24)
 # Expenses + settlements combined, per group. A ten-person trip logging every
 # meal might reach 50 in a day; this leaves room for that and stops a runaway
 # client. Deliberately per-group and NOT global: a deployment-wide ledger cap
-# would turn one abusive account into an outage for everybody, and the pair of
-# limits here already bounds any single account to the groups it can create
-# times the writes each group allows.
+# would turn one abusive account into an outage for everybody.
 MAX_LEDGER_WRITES_PER_GROUP = 300
 
 # Groups one account can create in a window. Nobody legitimately creates 25
-# groups a day; this is what stops the per-group limit from being sidestepped
-# by simply making more groups.
+# groups a day. This raises the cost of sidestepping the per-group limit by
+# making more groups — it does not remove it, since deleting a group frees the
+# count again (see the module docstring).
 MAX_GROUPS_PER_CALLER = 25
 
 

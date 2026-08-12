@@ -91,6 +91,57 @@ class TestLedgerWriteQuota:
         )
         assert blocked.status_code == 429
 
+    async def test_replaying_at_the_ceiling_still_returns_the_existing_row(
+        self, client, two_user_group
+    ):
+        """A client retrying a request whose response it never saw has already
+        spent its slot. 429 there would leave it unable to find out whether the
+        entry exists — the one thing Idempotency-Key is for."""
+        g = two_user_group
+        payload = expense_payload(g["alice"], [g["alice"], g["bob"]])
+        key = idem()
+
+        first = await client.post(
+            f"/api/groups/{g['group'].id}/expenses", json=payload, headers=key
+        )
+        assert first.status_code == 201
+        for _ in range(2):  # fill the window to the limit
+            await client.post(
+                f"/api/groups/{g['group'].id}/expenses", json=payload, headers=idem()
+            )
+
+        replay = await client.post(
+            f"/api/groups/{g['group'].id}/expenses", json=payload, headers=key
+        )
+        assert replay.status_code == 200
+        assert replay.json()["id"] == first.json()["id"]
+
+    async def test_settlement_replay_at_the_ceiling_returns_the_existing_row(
+        self, client, two_user_group
+    ):
+        g = two_user_group
+        key = idem()
+        first = await client.post(
+            f"/api/groups/{g['group'].id}/settlements",
+            json=_settlement_payload(g["bob"], g["alice"]),
+            headers=key,
+        )
+        assert first.status_code == 201
+        for _ in range(2):
+            await client.post(
+                f"/api/groups/{g['group'].id}/settlements",
+                json=_settlement_payload(g["bob"], g["alice"]),
+                headers=idem(),
+            )
+
+        replay = await client.post(
+            f"/api/groups/{g['group'].id}/settlements",
+            json=_settlement_payload(g["bob"], g["alice"]),
+            headers=key,
+        )
+        assert replay.status_code == 200
+        assert replay.json()["id"] == first.json()["id"]
+
     async def test_the_limit_is_per_group(self, client, db_session, two_user_group):
         g = two_user_group
         payload = expense_payload(g["alice"], [g["alice"], g["bob"]])

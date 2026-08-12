@@ -36,6 +36,20 @@ async def _validate_participants(
         )
 
 
+async def _find_by_idempotency_key(
+    db: AsyncSession, group_id: uuid.UUID, key: uuid.UUID
+) -> Expense | None:
+    """Scoped to the path group on purpose: a key colliding with (or copied
+    from) another group's request must never surface that group's record."""
+    return (
+        await db.execute(
+            select(Expense).where(
+                Expense.idempotency_key == key, Expense.group_id == group_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
 @router.get("/groups/{group_id}/expenses", response_model=ExpenseListOut)
 async def list_expenses(
     group_id: uuid.UUID,
@@ -79,6 +93,14 @@ async def create_expense(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     await require_membership(db, group_id, caller, lock="shared")
+    # Answer a replay before the quota, not after. A client retrying a request
+    # whose response it never saw has already spent its slot; 429 here would
+    # leave it unable to discover whether the entry exists — the one thing
+    # Idempotency-Key is for. Invitations order it the same way.
+    replay = await _find_by_idempotency_key(db, group_id, idempotency_key)
+    if replay is not None:
+        response.status_code = 200
+        return replay
     await enforce_ledger_write_quota(db, group_id)
     await _validate_participants(db, group_id, body)
     shares = compute_splits(
@@ -103,18 +125,10 @@ async def create_expense(
     try:
         await db.commit()
     except IntegrityError:
-        # Idempotent replay: return the existing record with 200 OK — but
-        # only within this group, so a key colliding with (or copied from)
-        # another group's request can never expose that group's record.
+        # Still reachable despite the pre-check above: two concurrent requests
+        # carrying the same key can both miss it and race to insert.
         await db.rollback()
-        existing = (
-            await db.execute(
-                select(Expense).where(
-                    Expense.idempotency_key == idempotency_key,
-                    Expense.group_id == group_id,
-                )
-            )
-        ).scalar_one_or_none()
+        existing = await _find_by_idempotency_key(db, group_id, idempotency_key)
         if existing is None:
             raise HTTPException(
                 status_code=409, detail="Idempotency-Key is already in use"

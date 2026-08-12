@@ -233,12 +233,21 @@ Home Screen"). To turn it into a Play Store app:
   - Soft-deleted rows still count, so a create/delete loop can't reset a
     window (the same reason cancelled invitations are kept).
   - **Deliberately no global ledger cap**: it would turn one abusive account
-    into an outage for everyone. The two limits together already bound any
-    account to (groups it can create) × (writes per group).
-  - Known trade-off: the natural axis is *per caller*, which needs a
-    `created_by` column on `expenses`/`settlements`. Skipped rather than
-    migrate the ledger tables for a volume brake — revisit if abuse is ever
-    seen from a member inside a shared group.
+    into an outage for everyone.
+  - Replays are answered **before** the quota in both create endpoints: a
+    client retrying a request whose response it never saw has already spent
+    its slot, and a 429 there would leave it unable to discover whether the
+    entry exists — the one thing `Idempotency-Key` is for.
+  - ☐ **These are brakes on runaway volume, not a defence against a
+    determined attacker.** Deleting a group is a *hard* delete that takes its
+    expenses and settlements with it, so create-group → fill → delete → repeat
+    resets both windows. Closing it needs a tombstone that survives group
+    deletion (or a `created_by` column on the ledger tables, which would also
+    move the ledger limit onto the more natural per-caller axis). Both are
+    migrations on the money tables, deliberately not done for a volume brake.
+  - Second known gap: the ledger limit is per *group*, so one member can
+    consume the window for the others. At 300/group/24h against a busy trip's
+    ~50 that shouldn't bite, and the failure is a temporary 429, not data loss.
   - The 429 `detail` reaches the UI as-is (English only), like the existing
     invitation quota message. Worth localizing if these start firing.
 - Empty-state polish and a 404 page.
