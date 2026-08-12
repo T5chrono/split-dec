@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SplitDec — a Splitwise clone (groups, multi-currency expenses, settlements, greedy debt
 simplification). Built to `SplitDec - specification.md` (v6), **with deliberate deviations**
-listed below. Production: https://split-dec.vercel.app (installable PWA).
+listed below. Production: https://split-dec.app (installable PWA) — the apex is the
+canonical origin; `split-dec.vercel.app` still serves the app but is `noindex`.
 
 ## Commands
 
@@ -59,6 +60,12 @@ on `ENV=development`):
   `X-Frame-Options: DENY`, referrer and permissions policy), asserted by
   `tests/test_vercel_config.py`. The CSP is intentionally framing-only; a `default-src`
   policy would need the Supabase endpoints and the PWA's generated SW audited first.
+  A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing
+  with the apex in search — it has to be a header, because every route rewrites to one
+  `index.html` and a `<link rel="canonical">` in it would also claim `/privacy` and
+  `/terms` are copies of the landing page. `public/robots.txt` and `public/sitemap.xml`
+  cover the three public routes; assets are left crawlable on purpose, since the
+  landing page is client-rendered.
 - **Backend**: FastAPI in `api/index.py` (single Vercel function; code lives in `api/_src/` —
   the underscore prevents Vercel treating those files as separate functions).
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
@@ -101,6 +108,27 @@ query (`deps.py`: `require_membership`/`get_*_for_member` with `lock=`, `lock_gr
 for multi-group in sorted order). Any new balance-changing endpoint must join this protocol.
 SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
+### Write quotas (`api/_src/ratelimit.py`)
+
+Row-creating endpoints are volume-braked, counting rows in the database (never
+process memory — the API is a serverless function with several instances and
+constant cold starts). Expense and settlement creation share one **per-group**
+24h window; group creation is capped **per caller**; invitations keep their own
+three windows. All of them use the dialect-aware `window_cutoff` helper, because
+SQLite (tests) stores naive UTC where Postgres stores TIMESTAMPTZ.
+
+Two rules any new quota must follow:
+
+- **Soft-deleted rows still count**, or a create/delete loop resets the window.
+- **Answer an idempotent replay *before* the quota.** A client retrying a
+  request whose response it never saw has already spent its slot, and a 429
+  there leaves it unable to discover whether the row exists — the one thing
+  `Idempotency-Key` is for. Both create endpoints look the key up first.
+
+Deliberately **no global ledger cap**: it would turn one abusive account into
+an outage for everyone. Known gap: group deletion is a hard delete, so
+create → fill → delete → repeat still resets both windows (GO-LIVE item 11).
+
 A second, narrower lock covers *membership creation* against account deletion:
 `get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
 the caller a new membership (group create, invitation accept), `"exclusive"` in
@@ -139,6 +167,28 @@ on `users` rows, which deadlocks against an expense write already holding the gr
 
 ### Frontend patterns
 
+- **Routes are code-split** (`App.tsx`): `LandingPage`, `LegalPage`,
+  `ResetPasswordPage` and `GroupPage` are `lazy`, split along the auth branch so
+  each user type downloads roughly its own half. `LoginPage`, `GroupsPage`,
+  `Layout` and `NotFoundPage` stay eager — they are on one branch's first paint.
+  Any new lazy route must sit inside one of the two `Suspense` boundaries, and
+  `GroupsPage` warms the `GroupPage` chunk from the same hover/focus handler that
+  prefetches group data (same import specifier, so Rollup emits one chunk).
+- A top-level `ErrorBoundary` (`main.tsx`, inside `I18nProvider` so its fallback
+  is translated) reloads **once** on a chunk-load error: a client on an old app
+  shell 404s its next lazy import after a deploy rotates the chunk hashes, and
+  `Suspense` only covers a *pending* import, not a rejected one. A
+  `sessionStorage` cooldown stops a genuinely missing chunk becoming a refresh
+  loop; ordinary render errors skip the reload.
+- **Routing invariants that look like bugs but are not.** `/privacy` and
+  `/terms` are registered in *both* auth branches (like `/reset-password`) so
+  they resolve for signed-out visitors — Google's OAuth review fetches them
+  cold. The signed-out catch-all renders `LoginPage`, **not** the 404: an
+  invitation deep link lands signed-out, and the focused sign-in screen is what
+  carries the visitor to the original URL afterwards. Only the signed-in
+  catch-all renders `NotFoundPage`.
+- Empty states share `EmptyState`; pass `action` where there is an obvious next
+  step (suppressed on the expenses tab when a payer filter is what emptied it).
 - Shared query definitions in `src/lib/queries.ts` — prefetchers and components must agree on
   keys. Query keys are NOT user-scoped; instead `useAuth` clears the whole cache when the
   authenticated user id changes. Keep both halves of that invariant.
