@@ -28,7 +28,10 @@ export default function GroupsPage() {
   // would wait on a chunk request; the same specifier App uses, so Rollup
   // resolves both to one chunk.
   const prefetchGroup = (id: string) => {
-    void import("./GroupPage");
+    // Swallowed on purpose: this is speculative. A transient failure here
+    // would otherwise be an unhandled rejection, and the real navigation
+    // still gets a second chance through Suspense and the ErrorBoundary.
+    void import("./GroupPage").catch(() => {});
     queryClient.prefetchQuery(groupDetailQuery(id));
     queryClient.prefetchQuery(expensesQuery(id, 0));
   };
