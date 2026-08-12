@@ -6,6 +6,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
+import LegalLinks from "./LegalLinks";
 
 export default function AccountModal({ onClose }: { onClose: () => void }) {
   const { session, signOut } = useAuth();
@@ -70,6 +71,8 @@ export default function AccountModal({ onClose }: { onClose: () => void }) {
               </p>
             )}
           </div>
+
+          <LegalLinks className="justify-center text-slate-400 dark:text-slate-500" />
         </div>
       </Modal>
 

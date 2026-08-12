@@ -22,3 +22,7 @@ Object.defineProperty(window, "matchMedia", {
 
 // jsdom doesn't implement scrollIntoView; DatePicker/CategorySelect use it.
 Element.prototype.scrollIntoView = vi.fn();
+
+// jsdom doesn't implement scrollTo; LegalPage resets the offset when you
+// switch between the privacy policy and the terms.
+window.scrollTo = vi.fn();

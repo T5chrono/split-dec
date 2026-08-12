@@ -112,6 +112,11 @@ const dict = {
     demoExpenseHotel: "Mountain hostel, 2 nights",
     demoExpenseGroceries: "Groceries",
     demoToast: "Settled up!",
+    // legal (document bodies live in lib/legal.ts)
+    privacyPolicy: "Privacy Policy",
+    termsOfService: "Terms of Service",
+    lastUpdated: "Last updated:",
+    backToApp: "Back to SplitDec",
     // header / account
     signOut: "Sign out",
     account: "Account",
@@ -323,6 +328,10 @@ const dict = {
     demoExpenseHotel: "Schronisko, 2 noce",
     demoExpenseGroceries: "Zakupy spożywcze",
     demoToast: "Rozliczone!",
+    privacyPolicy: "Polityka prywatności",
+    termsOfService: "Regulamin",
+    lastUpdated: "Ostatnia aktualizacja:",
+    backToApp: "Powrót do SplitDec",
     signOut: "Wyloguj się",
     account: "Konto",
     signedInAs: "Zalogowano jako",
