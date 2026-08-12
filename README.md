@@ -31,6 +31,12 @@ Built to `SplitDec - specification.md` (v6).
   SQL CTE, then greedy-matches debtors to creditors per currency bucket.
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
+- Row-creating endpoints are volume-limited (`api/_src/ratelimit.py`): expenses
+  and settlements share a per-group 24h window, group creation is capped per
+  caller, invitations keep their own quotas. Counts come from the database, and
+  soft-deleted rows still count so a create/delete loop can't reset a window.
+  An idempotent replay is answered *before* the quota, so retrying a request
+  whose response was lost never returns 429.
 
 ## Email invitations (optional)
 
@@ -48,8 +54,9 @@ and the UI offers a pre-written mailto draft instead.
 - When `develop` is green, open a PR to `master` and request a review from
   Claude (mention `@claude` in the PR). Address comments, then merge.
 - Merging to `master` runs CI again and Vercel auto-deploys `master` to
-  production (https://split-dec.vercel.app). Pushes to `develop` get Vercel
-  preview deployments.
+  production (https://split-dec.app — the apex is the canonical origin;
+  `split-dec.vercel.app` still serves the app but is `noindex`). Pushes to
+  `develop` get Vercel preview deployments.
 
 ## Tests
 

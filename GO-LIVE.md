@@ -1,9 +1,13 @@
 # SplitDec — Pre-Go-Live Checklist
 
 Things to do before treating SplitDec as a real, publicly-usable product.
-The app is fully functional today at https://split-dec.vercel.app; the items
-below are about production-readiness, deliverability, security hardening, and
+The app is fully functional today at https://split-dec.app; the items below
+are about production-readiness, deliverability, security hardening, and
 polish — not missing features.
+
+(Use the apex when linking to the app. `split-dec.vercel.app` still serves it,
+but it now carries `X-Robots-Tag: noindex` so it cannot compete with the
+canonical domain in search — item 11.)
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -12,8 +16,10 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 ## Remaining before launch, in dependency order
 
 An index into the items below — the detail stays in each section. The app
-itself is feature-complete and green (backend + frontend suites, build);
-everything here is ops, config or legal, with two exceptions marked *code*.
+itself is feature-complete and green (131 backend tests, 153 frontend, build).
+**Everything still outstanding is ops, config or legal** — dashboards, DNS,
+billing and a lawyer's eye. The code-side work is done; item 6 is the only
+entry with a code component left in it (wiring an error tracker).
 
 **Critical path — these gate a public launch:**
 
@@ -40,8 +46,38 @@ everything here is ops, config or legal, with two exceptions marked *code*.
 8. Legal review of the text drafted in item 8.
 
 **After launch:** buycoffee.to profile and its tax treatment (item 9), the
-TWA/Play Store path (item 10), 404 page, `robots.txt`, and route-level code
-splitting (item 11).
+TWA/Play Store path (item 10), and the two rate-limit gaps recorded in item 11
+(a tombstone so group deletion can't reset a quota; vendor-chunk splitting).
+
+**Item 11 is closed** — rate limiting, the 404 page and empty states, SEO, and
+route-level code splitting all shipped and are live.
+
+---
+
+## Verified in production — 2026-08-12
+
+Checked against `https://split-dec.app` on commit `1ead6b2`, not inferred from
+a green build:
+
+- All six security headers present on the apex; `X-Robots-Tag: noindex,
+  nofollow` present on `split-dec.vercel.app` and **absent** from the apex and
+  its subpages, so the host scoping does what it was written for.
+- `www` 308s to the apex on `/` and on a subpath, query string preserved.
+- `robots.txt` (`text/plain`) and `sitemap.xml` (`application/xml`) serve, the
+  sitemap listing exactly the three public routes.
+- `/privacy` and `/terms` render with their `mailto:` contact live, and pull
+  `LegalPage-*.js` as a separate chunk — code splitting confirmed on the wire.
+- `/api/health` returns ok; `POST /api/groups` without a token returns 401.
+- Signed-out `/groups/<id>` still serves the sign-in screen, so invitation deep
+  links survive.
+- Signed-in 404 confirmed by hand (it is behind auth, so no automated probe
+  covers it).
+
+One incidental finding worth keeping: the first browser load was served by an
+**already-installed service worker** from an older deploy and reported a stale
+bundle hash before auto-updating. Harmless here, but it is the exact stale-shell
+scenario the `ErrorBoundary` in item 11 exists to catch, observed live. When
+re-probing after any deploy, expect that and cache-bust.
 
 ---
 
@@ -221,7 +257,9 @@ Home Screen"). To turn it into a Play Store app:
    `.aab` to Google Play ($25 one-time developer account; privacy policy from
    item 8 is required for the listing).
 
-## 11. Nice-to-haves before launch — ◐
+## 11. Nice-to-haves before launch — ☑ all four shipped
+Two known limitations are recorded inline below and carried in the "after
+launch" list; neither blocks a launch.
 - ☑ **Rate limiting on write endpoints.** `api/_src/ratelimit.py`: expense and
   settlement creation share one per-group 24h window
   (`MAX_LEDGER_WRITES_PER_GROUP`), and group creation is capped per caller
@@ -238,8 +276,8 @@ Home Screen"). To turn it into a Play Store app:
     client retrying a request whose response it never saw has already spent
     its slot, and a 429 there would leave it unable to discover whether the
     entry exists — the one thing `Idempotency-Key` is for.
-  - ☐ **These are brakes on runaway volume, not a defence against a
-    determined attacker.** Deleting a group is a *hard* delete that takes its
+  - **Known limitation — these are brakes on runaway volume, not a defence
+    against a determined attacker.** Deleting a group is a *hard* delete that takes its
     expenses and settlements with it, so create-group → fill → delete → repeat
     resets both windows. Closing it needs a tombstone that survives group
     deletion (or a `created_by` column on the ledger tables, which would also
@@ -257,6 +295,7 @@ Home Screen"). To turn it into a Play Store app:
   sign-in. The four "nothing here yet" cards now share `EmptyState`, and the
   groups/expenses ones offer the action that fills them (suppressed on the
   expenses tab when a payer filter is what emptied the list).
+  Confirmed signed-in in production on 2026-08-12.
 - ☑ **`robots.txt` / basic SEO meta.** `public/robots.txt` (assets left
   crawlable on purpose — the landing page is client-rendered, so a blocked JS
   bundle means an empty `<div id="root">`), `public/sitemap.xml` covering the
