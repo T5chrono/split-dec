@@ -12,6 +12,7 @@ from ..currencies import precision_for
 from ..db import get_db
 from ..deps import get_settlement_for_member, require_membership
 from ..models import GroupMember, Settlement
+from ..ratelimit import enforce_ledger_write_quota
 from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
 
 router = APIRouter(tags=["settlements"])
@@ -24,6 +25,20 @@ def _validate_amount_precision(amount: Decimal, currency: str) -> None:
             status_code=422,
             detail=f"Amount has more decimal places than {currency} allows",
         )
+
+
+async def _find_by_idempotency_key(
+    db: AsyncSession, group_id: uuid.UUID, key: uuid.UUID
+) -> Settlement | None:
+    """Scoped to the path group on purpose: a key colliding with (or copied
+    from) another group's request must never surface that group's record."""
+    return (
+        await db.execute(
+            select(Settlement).where(
+                Settlement.idempotency_key == key, Settlement.group_id == group_id
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def _validate_parties(
@@ -73,6 +88,12 @@ async def create_settlement(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     await require_membership(db, group_id, caller, lock="shared")
+    # Replay before quota — see the matching comment in expenses.py.
+    replay = await _find_by_idempotency_key(db, group_id, idempotency_key)
+    if replay is not None:
+        response.status_code = 200
+        return replay
+    await enforce_ledger_write_quota(db, group_id)
     await _validate_parties(db, group_id, body.paid_by_user_id, body.paid_to_user_id)
     _validate_amount_precision(body.amount, body.currency)
     settlement = Settlement(
@@ -87,18 +108,10 @@ async def create_settlement(
     try:
         await db.commit()
     except IntegrityError:
-        # Idempotent replay: return the existing record with 200 OK — but
-        # only within this group, so a key colliding with (or copied from)
-        # another group's request can never expose that group's record.
+        # Still reachable despite the pre-check above: two concurrent requests
+        # carrying the same key can both miss it and race to insert.
         await db.rollback()
-        existing = (
-            await db.execute(
-                select(Settlement).where(
-                    Settlement.idempotency_key == idempotency_key,
-                    Settlement.group_id == group_id,
-                )
-            )
-        ).scalar_one_or_none()
+        existing = await _find_by_idempotency_key(db, group_id, idempotency_key)
         if existing is None:
             raise HTTPException(
                 status_code=409, detail="Idempotency-Key is already in use"

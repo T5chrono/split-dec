@@ -17,6 +17,7 @@ from ..models import (
     Settlement,
     User,
 )
+from ..ratelimit import enforce_group_creation_quota
 from ..schemas import (
     BalanceTransfer,
     CurrencyTotalOut,
@@ -55,6 +56,7 @@ async def create_group(
     # The shared lock holds until commit, so a concurrent account deletion
     # cannot snapshot this caller's groups before the membership below exists.
     await get_active_user(db, caller, lock="shared")
+    await enforce_group_creation_quota(db, caller)
     group = Group(name=body.name, created_by=caller)
     db.add(group)
     await db.flush()
