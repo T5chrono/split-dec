@@ -1,42 +1,67 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
-import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import LegalPage from "./pages/LegalPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import GroupsPage from "./pages/GroupsPage";
-import GroupPage from "./pages/GroupPage";
 import Layout from "./components/Layout";
 import Spinner from "./components/Spinner";
+
+/* Split on the auth branch: a signed-in user never needs the marketing page,
+ * and a signed-out visitor never needs the group screens, so each downloads
+ * roughly its own half.
+ *
+ * Eager on purpose:
+ *   LoginPage    — the signed-out catch-all, so any deep link renders it.
+ *   GroupsPage   — where every signed-in session starts.
+ *   Layout       — wraps every signed-in route.
+ *   NotFoundPage — a few hundred bytes; a chunk request would cost more.
+ *
+ * GroupPage is the largest of these: it pulls in all four tabs, both form
+ * modals, the date and category pickers, and the whole category icon table.
+ * Splitting it is what makes the groups list light, and GroupsPage warms the
+ * chunk on the same hover/focus intent that already prefetches group data, so
+ * the usual path never waits on it. */
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
+const LegalPage = lazy(() => import("./pages/LegalPage"));
+const GroupPage = lazy(() => import("./pages/GroupPage"));
+
+/** Shared by the auth check and the lazy-route fallback, so resolving a
+ *  session and then fetching its first chunk look like one wait, not two. */
+function FullScreenSpinner() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <Spinner />
+    </div>
+  );
+}
 
 export default function App() {
   const { session, loading, passwordRecovery } = useAuth();
   const location = useLocation();
 
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <FullScreenSpinner />;
   }
 
   if (!session) {
     // Marketing landing at the root; deep links (e.g. from invitation emails)
     // keep the focused sign-in screen instead of the pitch.
     return (
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
-        {/* Registered in both auth branches, like /reset-password: the legal
-            pages must resolve for signed-out visitors (Google's OAuth review
-            fetches them cold) and must not be swallowed by the catch-all. */}
-        <Route path="/privacy" element={<LegalPage doc="privacy" />} />
-        <Route path="/terms" element={<LegalPage doc="terms" />} />
-        <Route path="*" element={<LoginPage />} />
-      </Routes>
+      <Suspense fallback={<FullScreenSpinner />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          {/* Registered in both auth branches, like /reset-password: the legal
+              pages must resolve for signed-out visitors (Google's OAuth review
+              fetches them cold) and must not be swallowed by the catch-all. */}
+          <Route path="/privacy" element={<LegalPage doc="privacy" />} />
+          <Route path="/terms" element={<LegalPage doc="terms" />} />
+          <Route path="*" element={<LoginPage />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -48,22 +73,24 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      {/* Outside Layout: the recovery screen shows no app chrome, and the
-          legal pages carry their own so one URL renders identically whether
-          or not you are signed in. */}
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/privacy" element={<LegalPage doc="privacy" />} />
-      <Route path="/terms" element={<LegalPage doc="terms" />} />
-      <Route element={<Layout />}>
-        <Route path="/" element={<GroupsPage />} />
-        <Route path="/groups/:groupId" element={<GroupPage />} />
-        {/* A real 404 rather than a redirect to "/": silently landing on the
-            groups list made a stale or mistyped link look like it had worked.
-            Signed-out unmatched routes still fall through to LoginPage above,
-            so a deep link from an invitation email survives sign-in. */}
-        <Route path="*" element={<NotFoundPage />} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<FullScreenSpinner />}>
+      <Routes>
+        {/* Outside Layout: the recovery screen shows no app chrome, and the
+            legal pages carry their own so one URL renders identically whether
+            or not you are signed in. */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/privacy" element={<LegalPage doc="privacy" />} />
+        <Route path="/terms" element={<LegalPage doc="terms" />} />
+        <Route element={<Layout />}>
+          <Route path="/" element={<GroupsPage />} />
+          <Route path="/groups/:groupId" element={<GroupPage />} />
+          {/* A real 404 rather than a redirect to "/": silently landing on the
+              groups list made a stale or mistyped link look like it had worked.
+              Signed-out unmatched routes still fall through to LoginPage above,
+              so a deep link from an invitation email survives sign-in. */}
+          <Route path="*" element={<NotFoundPage />} />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }

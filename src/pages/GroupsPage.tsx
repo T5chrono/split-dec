@@ -23,8 +23,12 @@ export default function GroupsPage() {
 
   const { data: groups, isLoading, error } = useQuery(groupsQuery());
 
-  // Warm a group's data the moment the user shows intent to open it.
+  // Warm a group's data — and the route's code — the moment the user shows
+  // intent to open it. GroupPage is lazy (App.tsx), so without this the click
+  // would wait on a chunk request; the same specifier App uses, so Rollup
+  // resolves both to one chunk.
   const prefetchGroup = (id: string) => {
+    void import("./GroupPage");
     queryClient.prefetchQuery(groupDetailQuery(id));
     queryClient.prefetchQuery(expensesQuery(id, 0));
   };

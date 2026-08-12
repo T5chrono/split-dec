@@ -268,10 +268,20 @@ Home Screen"). To turn it into a Play Store app:
   in `vercel.json` instead, asserted by `tests/test_vercel_config.py`.
   Neither file is service-worker precached (`globPatterns` covers no
   `.txt`/`.xml`), so crawlers always get the live copy.
-- Bundle size: the SPA is a single ~670 kB chunk (~195 kB gzipped); consider
-  route-level code splitting if load time matters. The legal documents are
-  ~35 kB of that and are needed on two rarely-visited routes — a natural first
-  split.
+- ☑ **Route-level code splitting.** The single ~670 kB chunk is now ~545 kB
+  (~160 kB gzipped, down from ~195) with the rest split by auth branch, so a
+  signed-in user never downloads the marketing page and a signed-out visitor
+  never downloads the group screens: `LandingPage` (19 kB), `LegalPage`
+  (32 kB), `ResetPasswordPage` (3 kB) and `GroupPage` (74 kB — all four tabs,
+  both form modals, the pickers and the category icon table).
+  - `LoginPage`, `GroupsPage`, `Layout` and `NotFoundPage` stay eager: they are
+    on the first paint of one branch or the other, and a chunk request for the
+    404 page would cost more than the page.
+  - `GroupsPage` warms the `GroupPage` chunk from the same hover/focus intent
+    that already prefetches group data, so opening a group never waits on it.
+  - Remaining weight is vendor (React, Supabase, TanStack Query, lucide).
+    Splitting that into its own chunk would help repeat visits across deploys —
+    the obvious next step if load time still matters.
 
 ---
 
