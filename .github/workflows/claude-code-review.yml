@@ -1,9 +1,19 @@
 name: Claude Code Review
 
-# Automatic review of every PR when it is opened or marked ready.
+# Automatic review of every PR when it is opened or marked ready, and again on
+# every push to an open one. Without `synchronize` the check attests only to
+# the code as it was at open: fixes pushed in response to a review were never
+# themselves reviewed, while the PR kept showing a green tick.
 on:
   pull_request:
-    types: [opened, ready_for_review]
+    types: [opened, ready_for_review, synchronize]
+
+# One review at a time per PR. Pushes often arrive in bursts (a fix, then its
+# test), and without this each starts a full review of a diff that is already
+# stale — cost with nothing to show for it.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
@@ -28,10 +38,26 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 1
+      # Anchor for the check below. Taken before the reviewer runs so that a
+      # comment left on an earlier run can't be mistaken for this one's.
+      - name: Record start time
+        run: echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Run Claude Code Review
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Supplying `prompt` puts the job in agent mode, which is what lets
+          # it fire on a pull_request event with no @claude mention ("Auto-
+          # detected mode: agent for event: pull_request" in the run log).
+          #
+          # track_progress/use_sticky_comment are deliberately NOT set. They
+          # would move the job to tag mode, and this job has no way to test
+          # that change: the action refuses to run whenever this file differs
+          # from the copy on the default branch (see the guard step below), so
+          # a PR editing it can never exercise the reviewer. Changing modes
+          # blind, on the job that reviews everything else, is not a trade
+          # worth taking — the guard below covers the failure they were meant
+          # to fix.
           prompt: |
             Review this pull request for the SplitDec app (FastAPI + React
             Splitwise clone). Read README.md, CLAUDE.md, and
@@ -86,7 +112,70 @@ jobs:
             Leave concise inline comments only on problems you're actually
             confident about — do not comment on style, naming, or
             formatting. Mark any security finding's severity (blocking vs.
-            minor). You MUST finish by posting an overall verdict as a PR
-            comment (use `gh pr comment`) — even "reviewed, no issues found"
-            is required output, not optional.
-          claude_args: '--allowed-tools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
+            minor).
+
+            You MUST finish by posting an overall verdict as a PR comment
+            (`gh pr comment`) — even "reviewed, no issues found" is required
+            output, not optional. Nothing else surfaces your findings: a
+            final message that is only prose is discarded when the job ends,
+            and the job then reports success having said nothing. Post the
+            comment even if you were denied tools, ran short of context, or
+            are unsure — say so in the comment. A step after this one fails
+            the build if no comment appears.
+          # Wider than the reviewer strictly needs to *read* the diff, because
+          # the prompt asks it to verify claims against surrounding code and
+          # history — and every call outside this list costs a turn to be
+          # denied. The run that failed to post on PR #29 burned 7 of its 13
+          # turns on denials; the one that succeeded burned 22 of 49.
+          # Still read-only: nothing here can write to the repo.
+          # Kept on one line on purpose: a folded scalar (>-) would join the
+          # continuations with spaces, and " Bash(git log:*)" is not the same
+          # tool name as "Bash(git log:*)".
+          claude_args: '--allowed-tools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git blame:*)"'
+
+      # The action reports success even when it reviews nothing and posts
+      # nothing — that is exactly what happened on PR #29, and a green tick
+      # with no review behind it is worse than a red one, because it reads as
+      # "reviewed, no issues". Turn that silence into a failure.
+      #
+      # Only runs when the reviewer step itself succeeded: if it failed, the
+      # job is already red and a second error adds nothing.
+      - name: Fail if no review was posted
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # A PR that edits this file cannot be reviewed by it: the action
+          # requires the workflow to match the default branch's copy, so that
+          # a PR can't rewrite the reviewer (which holds an OAuth token) and
+          # have the rewrite run. Warn and pass, or this step would pin a
+          # permanent red check on every workflow change.
+          #
+          # The contents API returns the git blob SHA, so reading the blob out
+          # of HEAD compares content without fetching the base branch. Read
+          # from the commit rather than hashing the file on disk: that way no
+          # checkout filter or EOL normalisation can shift the hash.
+          head_blob=$(git rev-parse "HEAD:.github/workflows/claude-code-review.yml")
+          base_blob=$(gh api \
+            "repos/${{ github.repository }}/contents/.github/workflows/claude-code-review.yml?ref=$BASE_REF" \
+            --jq .sha 2>/dev/null || echo "missing")
+          if [ "$head_blob" != "$base_blob" ]; then
+            echo "::warning::This PR changes the review workflow, so the action skipped itself (it only runs when the file matches $BASE_REF). No review to check for. The change takes effect for PRs opened after this one merges."
+            exit 0
+          fi
+
+          # `since` is the API's own filter, so this asks only for comments
+          # newer than the anchor. Note: no --paginate — combined with --jq it
+          # prints one count per page, and `[ "$posted" -eq 0 ]` would then be
+          # comparing a multi-line string. `since` keeps the result to a
+          # handful, well inside one page.
+          posted=$(gh api \
+            "repos/${{ github.repository }}/issues/$PR/comments?since=$REVIEW_STARTED_AT&per_page=100" \
+            --jq '[.[] | select(.user.login == "claude[bot]")] | length')
+          if [ "$posted" -eq 0 ]; then
+            echo "::error::Claude Code Review posted no comment. Failing rather than showing a green check that looks like a clean review — see PR #29 for this exact failure mode."
+            exit 1
+          fi
+          echo "Review posted ($posted comment(s) since $REVIEW_STARTED_AT)."

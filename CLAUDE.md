@@ -35,9 +35,12 @@ skip unless `TEST_DATABASE_URL` is set — never point that at production.
 ## Workflow (mandatory)
 
 Work on `develop`, never commit to `master` directly. Push → open PR to `master` → the
-Claude GitHub Action auto-reviews every PR on open (`.github/workflows/claude-code-review.yml`;
-`@claude` mentions work too, but those workflows execute from `master`, the default branch) →
-address findings → merge on green CI → Vercel auto-deploys `master` to production.
+Claude GitHub Action auto-reviews every PR on open **and on every push to it**
+(`.github/workflows/claude-code-review.yml`; `@claude` mentions work too, but those workflows
+execute from `master`, the default branch) → address findings → merge on green CI → Vercel
+auto-deploys `master` to production.
+A green `claude-review` check is not by itself proof a review happened: the job reports success
+even when it posts nothing (PR #29). Look for the tracking comment, not the tick.
 After merging, sync: `git checkout develop && git merge master && git push`.
 CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs.
 Branch protection is unavailable (free plan + private repo) — the gate is by convention.
