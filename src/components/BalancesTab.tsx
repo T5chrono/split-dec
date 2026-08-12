@@ -9,6 +9,7 @@ import { useAuth } from "../hooks/useAuth";
 import Avatar from "./Avatar";
 import SettleUpModal from "./SettleUpModal";
 import Spinner from "./Spinner";
+import EmptyState from "./EmptyState";
 
 export default function BalancesTab({ group }: { group: GroupDetail }) {
   const { t } = useI18n();
@@ -30,12 +31,7 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
       {isLoading && <Spinner label={t("computingBalances")} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
 
-      {data && allSettled && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          <Scale className="mx-auto mb-3 h-8 w-8 text-slate-400 dark:text-slate-500" />
-          {t("allSettled")}
-        </div>
-      )}
+      {data && allSettled && <EmptyState icon={Scale} message={t("allSettled")} />}
 
       {entries.map(([currency, transfers]) =>
         transfers.length === 0 ? null : (

@@ -13,6 +13,7 @@ import {
 import { useI18n } from "../lib/i18n";
 import Modal from "../components/Modal";
 import ListSkeleton from "../components/ListSkeleton";
+import EmptyState from "../components/EmptyState";
 
 export default function GroupsPage() {
   const queryClient = useQueryClient();
@@ -99,10 +100,11 @@ export default function GroupsPage() {
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
 
       {groups && groups.length === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          <Users className="mx-auto mb-3 h-8 w-8 text-slate-400 dark:text-slate-500" />
-          {t("noGroups")}
-        </div>
+        <EmptyState
+          icon={Users}
+          message={t("noGroups")}
+          action={{ label: t("newGroup"), onClick: () => setCreating(true) }}
+        />
       )}
 
       <ul className="space-y-2">
