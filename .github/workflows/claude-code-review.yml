@@ -46,14 +46,18 @@ jobs:
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Do NOT set track_progress/use_sticky_comment here. They force the
-          # action into *tag* mode, which still requires a tag-mode trigger
-          # (an @claude mention, an assignee, or the label) — a plain
-          # pull_request event satisfies none of those, so the whole run is
-          # skipped and nothing is reviewed at all. Tried on PR #30: the run
-          # step reported `outcome=skipped` in 11s with MODE empty. Supplying
-          # `prompt` keeps this job in agent mode, which is what makes it fire
-          # on the pull_request event without a mention.
+          # Supplying `prompt` puts the job in agent mode, which is what lets
+          # it fire on a pull_request event with no @claude mention ("Auto-
+          # detected mode: agent for event: pull_request" in the run log).
+          #
+          # track_progress/use_sticky_comment are deliberately NOT set. They
+          # would move the job to tag mode, and this job has no way to test
+          # that change: the action refuses to run whenever this file differs
+          # from the copy on the default branch (see the guard step below), so
+          # a PR editing it can never exercise the reviewer. Changing modes
+          # blind, on the job that reviews everything else, is not a trade
+          # worth taking — the guard below covers the failure they were meant
+          # to fix.
           prompt: |
             Review this pull request for the SplitDec app (FastAPI + React
             Splitwise clone). Read README.md, CLAUDE.md, and
@@ -141,7 +145,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          # A PR that edits this file cannot be reviewed by it: the action
+          # requires the workflow to match the default branch's copy, so that
+          # a PR can't rewrite the reviewer (which holds an OAuth token) and
+          # have the rewrite run. Warn and pass, or this step would pin a
+          # permanent red check on every workflow change.
+          #
+          # The contents API returns the git blob SHA, so reading the blob out
+          # of HEAD compares content without fetching the base branch. Read
+          # from the commit rather than hashing the file on disk: that way no
+          # checkout filter or EOL normalisation can shift the hash.
+          head_blob=$(git rev-parse "HEAD:.github/workflows/claude-code-review.yml")
+          base_blob=$(gh api \
+            "repos/${{ github.repository }}/contents/.github/workflows/claude-code-review.yml?ref=$BASE_REF" \
+            --jq .sha 2>/dev/null || echo "missing")
+          if [ "$head_blob" != "$base_blob" ]; then
+            echo "::warning::This PR changes the review workflow, so the action skipped itself (it only runs when the file matches $BASE_REF). No review to check for. The change takes effect for PRs opened after this one merges."
+            exit 0
+          fi
+
           # `since` is the API's own filter, so this asks only for comments
           # newer than the anchor. Note: no --paginate — combined with --jq it
           # prints one count per page, and `[ "$posted" -eq 0 ]` would then be
