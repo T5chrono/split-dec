@@ -12,6 +12,7 @@ from ..currencies import precision_for
 from ..db import get_db
 from ..deps import get_settlement_for_member, require_membership
 from ..models import GroupMember, Settlement
+from ..ratelimit import enforce_ledger_write_quota
 from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
 
 router = APIRouter(tags=["settlements"])
@@ -73,6 +74,7 @@ async def create_settlement(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     await require_membership(db, group_id, caller, lock="shared")
+    await enforce_ledger_write_quota(db, group_id)
     await _validate_parties(db, group_id, body.paid_by_user_id, body.paid_to_user_id)
     _validate_amount_precision(body.amount, body.currency)
     settlement = Settlement(

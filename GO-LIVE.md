@@ -36,9 +36,8 @@ everything here is ops, config or legal, with two exceptions marked *code*.
 **Should land before real traffic, but not blocking:**
 
 6. Uptime check on `/api/health` and some error aggregation (item 7).
-7. *Code:* rate limiting on write endpoints (item 11).
-8. Branch protection, if the repo goes public or onto GitHub Pro (item 6).
-9. Legal review of the text drafted in item 8.
+7. Branch protection, if the repo goes public or onto GitHub Pro (item 6).
+8. Legal review of the text drafted in item 8.
 
 **After launch:** buycoffee.to profile and its tax treatment (item 9), the
 TWA/Play Store path (item 10), 404 page, `robots.txt`, and route-level code
@@ -222,8 +221,26 @@ Home Screen"). To turn it into a Play Store app:
    `.aab` to Google Play ($25 one-time developer account; privacy policy from
    item 8 is required for the listing).
 
-## 11. Nice-to-haves before launch — ☐
-- Rate limiting on write endpoints (expense/settlement/invite creation).
+## 11. Nice-to-haves before launch — ◐
+- ☑ **Rate limiting on write endpoints.** `api/_src/ratelimit.py`: expense and
+  settlement creation share one per-group 24h window
+  (`MAX_LEDGER_WRITES_PER_GROUP`), and group creation is capped per caller
+  (`MAX_GROUPS_PER_CALLER`) so the per-group limit can't be sidestepped by
+  making more groups. Invitations keep their own three windows and now share
+  the dialect-aware `window_cutoff` helper.
+  - Counted from rows in the database, not process memory — the API is a
+    serverless function with several instances and constant cold starts.
+  - Soft-deleted rows still count, so a create/delete loop can't reset a
+    window (the same reason cancelled invitations are kept).
+  - **Deliberately no global ledger cap**: it would turn one abusive account
+    into an outage for everyone. The two limits together already bound any
+    account to (groups it can create) × (writes per group).
+  - Known trade-off: the natural axis is *per caller*, which needs a
+    `created_by` column on `expenses`/`settlements`. Skipped rather than
+    migrate the ledger tables for a volume brake — revisit if abuse is ever
+    seen from a member inside a shared group.
+  - The 429 `detail` reaches the UI as-is (English only), like the existing
+    invitation quota message. Worth localizing if these start firing.
 - Empty-state polish and a 404 page.
 - `robots.txt` / basic SEO meta if the marketing page is public.
 - Bundle size: the SPA is a single ~670 kB chunk (~195 kB gzipped); consider

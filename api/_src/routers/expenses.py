@@ -10,6 +10,7 @@ from ..auth import verify_jwt
 from ..db import get_db
 from ..deps import get_expense_for_member, require_membership
 from ..models import Expense, ExpenseSplit, GroupMember
+from ..ratelimit import enforce_ledger_write_quota
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
 from ..splits import compute_splits
 
@@ -78,6 +79,7 @@ async def create_expense(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     await require_membership(db, group_id, caller, lock="shared")
+    await enforce_ledger_write_quota(db, group_id)
     await _validate_participants(db, group_id, body)
     shares = compute_splits(
         body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits

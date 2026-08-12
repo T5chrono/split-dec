@@ -11,6 +11,7 @@ from ..db import get_db
 from ..deps import get_active_user, require_membership
 from ..emailer import send_invitation_email
 from ..models import Group, GroupInvitation, GroupMember, User
+from ..ratelimit import window_cutoff
 from ..schemas import (
     InvitationCreate,
     InvitationCreatedOut,
@@ -31,17 +32,6 @@ INVITE_MAX_PER_RECIPIENT = 3  # one address, however many accounts aim at it
 INVITE_MAX_GLOBAL = 300  # whole-deployment brake on a compromised account
 
 
-def _window_cutoff(db: AsyncSession) -> datetime:
-    """Start of the rate-limit window, in the flavour the bound dialect
-    stores `created_at` as. Postgres keeps TIMESTAMPTZ; SQLite (tests) keeps
-    the naive UTC text CURRENT_TIMESTAMP produces, and comparing that against
-    an offset-aware bind parameter compares wrong."""
-    cutoff = datetime.now(timezone.utc) - INVITE_WINDOW
-    if db.get_bind().dialect.name == "sqlite":
-        return cutoff.replace(tzinfo=None)
-    return cutoff
-
-
 async def _enforce_invite_quota(db: AsyncSession, caller: uuid.UUID, email: str) -> None:
     """429 once any of the three windows is exhausted. One round trip."""
     by_caller, by_recipient, overall = (
@@ -50,7 +40,7 @@ async def _enforce_invite_quota(db: AsyncSession, caller: uuid.UUID, email: str)
                 func.sum(case((GroupInvitation.invited_by == caller, 1), else_=0)),
                 func.sum(case((GroupInvitation.email == email, 1), else_=0)),
                 func.count(),
-            ).where(GroupInvitation.created_at >= _window_cutoff(db))
+            ).where(GroupInvitation.created_at >= window_cutoff(db, INVITE_WINDOW))
         )
     ).one()
     exceeded = (
