@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./hooks/useAuth";
 import { I18nProvider } from "./lib/i18n";
 import { enforceCanonicalOrigin } from "./lib/canonicalHost";
@@ -26,11 +27,15 @@ if (!leaving) {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <I18nProvider>
-          <AuthProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </AuthProvider>
+          {/* Inside I18nProvider so its fallback can be translated, and around
+              everything else so a failed lazy chunk cannot blank the app. */}
+          <ErrorBoundary>
+            <AuthProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </AuthProvider>
+          </ErrorBoundary>
         </I18nProvider>
       </QueryClientProvider>
     </StrictMode>,
