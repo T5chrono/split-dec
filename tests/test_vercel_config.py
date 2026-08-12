@@ -14,9 +14,16 @@ CONFIG = json.loads(
 
 
 def _headers_for(path: str) -> dict[str, str]:
-    """Flatten every header rule whose source matches everything."""
+    """Flatten every header rule that applies to *every* response.
+
+    Host-scoped rules (`has`) are skipped: they fire on one domain only, so
+    folding them in here would claim, for instance, that the apex sends the
+    noindex meant for the vercel.app host.
+    """
     found: dict[str, str] = {}
     for rule in CONFIG.get("headers", []):
+        if rule.get("has"):
+            continue
         if rule["source"] in ("/(.*)", "/:path*", path):
             found.update({h["key"]: h["value"] for h in rule["headers"]})
     return found
@@ -64,3 +71,30 @@ def test_www_redirect_covers_the_bare_root():
     assert "/" in sources
     if "/:path*" in sources:
         assert sources.index("/") < sources.index("/:path*")
+
+
+def test_apex_is_indexable():
+    """The canonical domain must never carry a noindex — the whole point of
+    the host-scoped rule below is that it applies to the *other* host."""
+    assert "X-Robots-Tag" not in _headers_for("/")
+
+
+def test_vercel_domain_is_not_indexable():
+    """split-dec.vercel.app serves the same app as the apex, so left alone it
+    is duplicate content competing with the canonical domain.
+
+    A host-scoped header is the only way to say so: every route is rewritten
+    to a single index.html, so a `<link rel="canonical">` placed in it would
+    also claim /privacy and /terms are copies of the landing page.
+    """
+    rules = [
+        r
+        for r in CONFIG["headers"]
+        if any(
+            h["type"] == "host" and h["value"] == "split-dec.vercel.app"
+            for h in r.get("has", [])
+        )
+    ]
+    assert rules, "no host-scoped rule for split-dec.vercel.app"
+    tags = [h["value"] for r in rules for h in r["headers"] if h["key"] == "X-Robots-Tag"]
+    assert tags and all("noindex" in v for v in tags)

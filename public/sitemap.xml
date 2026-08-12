@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The complete public surface. No <lastmod>: it would be a hand-maintained
+  date that goes stale silently, and crawlers weigh an obviously wrong one
+  worse than an absent one.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://split-dec.app/</loc>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://split-dec.app/privacy</loc>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://split-dec.app/terms</loc>
+    <priority>0.3</priority>
+  </url>
+</urlset>
