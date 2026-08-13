@@ -224,6 +224,23 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   `src/lib/legal.ts`, whose header carries the rule that any change to
   processors, storage or retention changes that file and bumps
   `LEGAL_UPDATED`.
+- **Checking the measurement is alive** cannot be done by curling the endpoints:
+  the catch-all rewrite turns *any* unregistered `/_vercel/...` path into a 200
+  `index.html`, so a dead collector and a live one both look like success. What
+  discriminates them is a GET on the collector path — `/_vercel/insights/view`
+  and `/_vercel/speed-insights/vitals` answer with Vercel's own
+  `{"code":"not_found"}` JSON, because the route exists and only rejects the
+  method, while a path the platform does not own falls through to the SPA and
+  returns HTML. Ground truth is the data:
+  `vercel metrics vercel.speed_insights.lcp_count --since 1d --prod` (names via
+  `vercel metrics schema vercel.speed_insights`; needs a recent CLI). Two traps
+  there. Ingestion lags a minute or two, so `No data found` straight after the
+  traffic means nothing — the query that came back empty at 12:18 returned the
+  same points at 12:19. And only TTFB is sent on load; LCP/FCP/CLS/INP wait for
+  the page to be hidden, so a single foreground visit reads as a broken install.
+  Query `vercel.analytics_pageview.count` first as a control: it shares the auth,
+  scope, project and `--prod` filter, so if it has rows and Speed Insights has
+  none, the difference is real rather than a mistake in the query.
 - A top-level `ErrorBoundary` (`main.tsx`, inside `I18nProvider` so its fallback
   is translated) reloads **once** on a chunk-load error: a client on an old app
   shell 404s its next lazy import after a deploy rotates the chunk hashes, and

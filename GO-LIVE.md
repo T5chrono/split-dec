@@ -2,51 +2,113 @@
 
 Things to do before treating SplitDec as a real, publicly-usable product.
 The app is fully functional today at https://split-dec.app; the items below
-are about production-readiness, deliverability, security hardening, and
-polish — not missing features.
-
-(Use the apex when linking to the app. `split-dec.vercel.app` still serves it,
-but it now carries `X-Robots-Tag: noindex` so it cannot compete with the
-canonical domain in search — item 11.)
+are production-readiness, deliverability, security hardening and polish — not
+missing features. The app itself is feature-complete and green (140 backend
+tests, 156 frontend, build), so **almost everything outstanding is ops, config
+or legal**. Only two entries still carry code: item 7 (wire an error tracker)
+and item 11's `beforeSend` follow-up.
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
+(Use the apex when linking to the app. `split-dec.vercel.app` still serves it
+but carries `X-Robots-Tag: noindex`, so it cannot compete with the canonical
+domain in search — item 11.)
+
 ---
 
-## Remaining before launch, in dependency order
+## Current phase: open but unannounced
 
-An index into the items below — the detail stays in each section. The app
-itself is feature-complete and green (140 backend tests, 156 frontend, build).
-**Everything still outstanding is ops, config or legal** — dashboards, DNS,
-billing and a lawyer's eye. The code-side work is done; item 6 is the only
-entry with a code component left in it (wiring an error tracker).
+Decided 2026-08-13. The app is live and anyone who finds the URL can use it;
+nothing points at it yet. Two things "test mode" does **not** mean here — both
+checked against production rather than assumed, and both deliberately left
+alone:
 
-**Critical path — these gate a public launch:**
+- **The apex is indexable.** Only `split-dec.vercel.app` carries
+  `X-Robots-Tag: noindex`; `split-dec.app` carries none, and `robots.txt`
+  invites crawling of `/`, `/privacy` and `/terms` with a sitemap listing them.
+- **Email/password signup is open to anyone.** `signUpWithPassword` goes
+  straight to `supabase.auth.signUp` with no allowlist or invite gate. Google's
+  "Testing" mode caps *Google* sign-in at 100 hand-added users; it does not
+  gate the app, and it never did.
 
-1. **Inbound mail for `privacy@split-dec.app`** (item 8). It is the contact
-   point published in both legal documents. Nothing else can be true until
-   mail to it is delivered somewhere a human reads.
-2. **Publish the Google OAuth consent screen** (items 2 + 3). Until then you
-   are capped at 100 hand-added test users and everyone sees an "unverified
-   app" warning. Needs the `/privacy` and `/terms` URLs (done, item 8) and
-   `split-dec.app` added to authorized domains. **Longest lead time —
-   verification can take days, so start it first once item 1 is done.**
+If the phase ever needs to become genuinely private, those are the two levers:
+a host-scoped `X-Robots-Tag` on the apex in `vercel.json` (with its assertion
+in `tests/test_vercel_config.py`), and Supabase → Authentication → "Allow new
+users to sign up".
+
+**Standing constraint for this phase: stay on free tiers.** That is the only
+reason item 5 (Supabase Pro) sits in section B rather than section A.
+
+---
+
+## A. Do now — nothing here waits on anyone else
+
+Ordered by lead time, longest first. The detail stays in the numbered sections.
+
+1. **Google OAuth consent screen** (items 2 + 3) — complete it, add
+   `split-dec.app` to authorized domains, publish, submit for verification.
+   **Start this first: it is the longest clock and the wait runs in parallel
+   with testing.** Publishing is not a launch; it removes the 100-user cap and
+   the "unverified app" warning. Its prerequisites (`/privacy`, `/terms`) are
+   already live. The outcome then sits in section C.
+2. **Inbound mail for `privacy@split-dec.app`** (item 8) — the contact point
+   published in both legal documents, and testers may well use it. An address
+   that bounces is worse than none.
 3. **Rotate the secrets that passed through chat/tooling** (item 4) — Supabase
-   DB password and the Resend API key.
-4. **Supabase Pro** (item 5). The free tier pauses after ~1 week of inactivity
-   and has **no point-in-time recovery**. This is the item with the worst
-   failure mode: holding other people's shared ledgers with no backups.
-5. **Bilingual PL+EN auth email templates** (item 1). SMTP is verified
-   end-to-end; only the Supabase default templates remain.
+   DB password, Resend API key. Best done *now*, in a phase where a fumbled
+   environment variable costs nothing.
+4. **Bilingual PL+EN auth email templates** (item 1) — testers hit signup and
+   reset emails, so they may as well test the real ones.
+5. **Error tracking and an uptime check** (item 7) — the only remaining code
+   work. Testing without error aggregation wastes every bug a tester hits.
+6. **buycoffee.to profile** (item 9) — moved ahead of launch by decision on
+   2026-08-13; the tax question is worth asking an accountant during testing.
+7. **Branch protection decision** (item 6) — needs GitHub Pro or a public repo.
+8. **Re-confirm the anon key cannot read tables** (item 5) — free, quick, and
+   the one part of item 5 that is not gated on Pro.
+9. **Analytics `beforeSend`** (item 11) — stop Web Analytics reporting raw
+   group UUIDs; Speed Insights already folds them.
 
-**Should land before real traffic, but not blocking:**
+## B. At launch — the switch-flip list
 
-6. Uptime check on `/api/health` and some error aggregation (item 7).
-7. Branch protection, if the repo goes public or onto GitHub Pro (item 6).
-8. Legal review of the text drafted in item 8.
+Short by design, because everything above is meant to be done already.
 
-**After launch:** buycoffee.to profile and its tax treatment (item 9) and the
-TWA/Play Store path (item 10).
+1. **Supabase Pro** (item 5). Deferred purely by the free-tier constraint, and
+   it is the item with the worst failure mode: the free tier pauses after ~1
+   week of inactivity and has **no point-in-time recovery**, so a bad day
+   holding other people's shared ledgers is unrecoverable. Reconsider early if
+   testers start entering data they would be upset to lose.
+2. **Leaked-password protection** (item 5) — Pro-only, so it lands with the
+   upgrade. Review Auth rate limits at the same time.
+3. **Announce.** No `noindex` to remove and no signup toggle to flip: the
+   current phase is unannounced, not hidden.
+
+## C. Waiting on other people — lower priority
+
+Real work, but the clock is not yours to run, so it should never block
+section A.
+
+1. **Legal review of the Privacy Policy and Terms** (item 8). Drafted to be
+   accurate about this specific app, never read by a lawyer; the liability,
+   consumer-rights and governing-law clauses are the ones worth a professional
+   eye. It says considerably more since analytics and Speed Insights landed.
+2. **Google's verification outcome** — follows the submission in A1. Days,
+   sometimes longer.
+3. **Play Store via TWA** (item 10) — depends on 12 testers staying opted in
+   for 14 continuous days *and* a paid developer account, so it is both
+   people-dependent and against the free-tier constraint. Deferred. **Verify
+   the current requirement before planning around it** — Google's terms for
+   new personal developer accounts have changed before.
+
+## Decisions on record — 2026-08-13
+
+- **Phase: open but unannounced.** Not hidden; see above.
+- **Free tiers for the duration of testing.** Defers item 5 and item 10.
+- **buycoffee.to moves before launch** (was: after).
+- **Test data stays at launch.** Nothing gets purged, so whatever testers
+  create becomes production data. Worth knowing: cleaning up later is
+  constrained by design — account deletion refuses while any balance is
+  non-zero, and a group cannot be deleted until it is settled.
 
 **Item 11 is fully closed.** Rate limiting, the 404 page and empty states, SEO
 and route-level code splitting shipped earlier; the two follow-ups they left
@@ -58,12 +120,20 @@ invitation quotas, which turned out to have the identical hole.
 
 ## Verified in production — 2026-08-13
 
-Checked against `https://split-dec.app` on commit `2f5471e`:
+Checked against `https://split-dec.app` on commit `28f05cc`, the last of the
+day's four merges:
 
-- The **vendor chunk split** holds across deploys: `vendor-B36xOpBl.js` kept
-  its hash through three separate production deploys while the app entry chunk
-  rotated each time (`DiQXpFl5` → `vChPMxzE` → `BdXQ6JuT`). That is the whole
-  point of the split, observed rather than assumed.
+- The **vendor chunk split** behaves exactly as designed, observed rather than
+  assumed. `vendor-B36xOpBl.js` held its hash through three consecutive
+  production deploys while the app entry chunk rotated each time
+  (`DiQXpFl5` → `vChPMxzE` → `BdXQ6JuT`), then rotated to `vendor-sAol5NOC.js`
+  on the fourth — the deploy that bumped `react-router`, which is precisely
+  when it *should* rotate.
+- That last hash is also the proof the **`react-router` 7.18.2 patch is really
+  live**: it is byte-identical to the local build's, and Rollup hashes are
+  content-derived. `node_modules` is unaffected by the CRLF difference that
+  makes app-code hashes diverge between a Windows checkout and Vercel's Linux
+  builders, so vendor is the one chunk that can be compared across the two.
 - **Web Analytics and Speed Insights both serve and fire**:
   `/_vercel/insights/script.js`, `/_vercel/speed-insights/script.js` and a
   `POST /_vercel/insights/view` beacon.
@@ -78,11 +148,11 @@ Checked against `https://split-dec.app` on commit `2f5471e`:
 - `/api/health` 200. `write_events` exists and is empty — the quota path is
   deployed but no traffic has exercised it yet.
 
-**The stale-shell trap bit twice in one day, both times looking like a failed
-deploy.** After each deploy the first load came from the *already-installed*
-service worker: old app shell, old chunk hash, and — the alarming one — the
-**previous version of the Privacy Policy**. Both times the origin was already
-serving the new build. Before concluding anything about a deploy, unregister
+**The stale-shell trap bit three times in one day, every time looking like a
+failed deploy.** After each deploy the first load came from the
+*already-installed* service worker: old app shell, old chunk hash, and — the
+alarming one — the **previous version of the Privacy Policy**. Every time, the
+origin was already serving the new build. Before concluding anything about a deploy, unregister
 the service worker and clear `caches`, or use a fresh private window. Note the
 failure mode is self-consistent rather than dangerous: an old cached shell is
 old JS, which contains no measurement code either, so nobody is ever measured
@@ -199,14 +269,18 @@ These were shared during development and should be rotated before launch:
 - Review the Supabase publishable/anon key exposure (it is public by design,
   but confirm no service-role key is anywhere in the frontend or git history).
 
-## 5. Supabase production readiness — ☐
-- **RLS stays disabled by design** (the FastAPI layer is the sole authz
-  boundary; Data API grants were revoked in migration
+## 5. Supabase production readiness — ☐ (split: one part now, the rest at launch)
+- **§A8 — do now, free:** **RLS stays disabled by design** (the FastAPI layer
+  is the sole authz boundary; Data API grants were revoked in migration
   `20260702000001_lock_down_data_api.sql`). Re-confirm no table is reachable
-  via the anon key: a quick `curl` to the REST endpoint should 401/empty.
-- Free tier **pauses the project after ~1 week of inactivity** and has no
-  point-in-time recovery — upgrade to Pro for uptime + daily backups before
-  real users depend on it.
+  via the anon key: a quick `curl` to the REST endpoint should 401/empty. This
+  is the only part of item 5 that is not gated on a paid plan.
+- **§B1 — at launch:** free tier **pauses the project after ~1 week of
+  inactivity** and has no point-in-time recovery. Deferred by the free-tier
+  decision of 2026-08-13, which is a real bet: during testing the exposure is
+  losing test data, and the decision was that test data now becomes production
+  data at launch. **Revisit the moment a tester enters something they would be
+  upset to lose** — the free tier has no way to get it back.
 - Confirm the DB connection uses the **Transaction Pooler (port 6543)** in
   production `DATABASE_URL` (it does today).
 - Email/password auth: enable **leaked-password protection** (HaveIBeenPwned
@@ -278,18 +352,23 @@ These were shared during development and should be rotated before launch:
   is the contact point in both documents and for GDPR requests. Resend inbound
   or a registrar-level forward to a real inbox. An address that bounces is
   worse than none.
-- ☐ Have the text reviewed. It was drafted to be accurate about this specific
-  app, not run past a lawyer; the liability, consumer-rights and governing-law
-  clauses in particular are the ones worth a professional eye if usage grows
-  beyond friends. Both documents state that the Polish version prevails.
+- ☐ **§C1 — waiting on someone else, deliberately not a blocker.** Have the
+  text reviewed. It was drafted to be accurate about this specific app, not run
+  past a lawyer; the liability, consumer-rights and governing-law clauses in
+  particular are the ones worth a professional eye if usage grows beyond
+  friends. Both documents state that the Polish version prevails. It says
+  considerably more since analytics and Speed Insights landed, so a review is
+  worth more now than it would have been this morning.
 - Note: these are SPA routes, so the served HTML is the app shell and the text
   is rendered by JS. Google's OAuth reviewers render pages, so this is normally
   fine — but if the review bounces on "policy not found", the fallback is a
   prerendered static `public/privacy.html` / `terms.html`.
 
-## 9. Funding: buycoffee.to — ☐
+## 9. Funding: buycoffee.to — ☐ (§A6 — moved before launch on 2026-08-13)
 SplitDec will be funded by voluntary payments via [buycoffee.to](https://buycoffee.to)
-rather than subscriptions or ads.
+rather than subscriptions or ads. Creating the profile and settling the tax
+question are both self-contained, so they belong in the testing phase; only the
+in-app link has to wait for a page worth linking to.
 - Create a **dedicated buycoffee.to profile for SplitDec** (not a personal
   account) — separate name/avatar/description, its own payout destination,
   and a clean transaction history if this ever needs accounting for.
@@ -307,7 +386,14 @@ rather than subscriptions or ads.
   no Terms change — but if contributions ever unlock anything, that clause and
   the consumer-withdrawal position both have to be revisited.
 
-## 10. Android app (Play Store) via TWA — ☐ (PWA prerequisite ☑)
+## 10. Android app (Play Store) via TWA — ☐ (§C3 — deferred)
+Deferred twice over: it needs a paid developer account, against the free-tier
+decision, and publishing from a new **personal** developer account has required
+12 testers opted in for 14 continuous days — people-dependent, and a clock that
+cannot be shortened. **Check Google's current requirement before planning
+around it**; their terms for new personal accounts have changed before, and
+this note is not a live source.
+
 The app is an installable PWA (manifest + service worker; Chrome → "Add to
 Home Screen"). To turn it into a Play Store app:
 1. `npx @bubblewrap/cli init --manifest https://split-dec.app/manifest.webmanifest`
