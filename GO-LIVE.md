@@ -56,6 +56,40 @@ invitation quotas, which turned out to have the identical hole.
 
 ---
 
+## Verified in production — 2026-08-13
+
+Checked against `https://split-dec.app` on commit `2f5471e`:
+
+- The **vendor chunk split** holds across deploys: `vendor-B36xOpBl.js` kept
+  its hash through three separate production deploys while the app entry chunk
+  rotated each time (`DiQXpFl5` → `vChPMxzE` → `BdXQ6JuT`). That is the whole
+  point of the split, observed rather than assumed.
+- **Web Analytics and Speed Insights both serve and fire**:
+  `/_vercel/insights/script.js`, `/_vercel/speed-insights/script.js` and a
+  `POST /_vercel/insights/view` beacon.
+- **Cookie audit — no cookies, confirmed four ways.** `document.cookie` empty
+  and `cookieStore.getAll()` zero *after* both beacons fired; no `Set-Cookie`
+  on `/`, `/privacy`, `/api/health` or either measurement script (checked with
+  `curl -I`, since `Set-Cookie` is a forbidden header for `fetch` to read);
+  and no `document.cookie` anywhere in `src/`. Signed-out browser storage is
+  exactly one key, `splitdec.theme`.
+- Privacy Policy live in **both** languages with the analytics and performance
+  disclosures and `LEGAL_UPDATED` 2026-08-13.
+- `/api/health` 200. `write_events` exists and is empty — the quota path is
+  deployed but no traffic has exercised it yet.
+
+**The stale-shell trap bit twice in one day, both times looking like a failed
+deploy.** After each deploy the first load came from the *already-installed*
+service worker: old app shell, old chunk hash, and — the alarming one — the
+**previous version of the Privacy Policy**. Both times the origin was already
+serving the new build. Before concluding anything about a deploy, unregister
+the service worker and clear `caches`, or use a fresh private window. Note the
+failure mode is self-consistent rather than dangerous: an old cached shell is
+old JS, which contains no measurement code either, so nobody is ever measured
+under a policy that does not disclose it.
+
+---
+
 ## Verified in production — 2026-08-12
 
 Checked against `https://split-dec.app` on commit `1ead6b2`, not inferred from
@@ -233,6 +267,13 @@ These were shared during development and should be rotated before launch:
   says the page address is recorded, and Vercel already sees every URL in its
   server logs) but it is worth closing with a `beforeSend` rewrite for the same
   reasons as above.
+- The "what the app stores in your browser" list said **three** things (session,
+  language, theme) and missed a fourth: `splitdec.chunk-reload`, the
+  `sessionStorage` timestamp `ErrorBoundary` writes to stop a missing chunk
+  becoming a refresh loop. Trivial and non-personal, but the sentence
+  enumerates, so it was wrong. Now four, in both languages. The lesson for the
+  next audit: that paragraph is an **exhaustive** claim, so anything that
+  touches `localStorage`/`sessionStorage` has to be added to it.
 - ☐ **Make `privacy@split-dec.app` actually receive mail** before launch — it
   is the contact point in both documents and for GDPR requests. Resend inbound
   or a registrar-level forward to a real inbox. An address that bounces is
