@@ -6,39 +6,53 @@ several concurrent instances and cold-starts constantly, so in-process state
 would be both unshared and routinely lost. The database is the only counter
 all instances agree on.
 
-Soft-deleted rows still count, so deleting an expense or a settlement does not
-free its slot — the same reason cancelled invitations are kept rather than
-deleted.
+What it counts is `write_events` — one append-only row per quota-consuming
+write, charged to the caller — and not the expenses, settlements and groups
+being created. Counting those made every window resettable. Soft-deleted
+entries did still count, but deleting a *group* is a hard delete that takes its
+expenses and settlements with it (routers/groups.py), and any member may delete
+a group once it is settled: create a group, fill it, delete it, repeat, and
+both windows were clear again. A tombstone that nothing cascades to is what
+closes that loop.
 
-What these limits do NOT stop: deleting a *group* is a hard delete that takes
-its expenses and settlements with it (groups.py), so a caller willing to
-create a group, fill it and delete it can loop indefinitely. These are brakes
-on runaway volume — a retrying client, a buggy script, an account writing
-flat out — not a defence against a determined attacker. Closing that hole
-needs a tombstone surviving group deletion; see GO-LIVE item 11.
+Moving the count off the ledger tables also put the ledger window on its
+natural axis. It was per-group, so one member could consume the allowance of
+everyone else in the group; both windows are now per-caller.
+
+Recording an event *is* the slot being spent, so it happens exactly once, in
+the same transaction as the row it authorizes. A create that rolls back — the
+idempotency race in expenses.py, or a validation failure after the check —
+takes its event with it, and a replay is answered before the quota is ever
+consulted, because a client retrying a request whose response it never saw has
+already paid for that slot.
+
+Deliberately no global cap on either window: a deployment-wide ceiling would
+turn one abusive account into an outage for everybody.
 """
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Expense, Group, Settlement
+from .models import WriteEvent
+
+# The two kinds of slot. Kept apart so a burst of expenses cannot exhaust the
+# allowance for creating a group, and vice versa.
+LEDGER = "LEDGER"
+GROUP = "GROUP"
 
 WRITE_WINDOW = timedelta(hours=24)
 
-# Expenses + settlements combined, per group. A ten-person trip logging every
-# meal might reach 50 in a day; this leaves room for that and stops a runaway
-# client. Deliberately per-group and NOT global: a deployment-wide ledger cap
-# would turn one abusive account into an outage for everybody.
-MAX_LEDGER_WRITES_PER_GROUP = 300
+# Expenses + settlements combined, per caller. One person logging every meal on
+# a busy trip might reach 50 in a day across all their groups; this leaves room
+# for that and still stops a runaway client.
+MAX_LEDGER_WRITES_PER_CALLER = 300
 
 # Groups one account can create in a window. Nobody legitimately creates 25
-# groups a day. This raises the cost of sidestepping the per-group limit by
-# making more groups — it does not remove it, since deleting a group frees the
-# count again (see the module docstring).
+# groups a day.
 MAX_GROUPS_PER_CALLER = 25
 
 
@@ -61,43 +75,55 @@ def _too_many(detail: str) -> HTTPException:
     )
 
 
-async def enforce_ledger_write_quota(db: AsyncSession, group_id: uuid.UUID) -> None:
-    """429 once a group has absorbed too many expense + settlement creations.
+async def _slots_used(db: AsyncSession, caller: uuid.UUID, kind: str) -> int:
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(WriteEvent)
+            .where(
+                WriteEvent.user_id == caller,
+                WriteEvent.kind == kind,
+                WriteEvent.created_at >= window_cutoff(db),
+            )
+        )
+    ).scalar_one()
 
-    Counted across both tables in one round trip. Unlike the invitation
-    quotas this message can be specific: the caller is already a member and
-    can see the group's whole history, so naming the group's own activity
-    tells them nothing they could not read off the expenses tab.
+
+async def record_write(db: AsyncSession, caller: uuid.UUID, kind: str) -> None:
+    """Charge one slot to the caller.
+
+    Call it in the same transaction as the row it authorizes, so the two commit
+    or roll back together. The event is added to the session rather than
+    committed here — the endpoint owns the transaction.
     """
-    cutoff = window_cutoff(db)
-    expenses = (
-        select(func.count())
-        .select_from(Expense)
-        .where(Expense.group_id == group_id, Expense.created_at >= cutoff)
-        .scalar_subquery()
+    # Opportunistic prune, scoped to this caller: rows that have aged out of
+    # the window can never be counted again, and a serverless function has
+    # nowhere to hang a cron. Usually deletes nothing, and the
+    # (user_id, created_at) index makes finding that out cheap. Done before the
+    # insert below so it can never sweep the row being written.
+    await db.execute(
+        delete(WriteEvent).where(
+            WriteEvent.user_id == caller,
+            WriteEvent.created_at < window_cutoff(db),
+        )
     )
-    settlements = (
-        select(func.count())
-        .select_from(Settlement)
-        .where(Settlement.group_id == group_id, Settlement.created_at >= cutoff)
-        .scalar_subquery()
-    )
-    written = (await db.execute(select(expenses + settlements))).scalar_one()
-    if written >= MAX_LEDGER_WRITES_PER_GROUP:
+    db.add(WriteEvent(user_id=caller, kind=kind))
+
+
+async def enforce_ledger_write_quota(db: AsyncSession, caller: uuid.UUID) -> None:
+    """429 once one account has created too many expenses + settlements.
+
+    Counted across both endpoints and across every group the caller writes to.
+    The message can name the caller's own activity: unlike the invitation
+    quotas it reveals nothing about anyone else.
+    """
+    if await _slots_used(db, caller, LEDGER) >= MAX_LEDGER_WRITES_PER_CALLER:
         raise _too_many(
-            "This group has recorded too many entries recently. "
-            "Please try again later."
+            "You have recorded too many entries recently. Please try again later."
         )
 
 
 async def enforce_group_creation_quota(db: AsyncSession, caller: uuid.UUID) -> None:
     """429 once one account has created too many groups in the window."""
-    created = (
-        await db.execute(
-            select(func.count())
-            .select_from(Group)
-            .where(Group.created_by == caller, Group.created_at >= window_cutoff(db))
-        )
-    ).scalar_one()
-    if created >= MAX_GROUPS_PER_CALLER:
+    if await _slots_used(db, caller, GROUP) >= MAX_GROUPS_PER_CALLER:
         raise _too_many("You have created too many groups recently. Please try again later.")

@@ -10,7 +10,7 @@ from ..auth import verify_jwt
 from ..db import get_db
 from ..deps import get_expense_for_member, require_membership
 from ..models import Expense, ExpenseSplit, GroupMember
-from ..ratelimit import enforce_ledger_write_quota
+from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
 from ..splits import compute_splits
 
@@ -101,7 +101,10 @@ async def create_expense(
     if replay is not None:
         response.status_code = 200
         return replay
-    await enforce_ledger_write_quota(db, group_id)
+    await enforce_ledger_write_quota(db, caller)
+    # Charged now, committed with the expense below. A validation failure or
+    # the idempotency race rolls the session back and takes the charge too.
+    await record_write(db, caller, LEDGER)
     await _validate_participants(db, group_id, body)
     shares = compute_splits(
         body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits

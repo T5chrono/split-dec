@@ -108,3 +108,22 @@ class Settlement(Base):
     idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WriteEvent(Base):
+    """One append-only row per quota-consuming write; see ratelimit.py.
+
+    Attached to the caller and to nothing else on purpose. The quotas used to
+    count the rows they protect, and a group deletion hard-deletes that group's
+    expenses and settlements, so the windows reset. Nothing cascades to here.
+    """
+
+    __tablename__ = "write_events"
+    __table_args__ = (
+        CheckConstraint("kind IN ('LEDGER', 'GROUP')", name="write_events_kind_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

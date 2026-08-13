@@ -4,6 +4,31 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // The runtime every route needs, pinned into one chunk so a deploy
+          // that only touches app code leaves it cached: it is the half of the
+          // bundle that changes on a dependency bump, not on a feature.
+          //
+          // Deliberately NOT "everything in node_modules". lucide-react is
+          // tree-shaken per route, so hoisting it here would drag GroupPage's
+          // icon table into the chunk a signed-out visitor downloads and undo
+          // the route splitting it sits behind. Same for anything else that
+          // only one branch imports — leave those to Rollup.
+          vendor: [
+            "react",
+            "react-dom",
+            "react-dom/client",
+            "react-router-dom",
+            "@tanstack/react-query",
+            "@supabase/supabase-js",
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select, text
 
 from conftest import expense_payload, idem, make_group, make_user
-from _src.models import GroupInvitation, GroupMember, User
+from _src.models import GroupInvitation, GroupMember, User, WriteEvent
 
 
 async def test_search_endpoint_removed(client, two_user_group):
@@ -54,6 +54,29 @@ async def test_delete_account_succeeds_when_settled(client, two_user_group, db_s
             )
         ).scalar_one()
         assert remaining == 0
+
+
+async def test_delete_account_drops_its_rate_limit_tombstones(
+    client, db_session, two_user_group
+):
+    """write_events (ratelimit.py) are a per-user activity trace whose only
+    housekeeping is a prune that runs when that user writes again — which this
+    account never will. Clearing them frees no window worth having: sign-in is
+    revoked, and a replacement account is a different user id anyway."""
+    g = two_user_group
+    # Alice as the sole participant, so the group stays settled and deletable.
+    await client.post(
+        f"/api/groups/{g['group'].id}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    async with db_session() as s:
+        assert (await s.execute(select(WriteEvent))).scalars().all() != []
+
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        assert (await s.execute(select(WriteEvent))).scalars().all() == []
 
 
 async def test_deleted_account_token_cannot_act(client, two_user_group, current_user):

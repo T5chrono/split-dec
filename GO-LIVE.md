@@ -16,7 +16,7 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 ## Remaining before launch, in dependency order
 
 An index into the items below — the detail stays in each section. The app
-itself is feature-complete and green (131 backend tests, 153 frontend, build).
+itself is feature-complete and green (137 backend tests, 153 frontend, build).
 **Everything still outstanding is ops, config or legal** — dashboards, DNS,
 billing and a lawyer's eye. The code-side work is done; item 6 is the only
 entry with a code component left in it (wiring an error tracker).
@@ -45,12 +45,15 @@ entry with a code component left in it (wiring an error tracker).
 7. Branch protection, if the repo goes public or onto GitHub Pro (item 6).
 8. Legal review of the text drafted in item 8.
 
-**After launch:** buycoffee.to profile and its tax treatment (item 9), the
-TWA/Play Store path (item 10), and the two rate-limit gaps recorded in item 11
-(a tombstone so group deletion can't reset a quota; vendor-chunk splitting).
+**After launch:** buycoffee.to profile and its tax treatment (item 9) and the
+TWA/Play Store path (item 10).
 
-**Item 11 is closed** — rate limiting, the 404 page and empty states, SEO, and
-route-level code splitting all shipped and are live.
+**Item 11 is fully closed.** Rate limiting, the 404 page and empty states, SEO
+and route-level code splitting shipped earlier; the two follow-ups they left
+behind — a tombstone so group deletion can't reset a write quota, and
+vendor-chunk splitting — landed on 2026-08-13. One narrower gap of the same
+shape is newly recorded there: the *invitation* quotas still count rows that a
+group deletion cascades away.
 
 ---
 
@@ -257,35 +260,46 @@ Home Screen"). To turn it into a Play Store app:
    `.aab` to Google Play ($25 one-time developer account; privacy policy from
    item 8 is required for the listing).
 
-## 11. Nice-to-haves before launch — ☑ all four shipped
-Two known limitations are recorded inline below and carried in the "after
-launch" list; neither blocks a launch.
+## 11. Nice-to-haves before launch — ☑ all four shipped, follow-ups closed
+The two limitations this item used to carry were closed on 2026-08-13; one
+narrower gap of the same shape is recorded below and does not block a launch.
 - ☑ **Rate limiting on write endpoints.** `api/_src/ratelimit.py`: expense and
-  settlement creation share one per-group 24h window
-  (`MAX_LEDGER_WRITES_PER_GROUP`), and group creation is capped per caller
-  (`MAX_GROUPS_PER_CALLER`) so the per-group limit can't be sidestepped by
-  making more groups. Invitations keep their own three windows and now share
-  the dialect-aware `window_cutoff` helper.
+  settlement creation share one 24h window (`MAX_LEDGER_WRITES_PER_CALLER`) and
+  group creation has its own (`MAX_GROUPS_PER_CALLER`), both **per caller**, so
+  neither limit can be sidestepped by making more groups. Invitations keep
+  their own three windows and share the dialect-aware `window_cutoff` helper.
   - Counted from rows in the database, not process memory — the API is a
     serverless function with several instances and constant cold starts.
-  - Soft-deleted rows still count, so a create/delete loop can't reset a
-    window (the same reason cancelled invitations are kept).
-  - **Deliberately no global ledger cap**: it would turn one abusive account
-    into an outage for everyone.
+  - **Deliberately no global cap** on either window: it would turn one abusive
+    account into an outage for everyone.
   - Replays are answered **before** the quota in both create endpoints: a
     client retrying a request whose response it never saw has already spent
     its slot, and a 429 there would leave it unable to discover whether the
     entry exists — the one thing `Idempotency-Key` is for.
-  - **Known limitation — these are brakes on runaway volume, not a defence
-    against a determined attacker.** Deleting a group is a *hard* delete that takes its
-    expenses and settlements with it, so create-group → fill → delete → repeat
-    resets both windows. Closing it needs a tombstone that survives group
-    deletion (or a `created_by` column on the ledger tables, which would also
-    move the ledger limit onto the more natural per-caller axis). Both are
-    migrations on the money tables, deliberately not done for a volume brake.
-  - Second known gap: the ledger limit is per *group*, so one member can
-    consume the window for the others. At 300/group/24h against a busy trip's
-    ~50 that shouldn't bite, and the failure is a temporary 429, not data loss.
+  - ☑ **Both windows now survive a group deletion** (PR pending, 2026-08-13).
+    They used to count the rows they protected, and deleting a group is a
+    *hard* delete that takes its expenses and settlements with it, so
+    create-group → fill → delete → repeat reset them — the brakes only stopped
+    clients that were not trying. They now count `write_events`
+    (`supabase/migrations/20260813000000_write_events.sql`): one append-only
+    tombstone per charged write, keyed by the caller, that no cascade reaches.
+    Note the `created_by`-column variant floated earlier does **not** work on
+    its own — those rows die with the group too.
+  - ☑ **The ledger window moved from per-group to per-caller** in the same
+    change, which was the other half of the fix: a per-group window let one
+    member consume everyone else's allowance. 300/caller/24h against a busy
+    trip's ~50 leaves plenty of room.
+  - `record_write` prunes the caller's aged-out rows opportunistically (no cron
+    on a serverless function) and `delete_account` clears that user's, since
+    nothing would prune them again.
+  - **Remaining gap of the same shape: the invitation quotas.** They still
+    count `group_invitations`, which `delete_group` cascades away, so an
+    invite/delete-the-group loop resets all three windows. Not closed with the
+    others because the per-recipient window is keyed by *email address*, and a
+    table that outlives the group would retain addresses that account deletion
+    is specifically required to anonymize (item 8) — it needs a retention
+    decision, not just a migration. Resend's own sending limits are the
+    backstop meanwhile.
   - The 429 `detail` reaches the UI as-is (English only), like the existing
     invitation quota message. Worth localizing if these start firing.
 - ☑ **Empty-state polish and a 404 page.** Unmatched signed-in routes render
@@ -327,11 +341,21 @@ launch" list; neither blocks a launch.
     reference — with a cooldown so a genuinely missing chunk can't become a
     refresh loop, and a translated fallback otherwise. Ordinary render errors
     skip the reload; repeating a crash doesn't help.
-  - Remaining weight is vendor (React, Supabase, TanStack Query, lucide).
-    Splitting that into its own chunk would help repeat visits across deploys —
-    the obvious next step if load time still matters.
+  - ☑ **The vendor chunk was split out** (2026-08-13). `vite.config.ts`
+    `manualChunks` pins React, React-DOM, the router, TanStack Query and
+    supabase-js into `vendor` (488 kB / 141 kB gzipped), leaving the app's own
+    entry chunk at 59 kB / 20 kB — so a deploy that only changes app code
+    re-downloads ~20 kB instead of ~160 kB. Route chunks are unchanged
+    (`GroupPage` 73.6 kB before and after).
+  - The allow-list is explicit on purpose: sending *everything* in
+    `node_modules` to `vendor` would hoist `lucide-react` out of the route
+    chunks that tree-shake it, pushing `GroupPage`'s icon table into the
+    bundle a signed-out visitor downloads. Verified on the wire against
+    `npm run preview` over the built `dist/`, with the landing page and the
+    lazy `/privacy` route both loading clean — `npm run dev` does not apply
+    this chunking, so it cannot show you this.
 
 ---
 
-_Last updated: 2026-08-12. Maintained alongside the develop → PR → master
+_Last updated: 2026-08-13. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._

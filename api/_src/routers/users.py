@@ -8,7 +8,7 @@ from ..auth import verify_jwt
 from ..balances import net_balances
 from ..db import get_db
 from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
-from ..models import GroupInvitation, GroupMember
+from ..models import GroupInvitation, GroupMember, WriteEvent
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -83,6 +83,12 @@ async def delete_account(
         .where(func.lower(GroupInvitation.email) == old_email)
         .values(email=f"deleted-{caller}{DELETED_EMAIL_SUFFIX}")
     )
+    # Rate-limit tombstones (ratelimit.py) are a per-user activity trace, and
+    # the opportunistic prune that normally retires them only runs when that
+    # user writes again — which this account never will. Dropping them resets
+    # no window worth having: sign-in is revoked below, and a replacement
+    # account is a different user id with a fresh one regardless.
+    await db.execute(delete(WriteEvent).where(WriteEvent.user_id == caller))
     user.email = f"deleted-{caller}{DELETED_EMAIL_SUFFIX}"
     user.full_name = "Deleted user"
     user.avatar_url = None

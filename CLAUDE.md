@@ -112,22 +112,41 @@ SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
 Row-creating endpoints are volume-braked, counting rows in the database (never
 process memory — the API is a serverless function with several instances and
-constant cold starts). Expense and settlement creation share one **per-group**
-24h window; group creation is capped **per caller**; invitations keep their own
-three windows. All of them use the dialect-aware `window_cutoff` helper, because
+constant cold starts). Expense/settlement creation and group creation are both
+capped **per caller** over a 24h window; invitations keep their own three
+windows. All of them use the dialect-aware `window_cutoff` helper, because
 SQLite (tests) stores naive UTC where Postgres stores TIMESTAMPTZ.
 
-Two rules any new quota must follow:
+The ledger and group windows count **`write_events`** — one append-only
+tombstone per quota-consuming write, charged by `record_write()` — and not the
+rows being created. That indirection is the whole point: deleting a group is a
+*hard* delete that takes its expenses and settlements with it, and any member
+may delete a settled group, so while the quotas counted real rows,
+create → fill → delete → repeat reset them. Nothing cascades to `write_events`.
 
-- **Soft-deleted rows still count**, or a create/delete loop resets the window.
+Three rules any new quota must follow:
+
+- **Count tombstones, not the rows you are protecting.** Soft-deleted rows
+  keeping their `created_at` is not enough — the group above them can vanish.
 - **Answer an idempotent replay *before* the quota.** A client retrying a
   request whose response it never saw has already spent its slot, and a 429
   there leaves it unable to discover whether the row exists — the one thing
   `Idempotency-Key` is for. Both create endpoints look the key up first.
+- **Charge inside the endpoint's transaction.** `record_write` only adds to the
+  session, so a validation failure or the idempotency-race rollback takes the
+  charge with it and a replay is never charged twice.
 
-Deliberately **no global ledger cap**: it would turn one abusive account into
-an outage for everyone. Known gap: group deletion is a hard delete, so
-create → fill → delete → repeat still resets both windows (GO-LIVE item 11).
+`record_write` also opportunistically prunes the caller's rows that have aged
+out of the window — a serverless function has nowhere to hang a cron — and
+`delete_account` clears that user's outright, since nothing would ever prune
+them again.
+
+Deliberately **no global cap** on either window: it would turn one abusive
+account into an outage for everyone. Remaining gap: the *invitation* quotas
+still count `group_invitations`, which a group deletion cascades away
+(GO-LIVE item 11) — closing it means storing recipient addresses in a table
+that outlives the group, which collides with the deletion-anonymizes-email
+rule below, so it needs a retention decision first.
 
 A second, narrower lock covers *membership creation* against account deletion:
 `get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
@@ -174,6 +193,15 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   Any new lazy route must sit inside one of the two `Suspense` boundaries, and
   `GroupsPage` warms the `GroupPage` chunk from the same hover/focus handler that
   prefetches group data (same import specifier, so Rollup emits one chunk).
+- **The vendor chunk is an explicit allow-list** (`vite.config.ts`
+  `manualChunks`): React, React-DOM, the router, TanStack Query and
+  supabase-js — the runtime both auth branches need on first paint, so a
+  deploy that only touches app code leaves ~490 kB cached. Do **not** widen it
+  to "everything in `node_modules`": `lucide-react` is tree-shaken per route,
+  and hoisting it would drag `GroupPage`'s icon table into the chunk a
+  signed-out visitor downloads, undoing the route splitting above. The dev
+  server applies none of this — check chunking with `npm run build` then
+  `npm run preview` (which serves `dist/`), never `npm run dev`.
 - A top-level `ErrorBoundary` (`main.tsx`, inside `I18nProvider` so its fallback
   is translated) reloads **once** on a chunk-load error: a client on an old app
   shell 404s its next lazy import after a deploy rotates the chunk hashes, and

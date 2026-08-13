@@ -17,7 +17,7 @@ from ..models import (
     Settlement,
     User,
 )
-from ..ratelimit import enforce_group_creation_quota
+from ..ratelimit import GROUP, enforce_group_creation_quota, record_write
 from ..schemas import (
     BalanceTransfer,
     CurrencyTotalOut,
@@ -57,6 +57,8 @@ async def create_group(
     # cannot snapshot this caller's groups before the membership below exists.
     await get_active_user(db, caller, lock="shared")
     await enforce_group_creation_quota(db, caller)
+    # Outlives the group: deleting one must not hand back the slot it cost.
+    await record_write(db, caller, GROUP)
     group = Group(name=body.name, created_by=caller)
     db.add(group)
     await db.flush()
