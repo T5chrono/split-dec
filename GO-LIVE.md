@@ -207,11 +207,18 @@ These were shared during development and should be rotated before launch:
   render identically whether or not you are signed in. Linked from the landing
   footer, the login screen and the account modal via `LegalLinks`.
 - The documents assert facts that are checked against the implementation:
-  processors and their regions (Supabase eu-west-3, Vercel cdg1, Resend
-  eu-west-1, Google only for OAuth), what account deletion actually erases vs.
-  anonymizes, what group members can see, and that no analytics/ad cookies
-  exist. **If any of that changes, `src/lib/legal.ts` changes with it** — and
-  bump `LEGAL_UPDATED`.
+  processors and their regions (Supabase eu-west-3, Vercel cdg1 for hosting
+  **and Vercel Web Analytics**, Resend eu-west-1, Google only for OAuth), what
+  account deletion actually erases vs. anonymizes, what group members can see,
+  and that no ad or analytics **cookies** exist and no identifier follows you
+  across sites. **If any of that changes, `src/lib/legal.ts` changes with it**
+  — and bump `LEGAL_UPDATED`.
+- Analytics went in on 2026-08-13 (PR #36). The policy previously promised "no
+  analytics product" outright; that sentence is gone, and the cookie/consent
+  claim now rests on Vercel Web Analytics being **cookieless** rather than on
+  there being no analytics at all. If analytics is ever swapped for a product
+  that sets cookies or fingerprints, the "you are never asked to accept any"
+  line stops being true and a consent banner becomes the real requirement.
 - ☐ **Make `privacy@split-dec.app` actually receive mail** before launch — it
   is the contact point in both documents and for GDPR requests. Resend inbound
   or a registrar-level forward to a real inbox. An address that bounces is

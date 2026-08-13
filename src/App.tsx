@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 import { useAuth } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/terms" element={<LegalPage doc="terms" />} />
           <Route path="*" element={<LoginPage />} />
         </Routes>
+        <Analytics />
       </Suspense>
     );
   }
@@ -91,6 +93,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
+      <Analytics />
     </Suspense>
   );
 }
