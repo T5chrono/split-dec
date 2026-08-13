@@ -15,7 +15,7 @@
 import type { Lang } from "./i18n";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-08-12";
+export const LEGAL_UPDATED = "2026-08-13";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -48,11 +48,12 @@ const PRIVACY_EN: LegalDoc = {
     {
       heading: "What we collect",
       blocks: [
-        "We collect only what the app needs to work. There is no advertising network, no analytics product and no tracking pixel anywhere in SplitDec.",
+        "We collect only what the app needs to work. There is no advertising network and no tracking pixel anywhere in SplitDec, and nothing you record in it is ever sold, rented or used to target you.",
         [
           "**Account data** — your email address, the name you signed up with, and, if you sign in with Google, the address of the profile picture Google provides.",
           "**What you record in the app** — your groups and their names, expenses (description, category, amount, currency, date, who paid, and how the cost is split), the settlements you register, and the email addresses you invite to a group.",
           "**Technical data** — our hosting providers keep short-lived server logs (IP address, time, requested address, browser user-agent) so the service can be operated and abuse investigated.",
+          "**Aggregate usage measurement** — Vercel Web Analytics counts page views, so we can see which parts of SplitDec people actually use. It records the page address, the site you arrived from, and coarse device and country information. It sets no cookies, stores nothing on your device, and cannot follow you to other websites or link a visit to your account.",
           "**Settings kept on your device** — your language, your light/dark preference and your sign-in session live in your browser's local storage, not on our servers.",
         ],
         "SplitDec never asks for and never stores card numbers, bank details, your location or your contacts. **The app does not move money.** It records who owes whom; the actual transfers happen outside SplitDec, however you normally pay each other.",
@@ -66,6 +67,7 @@ const PRIVACY_EN: LegalDoc = {
           "**Running the service** — creating your account, showing your groups, computing balances. Necessary to perform our agreement with you (Art. 6(1)(b)).",
           "**Sending you service email** — sign-up confirmation, password resets and group invitations. Also part of that agreement (Art. 6(1)(b)).",
           "**Keeping SplitDec safe** — verifying sign-ins, limiting how many invitations one account can send, investigating abuse. Our legitimate interest in a service that is not used to spam or attack people (Art. 6(1)(f)).",
+          "**Understanding how SplitDec is used** — counting page views in aggregate so we know what is worth improving. Our legitimate interest in developing the service (Art. 6(1)(f)); it uses no cookies and identifies nobody.",
           "**Meeting legal obligations**, where one applies to us (Art. 6(1)(c)).",
         ],
         "We do not profile you, do not advertise to you, do not make automated decisions about you with legal effects, and do not sell or rent personal data to anyone.",
@@ -77,7 +79,7 @@ const PRIVACY_EN: LegalDoc = {
         "We use a small number of providers to run the service. They act as our processors — they may handle your data only on our instructions:",
         [
           "**Supabase** — database and sign-in, hosted in the EU (Paris region). [Privacy policy](https://supabase.com/privacy).",
-          "**Vercel** — hosting for the website and the API, with the API function pinned to the EU (Paris region). [Privacy policy](https://vercel.com/legal/privacy-policy).",
+          "**Vercel** — hosting for the website and the API, with the API function pinned to the EU (Paris region), and the aggregate usage measurement described above. [Privacy policy](https://vercel.com/legal/privacy-policy).",
           "**Resend** — delivery of the emails listed above, EU region (Ireland). [Privacy policy](https://resend.com/legal/privacy-policy).",
           "**Google** — only if you choose to sign in with Google. Google confirms who you are and passes us your name, email address and profile-picture address. Your use of Google is governed by [Google's privacy policy](https://policies.google.com/privacy).",
         ],
@@ -119,7 +121,7 @@ const PRIVACY_EN: LegalDoc = {
     {
       heading: "Cookies and local storage",
       blocks: [
-        "SplitDec sets no advertising or analytics cookies and embeds no third-party trackers, which is why you are never asked to accept any.",
+        "SplitDec sets no advertising or analytics cookies and stores no identifier that could follow you to another website, which is why you are never asked to accept any. The usage measurement described above is cookieless: it counts visits without recognising who you are.",
         "The app stores three things in your browser: your sign-in session (so you stay signed in), your language, and your light/dark preference. If you install SplitDec as an app, a service worker also caches its files so it starts quickly and works offline. Clearing your browser storage removes all of it and signs you out.",
       ],
     },
@@ -166,11 +168,12 @@ const PRIVACY_PL: LegalDoc = {
     {
       heading: "Jakie dane zbieramy",
       blocks: [
-        "Zbieramy tylko to, co jest potrzebne do działania aplikacji. W SplitDec nie ma żadnej sieci reklamowej, narzędzia analitycznego ani piksela śledzącego.",
+        "Zbieramy tylko to, co jest potrzebne do działania aplikacji. W SplitDec nie ma żadnej sieci reklamowej ani piksela śledzącego, a tego, co w niej zapisujesz, nikomu nie sprzedajemy, nie wynajmujemy i nie używamy do kierowania do Ciebie reklam.",
         [
           "**Dane konta** — Twój adres e-mail, imię i nazwisko podane przy rejestracji oraz — jeśli logujesz się przez Google — adres zdjęcia profilowego przekazany przez Google.",
           "**To, co zapisujesz w aplikacji** — Twoje grupy i ich nazwy, wydatki (opis, kategoria, kwota, waluta, data, kto zapłacił i jak dzielony jest koszt), zarejestrowane rozliczenia oraz adresy e-mail zapraszane przez Ciebie do grupy.",
           "**Dane techniczne** — nasi dostawcy hostingu przechowują krótkotrwałe logi serwera (adres IP, czas, wywołany adres, identyfikator przeglądarki), aby można było prowadzić usługę i badać nadużycia.",
+          "**Zbiorcze pomiary użycia** — Vercel Web Analytics zlicza odsłony stron, żebyśmy wiedzieli, z których części SplitDec faktycznie korzystacie. Zapisuje adres strony, witrynę, z której przyszedłeś(-łaś), oraz ogólne informacje o urządzeniu i kraju. Nie ustawia plików cookie, nic nie zapisuje na Twoim urządzeniu i nie może śledzić Cię na innych stronach ani powiązać wizyty z Twoim kontem.",
           "**Ustawienia zapisane na Twoim urządzeniu** — język, tryb jasny/ciemny i sesja logowania są przechowywane w pamięci lokalnej przeglądarki, a nie na naszych serwerach.",
         ],
         "SplitDec nigdy nie prosi o numery kart, dane bankowe, Twoją lokalizację ani kontakty i ich nie przechowuje. **Aplikacja nie przelewa pieniędzy.** Zapisuje, kto komu ile jest winien; same przelewy odbywają się poza SplitDec, tak jak zwykle płacicie sobie nawzajem.",
@@ -184,6 +187,7 @@ const PRIVACY_PL: LegalDoc = {
           "**Świadczenie usługi** — założenie konta, pokazywanie grup, obliczanie sald. Niezbędne do wykonania umowy z Tobą (art. 6 ust. 1 lit. b).",
           "**Wysyłanie e-maili serwisowych** — potwierdzenie rejestracji, reset hasła i zaproszenia do grup. Również element tej umowy (art. 6 ust. 1 lit. b).",
           "**Bezpieczeństwo SplitDec** — weryfikacja logowań, ograniczanie liczby zaproszeń wysyłanych z jednego konta, badanie nadużyć. Nasz prawnie uzasadniony interes, aby usługa nie służyła do spamu ani ataków (art. 6 ust. 1 lit. f).",
+          "**Zrozumienie, jak używany jest SplitDec** — zbiorcze zliczanie odsłon, żeby wiedzieć, co warto poprawić. Nasz prawnie uzasadniony interes w rozwijaniu usługi (art. 6 ust. 1 lit. f); nie korzysta z plików cookie i nikogo nie identyfikuje.",
           "**Wypełnianie obowiązków prawnych**, jeśli nas dotyczą (art. 6 ust. 1 lit. c).",
         ],
         "Nie profilujemy Cię, nie wyświetlamy Ci reklam, nie podejmujemy wobec Ciebie zautomatyzowanych decyzji wywołujących skutki prawne i nikomu nie sprzedajemy ani nie wynajmujemy danych osobowych.",
@@ -195,7 +199,7 @@ const PRIVACY_PL: LegalDoc = {
         "Do prowadzenia usługi korzystamy z kilku dostawców. Działają jako nasze podmioty przetwarzające — mogą przetwarzać Twoje dane wyłącznie na nasze polecenie:",
         [
           "**Supabase** — baza danych i logowanie, hosting w UE (region Paryż). [Polityka prywatności](https://supabase.com/privacy).",
-          "**Vercel** — hosting strony i API, z funkcją API przypiętą do UE (region Paryż). [Polityka prywatności](https://vercel.com/legal/privacy-policy).",
+          "**Vercel** — hosting strony i API, z funkcją API przypiętą do UE (region Paryż), oraz opisane wyżej zbiorcze pomiary użycia. [Polityka prywatności](https://vercel.com/legal/privacy-policy).",
           "**Resend** — dostarczanie wymienionych wyżej e-maili, region UE (Irlandia). [Polityka prywatności](https://resend.com/legal/privacy-policy).",
           "**Google** — tylko jeśli wybierzesz logowanie przez Google. Google potwierdza Twoją tożsamość i przekazuje nam Twoje imię i nazwisko, adres e-mail oraz adres zdjęcia profilowego. Korzystanie z Google podlega [polityce prywatności Google](https://policies.google.com/privacy).",
         ],
@@ -237,7 +241,7 @@ const PRIVACY_PL: LegalDoc = {
     {
       heading: "Pliki cookie i pamięć lokalna",
       blocks: [
-        "SplitDec nie ustawia żadnych plików cookie reklamowych ani analitycznych i nie osadza zewnętrznych narzędzi śledzących — dlatego nigdy nie prosimy Cię o zgodę na cookies.",
+        "SplitDec nie ustawia żadnych plików cookie reklamowych ani analitycznych i nie zapisuje identyfikatora, który mógłby śledzić Cię na innych stronach — dlatego nigdy nie prosimy Cię o zgodę na cookies. Opisane wyżej pomiary użycia działają bez plików cookie: zliczają wizyty, nie rozpoznając, kim jesteś.",
         "Aplikacja zapisuje w Twojej przeglądarce trzy rzeczy: sesję logowania (żebyś pozostał(a) zalogowany(-a)), język oraz wybór trybu jasnego lub ciemnego. Jeśli zainstalujesz SplitDec jako aplikację, service worker dodatkowo zapisuje w pamięci podręcznej jej pliki, aby szybciej się uruchamiała i działała offline. Wyczyszczenie danych przeglądarki usuwa to wszystko i wylogowuje Cię.",
       ],
     },
