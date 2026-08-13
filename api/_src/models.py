@@ -120,10 +120,16 @@ class WriteEvent(Base):
 
     __tablename__ = "write_events"
     __table_args__ = (
-        CheckConstraint("kind IN ('LEDGER', 'GROUP')", name="write_events_kind_check"),
+        CheckConstraint(
+            "kind IN ('LEDGER', 'GROUP', 'INVITE')", name="write_events_kind_check"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     kind: Mapped[str] = mapped_column(String)
+    # INVITE rows only: SHA-256 of the lowercased recipient, never the address.
+    # The per-recipient window needs equality matching and nothing else, so the
+    # durable table never holds something you could send mail to.
+    recipient_hash: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

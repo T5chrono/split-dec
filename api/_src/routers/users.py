@@ -9,6 +9,7 @@ from ..balances import net_balances
 from ..db import get_db
 from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
 from ..models import GroupInvitation, GroupMember, WriteEvent
+from ..ratelimit import recipient_key
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -87,8 +88,15 @@ async def delete_account(
     # the opportunistic prune that normally retires them only runs when that
     # user writes again — which this account never will. Dropping them resets
     # no window worth having: sign-in is revoked below, and a replacement
-    # account is a different user id with a fresh one regardless.
-    await db.execute(delete(WriteEvent).where(WriteEvent.user_id == caller))
+    # account is a different user id with a fresh one regardless. Rows keyed to
+    # this address as an invitation *recipient* go too, so nothing derived from
+    # it outlives the account that owned it.
+    await db.execute(
+        delete(WriteEvent).where(
+            (WriteEvent.user_id == caller)
+            | (WriteEvent.recipient_hash == recipient_key(old_email))
+        )
+    )
     user.email = f"deleted-{caller}{DELETED_EMAIL_SUFFIX}"
     user.full_name = "Deleted user"
     user.avatar_url = None

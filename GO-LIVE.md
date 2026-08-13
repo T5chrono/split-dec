@@ -16,7 +16,7 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 ## Remaining before launch, in dependency order
 
 An index into the items below — the detail stays in each section. The app
-itself is feature-complete and green (137 backend tests, 153 frontend, build).
+itself is feature-complete and green (140 backend tests, 153 frontend, build).
 **Everything still outstanding is ops, config or legal** — dashboards, DNS,
 billing and a lawyer's eye. The code-side work is done; item 6 is the only
 entry with a code component left in it (wiring an error tracker).
@@ -51,9 +51,8 @@ TWA/Play Store path (item 10).
 **Item 11 is fully closed.** Rate limiting, the 404 page and empty states, SEO
 and route-level code splitting shipped earlier; the two follow-ups they left
 behind — a tombstone so group deletion can't reset a write quota, and
-vendor-chunk splitting — landed on 2026-08-13. One narrower gap of the same
-shape is newly recorded there: the *invitation* quotas still count rows that a
-group deletion cascades away.
+vendor-chunk splitting — landed on 2026-08-13, along with the same fix for the
+invitation quotas, which turned out to have the identical hole.
 
 ---
 
@@ -261,13 +260,13 @@ Home Screen"). To turn it into a Play Store app:
    item 8 is required for the listing).
 
 ## 11. Nice-to-haves before launch — ☑ all four shipped, follow-ups closed
-The two limitations this item used to carry were closed on 2026-08-13; one
-narrower gap of the same shape is recorded below and does not block a launch.
+The limitations this item used to carry were all closed on 2026-08-13.
 - ☑ **Rate limiting on write endpoints.** `api/_src/ratelimit.py`: expense and
-  settlement creation share one 24h window (`MAX_LEDGER_WRITES_PER_CALLER`) and
-  group creation has its own (`MAX_GROUPS_PER_CALLER`), both **per caller**, so
-  neither limit can be sidestepped by making more groups. Invitations keep
-  their own three windows and share the dialect-aware `window_cutoff` helper.
+  settlement creation share one 24h window (`MAX_LEDGER_WRITES_PER_CALLER`,
+  100) and group creation has its own (`MAX_GROUPS_PER_CALLER`, 25), both
+  **per caller**, so neither limit can be sidestepped by making more groups.
+  Invitations keep their own three windows (per inviter / per recipient /
+  global). All of them share the dialect-aware `window_cutoff` helper.
   - Counted from rows in the database, not process memory — the API is a
     serverless function with several instances and constant cold starts.
   - **Deliberately no global cap** on either window: it would turn one abusive
@@ -276,30 +275,34 @@ narrower gap of the same shape is recorded below and does not block a launch.
     client retrying a request whose response it never saw has already spent
     its slot, and a 429 there would leave it unable to discover whether the
     entry exists — the one thing `Idempotency-Key` is for.
-  - ☑ **Both windows now survive a group deletion** (PR pending, 2026-08-13).
-    They used to count the rows they protected, and deleting a group is a
-    *hard* delete that takes its expenses and settlements with it, so
-    create-group → fill → delete → repeat reset them — the brakes only stopped
-    clients that were not trying. They now count `write_events`
+  - ☑ **All six windows now survive a group deletion** (PR pending,
+    2026-08-13). They used to count the rows they protected, and deleting a
+    group is a *hard* delete that takes its expenses, settlements and
+    invitations with it, so create-group → fill → delete → repeat reset every
+    one of them — the brakes only stopped clients that were not trying. They
+    now count `write_events`
     (`supabase/migrations/20260813000000_write_events.sql`): one append-only
     tombstone per charged write, keyed by the caller, that no cascade reaches.
     Note the `created_by`-column variant floated earlier does **not** work on
     its own — those rows die with the group too.
   - ☑ **The ledger window moved from per-group to per-caller** in the same
     change, which was the other half of the fix: a per-group window let one
-    member consume everyone else's allowance. 300/caller/24h against a busy
-    trip's ~50 leaves plenty of room.
+    member consume everyone else's allowance. 100/caller/24h against a busy
+    trip's ~50 still leaves roughly double the headroom a real user needs.
+  - ☑ **The invitation quotas came along**, which needed one extra decision:
+    the per-recipient window is keyed by *email address*, and a table that
+    outlives the group would otherwise retain addresses that account deletion
+    is required to anonymize (item 8). It stores `recipient_key(email)`, a bare
+    SHA-256, because the window only ever needs equality — so nothing
+    contactable is retained. Unpeppered deliberately: whoever can read that
+    column can already read `public.users.email` in plaintext, so a pepper buys
+    nothing real and its rotation would silently reset every recipient window.
+    `delete_account` also clears rows keyed to the departing address.
   - `record_write` prunes the caller's aged-out rows opportunistically (no cron
     on a serverless function) and `delete_account` clears that user's, since
-    nothing would prune them again.
-  - **Remaining gap of the same shape: the invitation quotas.** They still
-    count `group_invitations`, which `delete_group` cascades away, so an
-    invite/delete-the-group loop resets all three windows. Not closed with the
-    others because the per-recipient window is keyed by *email address*, and a
-    table that outlives the group would retain addresses that account deletion
-    is specifically required to anonymize (item 8) — it needs a retention
-    decision, not just a migration. Resend's own sending limits are the
-    backstop meanwhile.
+    nothing would prune them again. An invitation row is charged to its
+    inviter, so it prunes on the inviter's next write — no row is keyed only to
+    someone who never writes.
   - The 429 `detail` reaches the UI as-is (English only), like the existing
     invitation quota message. Worth localizing if these start firing.
 - ☑ **Empty-state polish and a 404 page.** Unmatched signed-in routes render

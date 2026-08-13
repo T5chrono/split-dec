@@ -79,6 +79,25 @@ async def test_delete_account_drops_its_rate_limit_tombstones(
         assert (await s.execute(select(WriteEvent))).scalars().all() == []
 
 
+async def test_delete_account_clears_tombstones_keyed_to_its_address(
+    client, db_session, two_user_group, current_user
+):
+    """An invitation tombstone is charged to the *inviter* but keyed to a
+    digest of the recipient. Deleting the recipient's account has to take it
+    too, or something derived from the address outlives the account."""
+    g = two_user_group
+    carol = await make_user(db_session, "carol@test.dev", "Carol")
+    await client.post(
+        f"/api/groups/{g['group'].id}/invitations", json={"email": "carol@test.dev"}
+    )
+
+    current_user.id = carol.id
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        assert (await s.execute(select(WriteEvent))).scalars().all() == []
+
+
 async def test_deleted_account_token_cannot_act(client, two_user_group, current_user):
     """A JWT issued before deletion stays cryptographically valid until it
     expires; endpoints not gated by membership must reject it explicitly."""

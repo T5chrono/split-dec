@@ -112,17 +112,26 @@ SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
 Row-creating endpoints are volume-braked, counting rows in the database (never
 process memory — the API is a serverless function with several instances and
-constant cold starts). Expense/settlement creation and group creation are both
-capped **per caller** over a 24h window; invitations keep their own three
-windows. All of them use the dialect-aware `window_cutoff` helper, because
-SQLite (tests) stores naive UTC where Postgres stores TIMESTAMPTZ.
+constant cold starts). Expense/settlement creation (100) and group creation
+(25) are capped **per caller** over a 24h window; invitations keep their own
+three (per inviter / per recipient / global). All of them use the dialect-aware
+`window_cutoff` helper, because SQLite (tests) stores naive UTC where Postgres
+stores TIMESTAMPTZ.
 
-The ledger and group windows count **`write_events`** — one append-only
+**Every one of those windows counts `write_events`** — one append-only
 tombstone per quota-consuming write, charged by `record_write()` — and not the
 rows being created. That indirection is the whole point: deleting a group is a
-*hard* delete that takes its expenses and settlements with it, and any member
-may delete a settled group, so while the quotas counted real rows,
-create → fill → delete → repeat reset them. Nothing cascades to `write_events`.
+*hard* delete that takes its expenses, settlements **and invitations** with it,
+and any member may delete a settled group, so while the quotas counted real
+rows, create → fill → delete → repeat reset all of them. Nothing cascades to
+`write_events`.
+
+The per-recipient invitation window is keyed by `recipient_key(email)`, a bare
+SHA-256 — the window only ever needs equality, so the durable table never holds
+a contactable address and account deletion can go on promising to erase it.
+Unpeppered on purpose: whoever can read that column can already read
+`public.users.email` in plaintext, so a pepper buys nothing real and adds a
+secret whose rotation would silently reset every recipient window.
 
 Three rules any new quota must follow:
 
@@ -141,12 +150,10 @@ out of the window — a serverless function has nowhere to hang a cron — and
 `delete_account` clears that user's outright, since nothing would ever prune
 them again.
 
-Deliberately **no global cap** on either window: it would turn one abusive
-account into an outage for everyone. Remaining gap: the *invitation* quotas
-still count `group_invitations`, which a group deletion cascades away
-(GO-LIVE item 11) — closing it means storing recipient addresses in a table
-that outlives the group, which collides with the deletion-anonymizes-email
-rule below, so it needs a retention decision first.
+Deliberately **no global cap** on the ledger or group windows: a
+deployment-wide ceiling would turn one abusive account into an outage for
+everyone. Invitations do carry one, because the resource they burn — the
+sending domain's reputation — is shared and cannot be bought back.
 
 A second, narrower lock covers *membership creation* against account deletion:
 `get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
@@ -173,8 +180,10 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   email attempt, same latency whether or not the address has an account (anyone can create a
   group and invite arbitrary addresses). Never reintroduce `user_exists`/`email_sent`/
   `invited_user_id` in a response. Sending is quota-limited (per inviter / per recipient /
-  global, 24h) and cancelling sets `status='CANCELLED'` rather than deleting, so an
-  invite/cancel loop can't reset the quotas.
+  global, 24h — counted from `write_events`, see above). Cancelling sets
+  `status='CANCELLED'` rather than deleting: the quotas no longer depend on that, but the
+  row is the group's record that the invitation happened, and the partial unique index
+  covers only `PENDING` rows so re-inviting still works.
 - Account deletion anonymizes `public.users` (email gets `DELETED_EMAIL_SUFFIX` from `deps.py`)
   and deletes the `auth.users` row; endpoints not gated by membership must call
   `get_active_user` because old JWTs stay valid until expiry. It also drops pending
