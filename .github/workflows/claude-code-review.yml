@@ -46,6 +46,21 @@ jobs:
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Vercel's bot opens the PRs that install its own products (#36, #37,
+          # #39), and the action rejects non-human actors by default, so the run
+          # on `opened` fails having reviewed nothing. #36 and #37 only look
+          # reviewed because a fix was later pushed to each branch and
+          # `synchronize` re-ran the job under a human actor; nobody pushed to
+          # #39, so it was never reviewed at all. That is exactly backwards — a
+          # PR nobody here wrote by hand is the one least entitled to the
+          # benefit of the doubt.
+          #
+          # Named explicitly rather than '*': this repo is public, and the
+          # action's own warning is that '*' lets any external App invoke this
+          # job with a prompt it controls. Matching lowercases both sides and
+          # strips a trailing "[bot]", so this also covers the bare `vercel`
+          # that the rejection message prints.
+          allowed_bots: "vercel[bot]"
           # Supplying `prompt` puts the job in agent mode, which is what lets
           # it fire on a pull_request event with no @claude mention ("Auto-
           # detected mode: agent for event: pull_request" in the run log).
