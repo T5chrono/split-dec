@@ -7,7 +7,8 @@ Built to `SplitDec - specification.md` (v6).
 ## Stack
 
 - **Frontend:** React 19 + Vite + TypeScript, Tailwind CSS, TanStack Query,
-  `lucide-react` category icons, Supabase JS (Google OAuth, PKCE).
+  `lucide-react` category icons, Supabase JS (PKCE — Google OAuth plus
+  email/password), Vercel Web Analytics and Speed Insights (both cookieless).
 - **Backend:** FastAPI (async) deployed as a Vercel Function
   ([api/index.py](api/index.py)), SQLAlchemy 2.0 + asyncpg.
 - **Database:** Supabase Postgres (project `SplitDec`), schema in
@@ -32,11 +33,13 @@ Built to `SplitDec - specification.md` (v6).
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
 - Row-creating endpoints are volume-limited (`api/_src/ratelimit.py`): expenses
-  and settlements share a per-group 24h window, group creation is capped per
-  caller, invitations keep their own quotas. Counts come from the database, and
-  soft-deleted rows still count so a create/delete loop can't reset a window.
-  An idempotent replay is answered *before* the quota, so retrying a request
-  whose response was lost never returns 429.
+  and settlements share a 24h window, group creation has its own, both **per
+  caller**, and invitations keep their own three. Every window counts rows in
+  `write_events` — an append-only tombstone per charged write — rather than the
+  rows being created, because deleting a group hard-deletes its expenses,
+  settlements and invitations and would otherwise reset the window. An
+  idempotent replay is answered *before* the quota, so retrying a request whose
+  response was lost never returns 429.
 
 ## Email invitations (optional)
 
@@ -51,8 +54,11 @@ and the UI offers a pre-written mailto draft instead.
 
 - `develop` is the working branch — push (or PR) feature work here; CI runs
   the test suite and the frontend build on every push.
-- When `develop` is green, open a PR to `master` and request a review from
-  Claude (mention `@claude` in the PR). Address comments, then merge.
+- When `develop` is green, open a PR to `master`. The Claude review runs
+  automatically on open and on every push to the PR — no `@claude` mention
+  needed (`.github/workflows/claude-code-review.yml`). Address the findings,
+  then merge. Note the job refuses to review PRs opened by a bot; pushing a
+  commit to such a branch re-triggers it as you.
 - Merging to `master` runs CI again and Vercel auto-deploys `master` to
   production (https://split-dec.app — the apex is the canonical origin;
   `split-dec.vercel.app` still serves the app but is `noindex`). Pushes to

@@ -123,7 +123,7 @@ const PRIVACY_EN: LegalDoc = {
       heading: "Cookies and local storage",
       blocks: [
         "SplitDec sets no advertising or analytics cookies and stores no identifier that could follow you to another website, which is why you are never asked to accept any. The usage and performance measurement described above are both cookieless: they count visits and timings without recognising who you are.",
-        "The app stores three things in your browser: your sign-in session (so you stay signed in), your language, and your light/dark preference. If you install SplitDec as an app, a service worker also caches its files so it starts quickly and works offline. Clearing your browser storage removes all of it and signs you out.",
+        "The app stores four things in your browser: your sign-in session (so you stay signed in), your language, your light/dark preference, and — only if a file goes missing after an update — a timestamp that stops the page reloading in a loop. If you install SplitDec as an app, a service worker also caches its files so it starts quickly and works offline. Clearing your browser storage removes all of it and signs you out.",
       ],
     },
     {
@@ -244,7 +244,7 @@ const PRIVACY_PL: LegalDoc = {
       heading: "Pliki cookie i pamięć lokalna",
       blocks: [
         "SplitDec nie ustawia żadnych plików cookie reklamowych ani analitycznych i nie zapisuje identyfikatora, który mógłby śledzić Cię na innych stronach — dlatego nigdy nie prosimy Cię o zgodę na cookies. Opisane wyżej pomiary użycia i wydajności działają bez plików cookie: zliczają wizyty i czasy, nie rozpoznając, kim jesteś.",
-        "Aplikacja zapisuje w Twojej przeglądarce trzy rzeczy: sesję logowania (żebyś pozostał(a) zalogowany(-a)), język oraz wybór trybu jasnego lub ciemnego. Jeśli zainstalujesz SplitDec jako aplikację, service worker dodatkowo zapisuje w pamięci podręcznej jej pliki, aby szybciej się uruchamiała i działała offline. Wyczyszczenie danych przeglądarki usuwa to wszystko i wylogowuje Cię.",
+        "Aplikacja zapisuje w Twojej przeglądarce cztery rzeczy: sesję logowania (żebyś pozostał(a) zalogowany(-a)), język, wybór trybu jasnego lub ciemnego oraz — tylko jeśli po aktualizacji brakuje któregoś pliku — znacznik czasu, który zapobiega zapętlonemu przeładowywaniu strony. Jeśli zainstalujesz SplitDec jako aplikację, service worker dodatkowo zapisuje w pamięci podręcznej jej pliki, aby szybciej się uruchamiała i działała offline. Wyczyszczenie danych przeglądarki usuwa to wszystko i wylogowuje Cię.",
       ],
     },
     {

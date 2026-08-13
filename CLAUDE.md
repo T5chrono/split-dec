@@ -211,6 +211,19 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   signed-out visitor downloads, undoing the route splitting above. The dev
   server applies none of this — check chunking with `npm run build` then
   `npm run preview` (which serves `dist/`), never `npm run dev`.
+- **Measurement lives in `App.tsx`, inside both auth branches**: `<Analytics />`
+  (Vercel Web Analytics) and `<SpeedInsights route={insightsRoute(...)} />`.
+  Both must stay inside `App` rather than `main.tsx` — `main.tsx` renders
+  nothing when `enforceCanonicalOrigin()` says we are leaving, and a beacon
+  fired from a non-canonical origin is exactly what that guard exists to
+  prevent. `insightsRoute` folds `/groups/<uuid>` to `/groups/[groupId]`;
+  **a new dynamic route has to be added to it**, both so the busiest screen
+  isn't split into one bucket per group and because the Privacy Policy states
+  group identifiers never reach the measurement. Neither product sets cookies,
+  which is what lets the policy keep saying no consent banner is needed — see
+  `src/lib/legal.ts`, whose header carries the rule that any change to
+  processors, storage or retention changes that file and bumps
+  `LEGAL_UPDATED`.
 - A top-level `ErrorBoundary` (`main.tsx`, inside `I18nProvider` so its fallback
   is translated) reloads **once** on a chunk-load error: a client on an old app
   shell 404s its next lazy import after a deploy rotates the chunk hashes, and
