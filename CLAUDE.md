@@ -112,22 +112,48 @@ SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
 Row-creating endpoints are volume-braked, counting rows in the database (never
 process memory — the API is a serverless function with several instances and
-constant cold starts). Expense and settlement creation share one **per-group**
-24h window; group creation is capped **per caller**; invitations keep their own
-three windows. All of them use the dialect-aware `window_cutoff` helper, because
-SQLite (tests) stores naive UTC where Postgres stores TIMESTAMPTZ.
+constant cold starts). Expense/settlement creation (100) and group creation
+(25) are capped **per caller** over a 24h window; invitations keep their own
+three (per inviter / per recipient / global). All of them use the dialect-aware
+`window_cutoff` helper, because SQLite (tests) stores naive UTC where Postgres
+stores TIMESTAMPTZ.
 
-Two rules any new quota must follow:
+**Every one of those windows counts `write_events`** — one append-only
+tombstone per quota-consuming write, charged by `record_write()` — and not the
+rows being created. That indirection is the whole point: deleting a group is a
+*hard* delete that takes its expenses, settlements **and invitations** with it,
+and any member may delete a settled group, so while the quotas counted real
+rows, create → fill → delete → repeat reset all of them. Nothing cascades to
+`write_events`.
 
-- **Soft-deleted rows still count**, or a create/delete loop resets the window.
+The per-recipient invitation window is keyed by `recipient_key(email)`, a bare
+SHA-256 — the window only ever needs equality, so the durable table never holds
+a contactable address and account deletion can go on promising to erase it.
+Unpeppered on purpose: whoever can read that column can already read
+`public.users.email` in plaintext, so a pepper buys nothing real and adds a
+secret whose rotation would silently reset every recipient window.
+
+Three rules any new quota must follow:
+
+- **Count tombstones, not the rows you are protecting.** Soft-deleted rows
+  keeping their `created_at` is not enough — the group above them can vanish.
 - **Answer an idempotent replay *before* the quota.** A client retrying a
   request whose response it never saw has already spent its slot, and a 429
   there leaves it unable to discover whether the row exists — the one thing
   `Idempotency-Key` is for. Both create endpoints look the key up first.
+- **Charge inside the endpoint's transaction.** `record_write` only adds to the
+  session, so a validation failure or the idempotency-race rollback takes the
+  charge with it and a replay is never charged twice.
 
-Deliberately **no global ledger cap**: it would turn one abusive account into
-an outage for everyone. Known gap: group deletion is a hard delete, so
-create → fill → delete → repeat still resets both windows (GO-LIVE item 11).
+`record_write` also opportunistically prunes the caller's rows that have aged
+out of the window — a serverless function has nowhere to hang a cron — and
+`delete_account` clears that user's outright, since nothing would ever prune
+them again.
+
+Deliberately **no global cap** on the ledger or group windows: a
+deployment-wide ceiling would turn one abusive account into an outage for
+everyone. Invitations do carry one, because the resource they burn — the
+sending domain's reputation — is shared and cannot be bought back.
 
 A second, narrower lock covers *membership creation* against account deletion:
 `get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
@@ -154,8 +180,10 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   email attempt, same latency whether or not the address has an account (anyone can create a
   group and invite arbitrary addresses). Never reintroduce `user_exists`/`email_sent`/
   `invited_user_id` in a response. Sending is quota-limited (per inviter / per recipient /
-  global, 24h) and cancelling sets `status='CANCELLED'` rather than deleting, so an
-  invite/cancel loop can't reset the quotas.
+  global, 24h — counted from `write_events`, see above). Cancelling sets
+  `status='CANCELLED'` rather than deleting: the quotas no longer depend on that, but the
+  row is the group's record that the invitation happened, and the partial unique index
+  covers only `PENDING` rows so re-inviting still works.
 - Account deletion anonymizes `public.users` (email gets `DELETED_EMAIL_SUFFIX` from `deps.py`)
   and deletes the `auth.users` row; endpoints not gated by membership must call
   `get_active_user` because old JWTs stay valid until expiry. It also drops pending
@@ -174,6 +202,15 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   Any new lazy route must sit inside one of the two `Suspense` boundaries, and
   `GroupsPage` warms the `GroupPage` chunk from the same hover/focus handler that
   prefetches group data (same import specifier, so Rollup emits one chunk).
+- **The vendor chunk is an explicit allow-list** (`vite.config.ts`
+  `manualChunks`): React, React-DOM, the router, TanStack Query and
+  supabase-js — the runtime both auth branches need on first paint, so a
+  deploy that only touches app code leaves ~490 kB cached. Do **not** widen it
+  to "everything in `node_modules`": `lucide-react` is tree-shaken per route,
+  and hoisting it would drag `GroupPage`'s icon table into the chunk a
+  signed-out visitor downloads, undoing the route splitting above. The dev
+  server applies none of this — check chunking with `npm run build` then
+  `npm run preview` (which serves `dist/`), never `npm run dev`.
 - A top-level `ErrorBoundary` (`main.tsx`, inside `I18nProvider` so its fallback
   is translated) reloads **once** on a chunk-load error: a client on an old app
   shell 404s its next lazy import after a deploy rotates the chunk hashes, and

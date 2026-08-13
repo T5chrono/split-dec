@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from ..db import get_db
 from ..deps import get_active_user, require_membership
 from ..emailer import send_invitation_email
 from ..models import Group, GroupInvitation, GroupMember, User
-from ..ratelimit import window_cutoff
+from ..ratelimit import INVITE, enforce_invitation_quota, record_write
 from ..schemas import (
     InvitationCreate,
     InvitationCreatedOut,
@@ -20,43 +20,6 @@ from ..schemas import (
 )
 
 router = APIRouter(tags=["invitations"])
-
-# Every invitation to a non-member triggers an outbound email, and cancelling
-# one frees its (group, email) slot immediately — so without quotas a single
-# account can drive an unbounded invite/cancel loop at any address and burn
-# the sending domain's reputation. Cancelled invitations are kept (status
-# CANCELLED) precisely so they still count against these windows.
-INVITE_WINDOW = timedelta(hours=24)
-INVITE_MAX_PER_INVITER = 20  # one person inviting, across all their groups
-INVITE_MAX_PER_RECIPIENT = 3  # one address, however many accounts aim at it
-INVITE_MAX_GLOBAL = 300  # whole-deployment brake on a compromised account
-
-
-async def _enforce_invite_quota(db: AsyncSession, caller: uuid.UUID, email: str) -> None:
-    """429 once any of the three windows is exhausted. One round trip."""
-    by_caller, by_recipient, overall = (
-        await db.execute(
-            select(
-                func.sum(case((GroupInvitation.invited_by == caller, 1), else_=0)),
-                func.sum(case((GroupInvitation.email == email, 1), else_=0)),
-                func.count(),
-            ).where(GroupInvitation.created_at >= window_cutoff(db, INVITE_WINDOW))
-        )
-    ).one()
-    exceeded = (
-        (by_caller or 0) >= INVITE_MAX_PER_INVITER
-        or (by_recipient or 0) >= INVITE_MAX_PER_RECIPIENT
-        or overall >= INVITE_MAX_GLOBAL
-    )
-    if exceeded:
-        # Deliberately one message for all three limits: which limit was hit
-        # would tell the caller whether someone else has been inviting this
-        # address, and the global one would report deployment-wide activity.
-        raise HTTPException(
-            status_code=429,
-            detail="Too many invitations sent recently. Please try again later.",
-            headers={"Retry-After": str(int(INVITE_WINDOW.total_seconds()))},
-        )
 
 
 async def _get_pending_for_invitee(
@@ -136,7 +99,12 @@ async def invite_to_group(
         response.status_code = 200
         return InvitationCreatedOut.model_validate(existing)
 
-    await _enforce_invite_quota(db, caller, email)
+    await enforce_invitation_quota(db, caller, email)
+    # Charged to the inviter and keyed to a digest of the recipient, in a table
+    # that outlives this group — deleting the group used to hand all three
+    # windows back. Committed with the invitation below, so the duplicate race
+    # rolls it back with everything else.
+    await record_write(db, caller, INVITE, recipient=email)
 
     # Load everything the post-commit email needs BEFORE committing, so the
     # (up to 10s) provider call never holds a checked-out pooler connection
@@ -220,9 +188,10 @@ async def cancel_invitation(
     if invitation is None:
         raise HTTPException(status_code=404, detail="Invitation not found")
     await require_membership(db, invitation.group_id, caller)
-    # Marked, not deleted: a deleted row would let an invite/cancel loop
-    # reset the send quotas in _enforce_invite_quota. The partial unique
-    # index only covers PENDING rows, so re-inviting still works.
+    # Marked, not deleted: the row is this group's record that the invitation
+    # happened. The send quotas no longer depend on that — they count
+    # write_events, which a delete here would not touch either way — but the
+    # partial unique index only covers PENDING rows, so re-inviting still works.
     invitation.status = "CANCELLED"
     invitation.responded_at = datetime.now(timezone.utc)
     await db.commit()

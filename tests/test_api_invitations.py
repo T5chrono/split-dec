@@ -4,9 +4,10 @@ import uuid
 
 import pytest
 from conftest import make_group, make_user
+from sqlalchemy import select
 
-from _src.models import GroupInvitation
-from _src.routers import invitations as invitations_router
+from _src import ratelimit
+from _src.models import GroupInvitation, WriteEvent
 
 
 async def _invite(client, group_id, email):
@@ -192,9 +193,9 @@ class TestRateLimits:
 
     @pytest.fixture(autouse=True)
     def _small_quotas(self, monkeypatch):
-        monkeypatch.setattr(invitations_router, "INVITE_MAX_PER_INVITER", 5)
-        monkeypatch.setattr(invitations_router, "INVITE_MAX_PER_RECIPIENT", 2)
-        monkeypatch.setattr(invitations_router, "INVITE_MAX_GLOBAL", 50)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_PER_INVITER", 5)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_PER_RECIPIENT", 2)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_GLOBAL", 50)
 
     async def test_invite_cancel_loop_cannot_spam_one_address(self, client, two_user_group):
         g = two_user_group
@@ -222,6 +223,38 @@ class TestRateLimits:
             assert r.status_code == 201
             sent += 1
         assert sent == 5  # INVITE_MAX_PER_INVITER
+
+    async def test_deleting_the_group_does_not_free_the_window(
+        self, client, db_session, two_user_group
+    ):
+        """Invitations cascade away with their group, so while the quotas
+        counted them, invite → delete the group → repeat was unlimited at any
+        address."""
+        g = two_user_group
+        for _ in range(2):  # INVITE_MAX_PER_RECIPIENT
+            throwaway = await make_group(db_session, g["alice"], name="Throwaway")
+            assert (await _invite(client, throwaway.id, "victim@test.dev")).status_code == 201
+            assert (await client.delete(f"/api/groups/{throwaway.id}")).status_code == 204
+
+        fresh = await make_group(db_session, g["alice"], name="Round three")
+        blocked = await _invite(client, fresh.id, "victim@test.dev")
+        assert blocked.status_code == 429
+
+    async def test_the_recipient_address_is_not_stored_in_the_tombstone(
+        self, client, db_session, two_user_group
+    ):
+        """The per-recipient window only ever needs equality, so the durable
+        table holds a digest. Account deletion promises to erase the address,
+        and this table deliberately outlives the invitation."""
+        g = two_user_group
+        assert (await _invite(client, g["group"].id, "carol@test.dev")).status_code == 201
+
+        async with db_session() as s:
+            rows = (await s.execute(select(WriteEvent))).scalars().all()
+
+        assert [r.kind for r in rows] == ["INVITE"]
+        assert rows[0].recipient_hash == ratelimit.recipient_key("carol@test.dev")
+        assert "carol" not in rows[0].recipient_hash
 
     async def test_replaying_a_pending_invite_costs_no_quota(self, client, two_user_group):
         g = two_user_group
