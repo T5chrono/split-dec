@@ -16,7 +16,7 @@ Status legend: ☐ not started · ◐ partial · ☑ done
 ## Remaining before launch, in dependency order
 
 An index into the items below — the detail stays in each section. The app
-itself is feature-complete and green (140 backend tests, 153 frontend, build).
+itself is feature-complete and green (140 backend tests, 156 frontend, build).
 **Everything still outstanding is ops, config or legal** — dashboards, DNS,
 billing and a lawyer's eye. The code-side work is done; item 6 is the only
 entry with a code component left in it (wiring an error tracker).
@@ -208,17 +208,31 @@ These were shared during development and should be rotated before launch:
   footer, the login screen and the account modal via `LegalLinks`.
 - The documents assert facts that are checked against the implementation:
   processors and their regions (Supabase eu-west-3, Vercel cdg1 for hosting
-  **and Vercel Web Analytics**, Resend eu-west-1, Google only for OAuth), what
+  **plus Vercel Web Analytics and Speed Insights**, Resend eu-west-1, Google
+  only for OAuth), what
   account deletion actually erases vs. anonymizes, what group members can see,
   and that no ad or analytics **cookies** exist and no identifier follows you
   across sites. **If any of that changes, `src/lib/legal.ts` changes with it**
   — and bump `LEGAL_UPDATED`.
-- Analytics went in on 2026-08-13 (PR #36). The policy previously promised "no
-  analytics product" outright; that sentence is gone, and the cookie/consent
-  claim now rests on Vercel Web Analytics being **cookieless** rather than on
-  there being no analytics at all. If analytics is ever swapped for a product
-  that sets cookies or fingerprints, the "you are never asked to accept any"
-  line stops being true and a consent banner becomes the real requirement.
+- Analytics went in on 2026-08-13 (PR #36), Speed Insights the same day
+  (PR #37). The policy previously promised "no analytics product" outright;
+  that sentence is gone, and the cookie/consent claim now rests on both Vercel
+  products being **cookieless** rather than on there being no measurement at
+  all. If either is ever swapped for something that sets cookies or
+  fingerprints, the "you are never asked to accept any" line stops being true
+  and a consent banner becomes the real requirement.
+- Speed Insights is passed `insightsRoute(pathname)` from `App.tsx`, which
+  folds `/groups/<uuid>` to `/groups/[groupId]`. Two reasons, and a new dynamic
+  route must be added to it for both: bucketing by raw pathname would split the
+  app's busiest screen into one single-visit row per group, and it would hand
+  group ids to the measurement. The policy says the identifier is never part of
+  it, so that helper is load-bearing for a claim in a legal document — there
+  are tests on it in `src/App.test.tsx`.
+  **Known asymmetry:** Web Analytics (PR #36) still reports raw pathnames, so
+  group ids do reach it. That is consistent with what the policy discloses (it
+  says the page address is recorded, and Vercel already sees every URL in its
+  server logs) but it is worth closing with a `beforeSend` rewrite for the same
+  reasons as above.
 - ☐ **Make `privacy@split-dec.app` actually receive mail** before launch — it
   is the contact point in both documents and for GDPR requests. Resend inbound
   or a registrar-level forward to a real inbox. An address that bounces is
