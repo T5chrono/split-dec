@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import App from "./App";
+import App, { insightsRoute } from "./App";
 import { renderWithProviders } from "./test/utils";
 
 vi.mock("./hooks/useAuth", () => ({
@@ -49,5 +49,26 @@ describe("App routing", () => {
     renderAt("/groups/some-group-id");
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+});
+
+describe("insightsRoute", () => {
+  // Speed Insights buckets by route. A raw pathname would give every group its
+  // own bucket — the busiest screen in the app, split into single-visit rows
+  // that say nothing — and would hand group ids to the measurement.
+  it("folds a group id back into its route pattern", () => {
+    expect(insightsRoute("/groups/2b2f0e1c-9a71-4a51-8d0b-6d1c9b0f7e42")).toBe(
+      "/groups/[groupId]",
+    );
+  });
+
+  it("keeps anything nested under the group route folded too", () => {
+    expect(insightsRoute("/groups/abc/whatever")).toBe("/groups/[groupId]/whatever");
+  });
+
+  it("leaves static routes alone", () => {
+    for (const path of ["/", "/login", "/privacy", "/terms", "/reset-password", "/groups"]) {
+      expect(insightsRoute(path)).toBe(path);
+    }
   });
 });

@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { useAuth } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -27,6 +28,18 @@ const LandingPage = lazy(() => import("./pages/LandingPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const LegalPage = lazy(() => import("./pages/LegalPage"));
 const GroupPage = lazy(() => import("./pages/GroupPage"));
+
+/** The pathname with dynamic segments folded back into their route pattern.
+ *
+ *  Speed Insights buckets every measurement by route, and a raw pathname makes
+ *  each group its own bucket — so the app's busiest screen would be split
+ *  across as many entries as there are groups and tell you nothing about any
+ *  of them. Folding also keeps group ids out of the measurements. `/groups/:groupId`
+ *  is the only dynamic segment in either branch below; add to this if that
+ *  stops being true. */
+export function insightsRoute(pathname: string): string {
+  return pathname.replace(/^\/groups\/[^/]+/, "/groups/[groupId]");
+}
 
 /** Shared by the auth check and the lazy-route fallback, so resolving a
  *  session and then fetching its first chunk look like one wait, not two. */
@@ -63,6 +76,7 @@ export default function App() {
           <Route path="*" element={<LoginPage />} />
         </Routes>
         <Analytics />
+        <SpeedInsights route={insightsRoute(location.pathname)} />
       </Suspense>
     );
   }
@@ -94,6 +108,7 @@ export default function App() {
         </Route>
       </Routes>
       <Analytics />
+      <SpeedInsights route={insightsRoute(location.pathname)} />
     </Suspense>
   );
 }
