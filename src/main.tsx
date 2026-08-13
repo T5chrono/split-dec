@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { injectSpeedInsights } from "@vercel/speed-insights";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./hooks/useAuth";
@@ -12,6 +13,9 @@ import "./index.css";
 // Before anything mounts: on a non-canonical origin the API is a cross-origin
 // hop away and every request fails, so leave without firing one.
 const leaving = enforceCanonicalOrigin();
+
+// Inject Vercel Speed Insights for performance monitoring
+injectSpeedInsights();
 
 const queryClient = new QueryClient({
   defaultOptions: {
