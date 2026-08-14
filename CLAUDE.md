@@ -44,7 +44,9 @@ A green `claude-review` check is not by itself proof a review happened: the job 
 even when it posts nothing (PR #29). Look for the tracking comment, not the tick.
 After merging, sync: `git checkout develop && git merge master && git push`.
 CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs.
-Branch protection is unavailable (free plan + private repo) — the gate is by convention.
+Branch protection is *available* (the repo is public, so protected branches are free)
+but **not enabled** — `master` is unprotected and the gate is by convention. See
+GO-LIVE item 6; the older "unavailable on a free private repo" note was stale.
 
 ## Architecture
 
