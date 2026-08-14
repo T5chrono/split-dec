@@ -45,25 +45,33 @@ reason item 5 (Supabase Pro) sits in section B rather than section A.
 
 Ordered by lead time, longest first. The detail stays in the numbered sections.
 
-1. **Google OAuth consent screen** (items 2 + 3) — complete it, add
-   `split-dec.app` to authorized domains, publish, submit for verification.
-   **Start this first: it is the longest clock and the wait runs in parallel
-   with testing.** Publishing is not a launch; it removes the 100-user cap and
-   the "unverified app" warning. Its prerequisites (`/privacy`, `/terms`) are
-   already live. The outcome then sits in section C.
+1. **Google OAuth consent screen** (items 2 + 3) — ◐ **the domain-ownership
+   prerequisite is done** (2026-08-14, see item 2); what remains is the consent
+   screen itself: add `split-dec.app` to authorized domains, complete the form,
+   publish, submit for verification. **Still the longest clock, and the wait
+   runs in parallel with testing.** Publishing is not a launch; it removes the
+   100-user cap and the "unverified app" warning. Its other prerequisites
+   (`/privacy`, `/terms`) have been live since item 8. The outcome then sits in
+   section C.
 2. **Inbound mail for `privacy@split-dec.app`** (item 8) — the contact point
    published in both legal documents, and testers may well use it. An address
    that bounces is worse than none.
 3. **Rotate the secrets that passed through chat/tooling** (item 4) — Supabase
    DB password, Resend API key. Best done *now*, in a phase where a fumbled
    environment variable costs nothing.
-4. **Bilingual PL+EN auth email templates** (item 1) — testers hit signup and
-   reset emails, so they may as well test the real ones.
+4. **Bilingual PL+EN auth email templates** (item 1) — ◐ the copy is written
+   and now lives in `docs/auth-email-templates.md` (2026-08-14); all that is
+   left is pasting two subjects and two HTML bodies into the Supabase
+   dashboard. Testers hit signup and reset emails, so they may as well test the
+   real ones.
 5. **Error tracking and an uptime check** (item 7) — now the only remaining
    code work. Testing without error aggregation wastes every bug a tester hits.
 6. **buycoffee.to profile** (item 9) — moved ahead of launch by decision on
    2026-08-13; the tax question is worth asking an accountant during testing.
-7. **Branch protection decision** (item 6) — needs GitHub Pro or a public repo.
+7. **Branch protection decision** (item 6) — **no longer blocked**: the repo is
+   public, so protected branches are free (checked 2026-08-14, see item 6).
+   `master` is unprotected today. This is now a ~5-minute settings change, not
+   a purchase.
 8. **Re-confirm the anon key cannot read tables** (item 5) — free, quick, and
    the one part of item 5 that is not gated on Pro.
 9. ☑ **Analytics `beforeSend`** (item 11) — done 2026-08-14. Web Analytics no
@@ -115,6 +123,44 @@ and route-level code splitting shipped earlier; the two follow-ups they left
 behind — a tombstone so group deletion can't reset a write quota, and
 vendor-chunk splitting — landed on 2026-08-13, along with the same fix for the
 invitation quotas, which turned out to have the identical hole.
+
+---
+
+## Done — 2026-08-14
+
+A short session, deliberately split between work that needed a browser and work
+that needed a repo, so both ran at once.
+
+- **§A9 closed — Web Analytics no longer sees group ids** (PR #41, merged).
+  `foldAnalyticsUrl` runs the existing `insightsRoute` over the parsed pathname
+  in a `beforeSend` hook, so Web Analytics and Speed Insights now fold
+  identically and a new dynamic route is still added in exactly one place. An
+  unparseable URL returns `null`, dropping the event rather than reporting it
+  raw. 159 frontend tests (3 new), build clean. **This was the last of item 11's
+  follow-ups; item 7 is now the only checklist entry that carries any code.**
+- **§A1's prerequisite closed — `split-dec.app` verified in Search Console.**
+  Details in item 2, including the two traps: don't delete the TXT record, and
+  the Search Console account must match the Google Cloud project's.
+- **§A4 de-risked — the auth email copy is in the repo** (PR #42, merged), at
+  `docs/auth-email-templates.md`. It was previously drafted in a chat session
+  and lost; item 1 now points at the file instead of saying to regenerate it.
+  Pasting into the Supabase dashboard is still outstanding.
+- **Two stale assumptions corrected, both found incidentally:**
+  - The repo is **public**, so branch protection is free — item 6 had recorded
+    it as blocked on GitHub Pro. `master` is unprotected today.
+  - Prompted by that, git history was checked for secrets and is **clean**
+    (item 4). The one committed env file holds only public values.
+
+**Not verified on the wire yet:** both PRs deployed to production READY, but
+nobody has confirmed the analytics fold live. The check, for next session: load
+a group page and inspect the `POST /_vercel/insights/view` payload — the `url`
+should read `/groups/[groupId]`, not a UUID. **Cache-bust first.** Per the
+stale-shell trap below, the first load after a deploy is routinely served by the
+already-installed service worker, and old JS contains the old fold.
+
+**Untouched today, still §A:** `privacy@split-dec.app` inbound mail (A2), secret
+rotation (A3), error tracking (A5), buycoffee.to (A6), the branch-protection
+decision (A7), and the anon-key REST probe (A8).
 
 ---
 
@@ -208,7 +254,27 @@ rate limit to 30/hour.
   templates themselves live in a dashboard, and the first draft was lost that
   way; the dashboard is what sends mail, so if one changes, change both.
 
-## 2. Google OAuth consent screen — ☐
+## 2. Google OAuth consent screen — ◐ domain ownership proved, screen still to do
+- ☑ **`split-dec.app` is verified in Google Search Console** (2026-08-14),
+  which is the gate on the consent screen's **Authorized domains** field —
+  Google will not accept a domain it does not believe you own.
+  - Method: **Domain property** (covers the apex, `www` and every subdomain in
+    one go), proved with a DNS `TXT` record. Google reported the method as
+    "Dostawca nazwy domeny" / domain-name provider.
+  - The record lives in **Vercel's DNS**, not at a registrar — `split-dec.app`
+    delegates to `ns1/ns2.vercel-dns.com`. Value confirmed live on the wire:
+    `google-site-verification=JV4JystQ030adHtWsbhX46SCD3AgJM4RTXboRNL92oY`
+    (a public DNS record; it is a proof of control, not a secret).
+  - **Never delete that TXT record.** Google re-checks it, and removing it
+    un-verifies the domain silently — which would drop it back out of
+    Authorized domains long after anyone remembers why.
+  - It was the first and only `TXT` record at the apex, so nothing collided.
+    Resend's SPF/DKIM live on subdomains (`send.`, `resend._domainkey.`) and
+    were untouched.
+  - **The account matters:** verification only helps if Search Console and the
+    Google Cloud OAuth project are owned by the same Google account. If the
+    Authorized domains field still rejects `split-dec.app`, that mismatch is
+    the first thing to check.
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
   caps at 100 hand-added test users and shows an "unverified app" warning).
 - Complete the OAuth consent screen (app name, logo, support email, privacy
@@ -261,15 +327,29 @@ rate limit to 30/hour.
     stale `200` right after deploy is not proof of failure — cache-bust.
 - ☐ Google OAuth consent screen: add `split-dec.app` to authorized domains
   (the OAuth callback itself stays on the Supabase domain — no redirect URI
-  change needed).
+  change needed). **Unblocked on 2026-08-14**: the domain-ownership proof that
+  gates this field is done, see item 2.
 
 ## 4. Rotate secrets that passed through chat/tooling — ☐
 These were shared during development and should be rotated before launch:
 - **Supabase database password** (Project Settings → Database) → update
   `DATABASE_URL` on Vercel.
 - **Resend API key** (Resend → API Keys) → update `RESEND_API_KEY` on Vercel.
-- Review the Supabase publishable/anon key exposure (it is public by design,
-  but confirm no service-role key is anywhere in the frontend or git history).
+- ☑ **Git history checked for secrets (2026-08-14)** — and it matters more than
+  it used to, because the repo is public (item 6). Nothing leaked:
+  - `service_role` and `SUPABASE_SERVICE` appear **nowhere** in any commit on
+    any branch (`git log -S`, `--all`).
+  - `.env` and `.env.local` were never committed and are gitignored.
+  - `.env.production` **is** committed, deliberately ("Add public production
+    config for deployment") and holds exactly two variables:
+    `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Both are public by
+    design — Vite inlines them into the frontend bundle that every visitor
+    downloads, so committing them exposes nothing that shipping the app does
+    not. Keep it that way: **any `VITE_`-prefixed variable is public**, so a
+    real secret must never take that prefix.
+  - This does **not** discharge the rotation below. The DB password and Resend
+    key never reached git; they reached chat and tooling, which is a different
+    exposure with the same fix.
 
 ## 5. Supabase production readiness — ☐ (split: one part now, the rest at launch)
 - **§A8 — do now, free:** **RLS stays disabled by design** (the FastAPI layer
@@ -290,10 +370,22 @@ These were shared during development and should be rotated before launch:
   minimum password length in sync with `MIN_PASSWORD_LENGTH` in
   `src/lib/authErrors.ts` (both 8 today).
 
-## 6. Branch protection / CI gating — ☐
-- Enforcing "CI green before merge to `master`" needs GitHub Pro on a private
-  repo, or making the repo public. Today the gate is by convention.
-- Optionally require the Claude review to pass / be acknowledged.
+## 6. Branch protection / CI gating — ☐ (but the blocker turned out to be gone)
+- **The repo is public** (`gh repo view` → `"visibility": "PUBLIC"`, checked
+  2026-08-14), so protected branches cost nothing. The long-standing note that
+  this "needs GitHub Pro on a private repo" was stale — that was the constraint
+  when it was written, not now. `CLAUDE.md` said the same thing and has been
+  corrected.
+- `master` is **unprotected today** (`gh api .../branches/master/protection` →
+  404 "Branch not protected"), so the develop → PR → master workflow is still
+  enforced only by convention.
+- Turning it on is a few minutes in Settings → Branches. Worth deciding
+  deliberately rather than by default: a rule requiring PRs also applies to
+  **you**, on a repo where you are the only committer, and the existing
+  convention has held for 40+ PRs.
+- Optionally require the Claude review to pass / be acknowledged. Note the
+  known trap from PR #29: `claude-review` reports success even when it posts
+  nothing, so requiring that check is weaker evidence than it looks.
 
 ## 7. Observability & error handling — ◐
 - The invitation emailer now logs send failures (no more silent swallow), but
