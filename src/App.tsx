@@ -1,6 +1,6 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { Analytics } from "@vercel/analytics/react";
+import { Analytics, type BeforeSend } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { useAuth } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
@@ -41,6 +41,27 @@ export function insightsRoute(pathname: string): string {
   return pathname.replace(/^\/groups\/[^/]+/, "/groups/[groupId]");
 }
 
+/** The same fold, for Web Analytics.
+ *
+ *  Speed Insights takes its route as a prop, but Web Analytics reads
+ *  `location.href` itself, so `beforeSend` is the only place to fold a group id
+ *  out of it. Both paths run through `insightsRoute`, so a new dynamic route is
+ *  still added in exactly one place.
+ *
+ *  Vercel already sees every URL in its server logs, and the Privacy Policy
+ *  discloses that the page address is recorded — this is not a promise being
+ *  kept, it is the identifier not being handed to a second system that has no
+ *  use for it. A URL we cannot parse is dropped rather than sent raw. */
+export const foldAnalyticsUrl: BeforeSend = (event) => {
+  try {
+    const url = new URL(event.url);
+    url.pathname = insightsRoute(url.pathname);
+    return { ...event, url: url.toString() };
+  } catch {
+    return null;
+  }
+};
+
 /** Shared by the auth check and the lazy-route fallback, so resolving a
  *  session and then fetching its first chunk look like one wait, not two. */
 function FullScreenSpinner() {
@@ -75,7 +96,7 @@ export default function App() {
           <Route path="/terms" element={<LegalPage doc="terms" />} />
           <Route path="*" element={<LoginPage />} />
         </Routes>
-        <Analytics />
+        <Analytics beforeSend={foldAnalyticsUrl} />
         <SpeedInsights route={insightsRoute(location.pathname)} />
       </Suspense>
     );
@@ -107,7 +128,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
-      <Analytics />
+      <Analytics beforeSend={foldAnalyticsUrl} />
       <SpeedInsights route={insightsRoute(location.pathname)} />
     </Suspense>
   );

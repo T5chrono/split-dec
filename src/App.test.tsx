@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import App, { insightsRoute } from "./App";
+import App, { foldAnalyticsUrl, insightsRoute } from "./App";
 import { renderWithProviders } from "./test/utils";
 
 vi.mock("./hooks/useAuth", () => ({
@@ -70,5 +70,30 @@ describe("insightsRoute", () => {
     for (const path of ["/", "/login", "/privacy", "/terms", "/reset-password", "/groups"]) {
       expect(insightsRoute(path)).toBe(path);
     }
+  });
+});
+
+describe("foldAnalyticsUrl", () => {
+  // Web Analytics reads location.href itself, so unlike Speed Insights the only
+  // place to keep a group id out of it is this beforeSend hook.
+  const pageview = (url: string) => foldAnalyticsUrl({ type: "pageview", url });
+
+  it("folds the group id out of the reported URL", () => {
+    expect(
+      pageview("https://split-dec.app/groups/2b2f0e1c-9a71-4a51-8d0b-6d1c9b0f7e42"),
+    ).toEqual({
+      type: "pageview",
+      url: "https://split-dec.app/groups/[groupId]",
+    });
+  });
+
+  it("leaves a static route's URL untouched, origin and query included", () => {
+    expect(pageview("https://split-dec.app/privacy?lang=pl")?.url).toBe(
+      "https://split-dec.app/privacy?lang=pl",
+    );
+  });
+
+  it("drops an event whose URL cannot be parsed rather than sending it raw", () => {
+    expect(pageview("/groups/2b2f0e1c")).toBeNull();
   });
 });
