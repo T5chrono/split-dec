@@ -202,9 +202,11 @@ rate limit to 30/hour.
   EN-only defaults; the dashboard Templates page was returning an internal
   error during a Supabase incident on 2026-07-18 (Site URL config on the same
   dashboard worked fine, so this looks incident-specific, not a lasting
-  problem) — retry when the page loads. Suggested copy (subjects + bilingual
-  HTML bodies, `{{ .ConfirmationURL }}` placeholder) was drafted in-session;
-  ask Claude to regenerate it if not saved.
+  problem) — retry when the page loads. **The copy to paste is in
+  `docs/auth-email-templates.md`** (subjects + bilingual HTML bodies,
+  `{{ .ConfirmationURL }}` placeholder). It lives in the repo because the
+  templates themselves live in a dashboard, and the first draft was lost that
+  way; the dashboard is what sends mail, so if one changes, change both.
 
 ## 2. Google OAuth consent screen — ☐
 - Confirm the Google Cloud OAuth app is **published** (not "Testing", which
