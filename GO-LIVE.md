@@ -4,9 +4,9 @@ Things to do before treating SplitDec as a real, publicly-usable product.
 The app is fully functional today at https://split-dec.app; the items below
 are production-readiness, deliverability, security hardening and polish — not
 missing features. The app itself is feature-complete and green (140 backend
-tests, 156 frontend, build), so **almost everything outstanding is ops, config
-or legal**. Only two entries still carry code: item 7 (wire an error tracker)
-and item 11's `beforeSend` follow-up.
+tests, 159 frontend, build), so **almost everything outstanding is ops, config
+or legal**. Exactly one entry still carries code: item 7 (wire an error
+tracker).
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -59,15 +59,15 @@ Ordered by lead time, longest first. The detail stays in the numbered sections.
    environment variable costs nothing.
 4. **Bilingual PL+EN auth email templates** (item 1) — testers hit signup and
    reset emails, so they may as well test the real ones.
-5. **Error tracking and an uptime check** (item 7) — the only remaining code
-   work. Testing without error aggregation wastes every bug a tester hits.
+5. **Error tracking and an uptime check** (item 7) — now the only remaining
+   code work. Testing without error aggregation wastes every bug a tester hits.
 6. **buycoffee.to profile** (item 9) — moved ahead of launch by decision on
    2026-08-13; the tax question is worth asking an accountant during testing.
 7. **Branch protection decision** (item 6) — needs GitHub Pro or a public repo.
 8. **Re-confirm the anon key cannot read tables** (item 5) — free, quick, and
    the one part of item 5 that is not gated on Pro.
-9. **Analytics `beforeSend`** (item 11) — stop Web Analytics reporting raw
-   group UUIDs; Speed Insights already folds them.
+9. ☑ **Analytics `beforeSend`** (item 11) — done 2026-08-14. Web Analytics no
+   longer reports raw group UUIDs; it runs the same fold Speed Insights uses.
 
 ## B. At launch — the switch-flip list
 
@@ -336,11 +336,16 @@ These were shared during development and should be rotated before launch:
   group ids to the measurement. The policy says the identifier is never part of
   it, so that helper is load-bearing for a claim in a legal document — there
   are tests on it in `src/App.test.tsx`.
-  **Known asymmetry:** Web Analytics (PR #36) still reports raw pathnames, so
-  group ids do reach it. That is consistent with what the policy discloses (it
-  says the page address is recorded, and Vercel already sees every URL in its
-  server logs) but it is worth closing with a `beforeSend` rewrite for the same
-  reasons as above.
+  ☑ **The asymmetry with Web Analytics is closed** (2026-08-14). It used to
+  report raw pathnames, so group ids reached it — consistent with what the
+  policy discloses (the page address is recorded, and Vercel already sees every
+  URL in its server logs), but pointless to hand to a second system. It now
+  runs the same fold through `foldAnalyticsUrl`, the `beforeSend` hook, because
+  unlike Speed Insights it reads `location.href` itself instead of taking a
+  route prop. Both call `insightsRoute`, so a new dynamic route is still added
+  in exactly one place; a URL that fails to parse drops the event rather than
+  reporting it raw. No `LEGAL_UPDATED` bump — the documents get more accurate,
+  not less, and nothing about processors, storage or retention changed.
 - The "what the app stores in your browser" list said **three** things (session,
   language, theme) and missed a fourth: `splitdec.chunk-reload`, the
   `sessionStorage` timestamp `ErrorBoundary` writes to stop a missing chunk
@@ -508,5 +513,5 @@ The limitations this item used to carry were all closed on 2026-08-13.
 
 ---
 
-_Last updated: 2026-08-13. Maintained alongside the develop → PR → master
+_Last updated: 2026-08-14. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._

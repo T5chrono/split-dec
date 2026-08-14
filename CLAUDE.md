@@ -211,15 +211,21 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   signed-out visitor downloads, undoing the route splitting above. The dev
   server applies none of this — check chunking with `npm run build` then
   `npm run preview` (which serves `dist/`), never `npm run dev`.
-- **Measurement lives in `App.tsx`, inside both auth branches**: `<Analytics />`
-  (Vercel Web Analytics) and `<SpeedInsights route={insightsRoute(...)} />`.
+- **Measurement lives in `App.tsx`, inside both auth branches**:
+  `<Analytics beforeSend={foldAnalyticsUrl} />` (Vercel Web Analytics) and
+  `<SpeedInsights route={insightsRoute(...)} />`.
   Both must stay inside `App` rather than `main.tsx` — `main.tsx` renders
   nothing when `enforceCanonicalOrigin()` says we are leaving, and a beacon
   fired from a non-canonical origin is exactly what that guard exists to
   prevent. `insightsRoute` folds `/groups/<uuid>` to `/groups/[groupId]`;
   **a new dynamic route has to be added to it**, both so the busiest screen
   isn't split into one bucket per group and because the Privacy Policy states
-  group identifiers never reach the measurement. Neither product sets cookies,
+  group identifiers never reach the measurement. Speed Insights takes its
+  route as a prop, but Web Analytics reads `location.href` itself, so the same
+  fold reaches it only through `foldAnalyticsUrl` — the `beforeSend` hook,
+  which runs `insightsRoute` over the parsed pathname so a new dynamic route
+  is still added in exactly one place, and returns `null` (dropping the event)
+  rather than reporting a URL it could not parse. Neither product sets cookies,
   which is what lets the policy keep saying no consent banner is needed — see
   `src/lib/legal.ts`, whose header carries the rule that any change to
   processors, storage or retention changes that file and bumps
