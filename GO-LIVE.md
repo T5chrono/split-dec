@@ -3,10 +3,11 @@
 Things to do before treating SplitDec as a real, publicly-usable product.
 The app is fully functional today at https://split-dec.app; the items below
 are production-readiness, deliverability, security hardening and polish — not
-missing features. The app itself is feature-complete and green (140 backend
+missing features. The app itself is feature-complete and green (149 backend
 tests, 159 frontend, build), so **almost everything outstanding is ops, config
-or legal**. Exactly one entry still carries code: item 7 (wire an error
-tracker).
+or legal**. Two entries carry code: item 7 (wire an error tracker) and item 12
+(security hardening — none of it a live vulnerability, all of it blast radius;
+its one same-day fix, 12.2, is already done).
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -76,6 +77,9 @@ Ordered by lead time, longest first. The detail stays in the numbered sections.
    the one part of item 5 that is not gated on Pro.
 9. ☑ **Analytics `beforeSend`** (item 11) — done 2026-08-14. Web Analytics no
    longer reports raw group UUIDs; it runs the same fold Speed Insights uses.
+10. ☑ **Swagger UI closed in production** (item 12.2) — done 2026-08-15.
+    `/api/docs`, `/api/redoc` and `/api/openapi.json` are now development-only,
+    so no third-party script is served from the session origin.
 
 ## B. At launch — the switch-flip list
 
@@ -132,12 +136,27 @@ invitation quotas, which turned out to have the identical hole.
   including the two decisions worth not re-litigating: forwarding to a read
   inbox rather than Resend inbound, and **no SPF record at the apex**.
   Verified by an actual round-trip, not by the forwarder turning green.
+- **XSS audit — clean, and item 12 opened for what it did find.** No exploitable
+  injection anywhere: no HTML sinks in `src/`, an i18n layer that returns
+  strings rather than markup, a JSON-only backend that reflects nothing, and the
+  one HTML generator (invitation email) escaping properly. Everything recorded
+  in item 12 is defence in depth — the CSP has no `script-src` (12.1), `/api/docs`
+  was live in production pulling an unpinned CDN script onto the session origin
+  (12.2), and `avatar_url` reaches an `<img src>` unvalidated (12.3, not XSS).
+- **§A10 closed — Swagger UI is development-only** (item 12.2), the one finding
+  from that audit worth fixing the same day. `docs_urls(ENV)` in
+  `api/_src/main.py` now gates `/api/docs`, `/api/redoc` and
+  `/api/openapi.json`; `redoc_url` came along because FastAPI's bare `/redoc`
+  default sat outside the `/api` prefix and was unreachable in production only
+  by routing luck. 149 backend tests (8 new in `tests/test_docs_exposure.py`,
+  one of which skips on a machine with `ENV=development` — the docstring
+  explains why that is deliberate). Frontend untouched.
 
-**What that leaves in section A**, all of it untouched since yesterday: the
-Google consent screen itself (A1, prerequisite done), secret rotation (A3),
-pasting the email templates (A4, copy already in the repo), error tracking and
-an uptime check (A5, the only remaining code), buycoffee.to (A6), the
-branch-protection decision (A7, now free), and the anon-key REST probe (A8).
+**What that leaves in section A**: the Google consent screen itself (A1,
+prerequisite done), secret rotation (A3), pasting the email templates (A4, copy
+already in the repo), error tracking and an uptime check (A5), buycoffee.to
+(A6), the branch-protection decision (A7), and the anon-key REST probe (A8).
+A5 is no longer the only code left — item 12 still carries 12.1 and 12.3.
 
 Still unverified on the wire from yesterday: the analytics fold. The check is
 at the end of the 2026-08-14 entry below.
@@ -640,6 +659,127 @@ The limitations this item used to carry were all closed on 2026-08-13.
     `npm run preview` over the built `dist/`, with the landing page and the
     lazy `/privacy` route both loading clean — `npm run dev` does not apply
     this chunking, so it cannot show you this.
+
+## 12. Security hardening (XSS defence in depth) — ☐
+An XSS review on 2026-08-15 found **no exploitable injection anywhere in the
+app**, and nothing in this item is a live vulnerability. It is a checklist entry
+anyway because every sub-item is *blast radius*: these are the reasons an
+injection bug, if one is ever introduced, would go from "a bug" to "account
+takeover". Ordered by that leverage, not by effort.
+
+**What the audit confirmed, and what the items below are protecting.** A future
+change that breaks one of these is what would make this section urgent:
+- **No HTML sinks exist.** `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML`, `document.write`, `eval`, `new Function`, string-form
+  `setTimeout`, `srcDoc` and `postMessage` handlers are **absent from `src/`**.
+  Every user-controlled string — group name, expense description, `full_name`,
+  email — reaches the DOM as a JSX text child, so React escapes it.
+- **`t()` returns a `string`, not markup** (`src/lib/i18n.tsx`). An i18n layer
+  is the usual quiet place for this to go wrong; here the two `{email}` /
+  `{group}` placeholders are `String.replace` results that land in a text node
+  and inside `encodeURIComponent` respectively.
+- **`renderLegalText` emits React elements, not HTML**, and runs only over
+  repo-owned copy in `src/lib/legal.ts`.
+- **The backend serves JSON only** — no `HTMLResponse`, no templates — and every
+  `HTTPException` detail is a constant or interpolates an already-validated
+  value (`currency` is `^[A-Z]{3}$`, `split_type` a `Literal`). Nothing reflects
+  arbitrary input, and `X-Content-Type-Options: nosniff` means a JSON body could
+  not be sniffed into HTML even if it did.
+- **The one HTML generator escapes.** `invitation_email_content`
+  (`api/_src/emailer.py`) is the only place the codebase builds markup from user
+  input — a group named `<img src=x onerror=…>` would otherwise inject into mail
+  sent under our own sending domain — and both fields go through `html.escape`.
+
+### 12.1 A script-level CSP — worth more than everything else here combined
+`vercel.json` sends `Content-Security-Policy: frame-ancestors 'none'` and
+nothing more: no `default-src`, `script-src`, `object-src`, `base-uri` or
+`form-action`. That is deliberate (see `CLAUDE.md`), and the reason is real —
+a `default-src` policy needs the Supabase endpoints and the PWA's generated
+service worker audited first. What the decision costs is worth writing down:
+- Nothing would stop an injected script from executing or exfiltrating.
+- No `base-uri` means an injected `<base>` could redirect every relative
+  script load.
+- **The session is in `localStorage`** (`persistSession: true` in
+  `src/lib/supabase.ts` — the supabase-js default), so any XSS yields a
+  stealable *refresh* token: full account takeover, not a session that dies
+  with the tab. There is no clean fix for that in a static SPA — cookie-backed
+  storage wants a server session — which is exactly why the CSP carries the
+  weight instead.
+- **The concrete blocker is the inline theme script** at `index.html:38`, which
+  exists to avoid a light-mode flash before React mounts. A nonce is awkward
+  when one static `index.html` is served through a rewrite, so the practical
+  route is a hash — and it has to be regenerated if that script is ever edited.
+- Add the assertion to `tests/test_vercel_config.py` alongside the existing
+  header checks, or the policy can be reverted as silently as it was added.
+
+### 12.2 ☑ Swagger UI closed in production (§A10) — done 2026-08-15
+`https://split-dec.app/api/docs` was publicly reachable — verified on the wire,
+not inferred. FastAPI's `get_swagger_ui_html` defaults to
+`https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js`: an
+unpinned floating major tag, no SRI. That was **third-party script executing on
+the canonical origin**, the same origin holding the session in `localStorage`
+(12.1) — not XSS, but sitting on exactly the boundary XSS attacks, and the
+largest arbitrary-script-execution surface the app had. `/api/openapi.json` was
+public alongside it, enumerating every endpoint and schema.
+
+Fixed by `docs_urls(ENV)` in `api/_src/main.py`: gated on `ENV` like the CORS
+middleware rather than deleted, because the docs are useful against a local
+uvicorn. Three things worth not re-deriving:
+- **It fails closed.** The test is `== "development"`, not `!= "production"`,
+  so an unset or misspelled ENV costs a dev convenience instead of exposing a
+  CDN script.
+- **`redoc_url` had to go too, and it was the sneaky one.** FastAPI defaults it
+  to bare `/redoc` — *outside* the `/api` prefix, so it was unreachable in
+  production only because `vercel.json`'s catch-all rewrite sent it to the SPA
+  first. That is routing luck, not a decision, and it would evaporate the day
+  the rewrite changes. It is now `/api/redoc` in dev and absent otherwise.
+- **`tests/test_docs_exposure.py` mostly asserts the helper, not the live app,
+  on purpose** — and the module docstring says why: `app` is built at *import*
+  time from the developer's `.env`, so conftest's `_hermetic_env` cannot reach
+  back and rebuild it. A plain route-absence test passes in CI (no `.env` →
+  production) and fails on any machine running `ENV=development`. The one
+  whole-app assertion is therefore conditional; it is what CI actually runs,
+  and it was confirmed locally by forcing `ENV=production`.
+
+Verified on both branches by real requests through the ASGI transport, not just
+by route registration: production 404s `/api/docs`, `/api/redoc`,
+`/api/openapi.json`, `/redoc` and `/openapi.json`; development serves the three
+`/api`-prefixed ones and nothing at FastAPI's bare defaults.
+**Still to do: re-probe `https://split-dec.app/api/docs` after this deploys** —
+it should 404 rather than render. Per the stale-shell trap noted above, that is
+a CDN-cached path, so cache-bust before believing a 200.
+
+### 12.3 Constrain `avatar_url` before it reaches `<img src>`
+`src/components/Avatar.tsx` renders `user.avatar_url` unvalidated, and that
+value is attacker-influenceable: `handle_new_user` copies
+`raw_user_meta_data->>'avatar_url'` (or `'picture'`) verbatim from client-supplied
+signup metadata, which a crafted `signUp` call controls.
+- **This is not XSS.** `javascript:` does not execute in `img src`, and SVG
+  loaded through `<img>` cannot script. Do not treat it as one.
+- What it is: any group member can make every other member's browser issue a
+  request to a host of their choosing — IP address, rough location and
+  presence disclosure. `referrerPolicy="no-referrer"` already caps the leak.
+- Either an `https:` scheme allow-list at the component, or `img-src` under
+  12.1. The allow-list is the smaller change and does not wait on the CSP.
+- `Layout.tsx` and `AccountModal.tsx` read the *viewer's own* metadata, so
+  those two are self-only and need nothing.
+
+### 12.4 Keep `renderLegalText`'s input static — latent, currently unreachable
+`src/pages/LegalPage.tsx:39` passes the `href` parsed out of `[label](href)`
+straight to `<a href>` with no scheme check. Safe today because the only input
+is `src/lib/legal.ts`, which is ours. If legal copy ever becomes data-driven,
+`[click](javascript:…)` is a live XSS — React 19 *warns* on `javascript:` URLs,
+it does not block them. The invariant is already stated in the comment there;
+this is a note to keep it stated, and to add the scheme check in the same
+change that ever makes the input dynamic.
+
+### 12.5 Encode the address in `mailtoHref` — cosmetic
+`src/components/MembersTab.tsx:54` encodes the subject and body but interpolates
+the address raw. Backend validation (`^[^@\s]+@[^@\s]+\.[^@\s]+$`) excludes
+whitespace but permits `&` and `?`, so an address could inject extra `mailto:`
+parameters into the user's own draft. One line, no security consequence beyond
+a confusing draft — listed so the next reader does not have to re-derive that
+it is harmless.
 
 ---
 
