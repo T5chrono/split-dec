@@ -150,7 +150,19 @@ invitation quotas, which turned out to have the identical hole.
   default sat outside the `/api` prefix and was unreachable in production only
   by routing luck. 149 backend tests (8 new in `tests/test_docs_exposure.py`,
   one of which skips on a machine with `ENV=development` — the docstring
-  explains why that is deliberate). Frontend untouched.
+  explains why that is deliberate). Frontend untouched. **Merged and confirmed
+  live**: all three paths now return FastAPI's own `{"detail":"Not Found"}`,
+  with `/api/health` probed alongside as the control.
+- **One flaky test fixed on the way** (PR #45). `TestNoRegistrationOracle::
+  test_response_identical_for_registered_and_unregistered` compared the two
+  invitation responses without excluding `created_at`, so it passed only when
+  both sequential creates landed inside the same wall-clock second — a coin
+  flip that went red in CI that day. Excluding it loses nothing: the key-set
+  assertion that actually guards the enumeration oracle **was already passing
+  during the failure**, and a creation timestamp cannot reveal whether an
+  address is registered. Worth knowing for the next reader: with today's schema
+  the exclusions leave `status` alone, so that value comparison earns its keep
+  forward, not now.
 
 **What that leaves in section A**: the Google consent screen itself (A1,
 prerequisite done), secret rotation (A3), pasting the email templates (A4, copy
@@ -745,9 +757,15 @@ Verified on both branches by real requests through the ASGI transport, not just
 by route registration: production 404s `/api/docs`, `/api/redoc`,
 `/api/openapi.json`, `/redoc` and `/openapi.json`; development serves the three
 `/api`-prefixed ones and nothing at FastAPI's bare defaults.
-**Still to do: re-probe `https://split-dec.app/api/docs` after this deploys** —
-it should 404 rather than render. Per the stale-shell trap noted above, that is
-a CDN-cached path, so cache-bust before believing a 200.
+
+☑ **Confirmed live on `https://split-dec.app` after the PR #45 merge**
+(2026-08-15), cache-busted. All three doc paths return **`{"detail":"Not
+Found"}`** — note the body, because it is the part that proves the point: that
+is FastAPI's own 404, so the request reached the function and the route is
+genuinely unregistered. An HTML body would have meant the SPA catch-all
+answered and told us nothing about the function. `/api/health` was probed in
+the same pass as a control, returning 200: without it, three 404s are equally
+consistent with the whole API being down.
 
 ### 12.3 Constrain `avatar_url` before it reaches `<img src>`
 `src/components/Avatar.tsx` renders `user.avatar_url` unvalidated, and that
