@@ -53,9 +53,9 @@ Ordered by lead time, longest first. The detail stays in the numbered sections.
    100-user cap and the "unverified app" warning. Its other prerequisites
    (`/privacy`, `/terms`) have been live since item 8. The outcome then sits in
    section C.
-2. **Inbound mail for `privacy@split-dec.app`** (item 8) — the contact point
-   published in both legal documents, and testers may well use it. An address
-   that bounces is worse than none.
+2. ☑ **Inbound mail for `privacy@split-dec.app`** (item 8) — done 2026-08-15.
+   The contact point published in both legal documents now reaches a real
+   inbox instead of bouncing.
 3. **Rotate the secrets that passed through chat/tooling** (item 4) — Supabase
    DB password, Resend API key. Best done *now*, in a phase where a fumbled
    environment variable costs nothing.
@@ -123,6 +123,24 @@ and route-level code splitting shipped earlier; the two follow-ups they left
 behind — a tombstone so group deletion can't reset a write quota, and
 vendor-chunk splitting — landed on 2026-08-13, along with the same fix for the
 invitation quotas, which turned out to have the identical hole.
+
+---
+
+## Done — 2026-08-15
+
+- **§A2 closed — `privacy@split-dec.app` receives mail.** Details in item 8,
+  including the two decisions worth not re-litigating: forwarding to a read
+  inbox rather than Resend inbound, and **no SPF record at the apex**.
+  Verified by an actual round-trip, not by the forwarder turning green.
+
+**What that leaves in section A**, all of it untouched since yesterday: the
+Google consent screen itself (A1, prerequisite done), secret rotation (A3),
+pasting the email templates (A4, copy already in the repo), error tracking and
+an uptime check (A5, the only remaining code), buycoffee.to (A6), the
+branch-protection decision (A7, now free), and the anon-key REST probe (A8).
+
+Still unverified on the wire from yesterday: the analytics fold. The check is
+at the end of the 2026-08-14 entry below.
 
 ---
 
@@ -400,7 +418,7 @@ These were shared during development and should be rotated before launch:
   that a legitimate power user hitting a 429 has no self-service escape.
 - Add a lightweight uptime check on `/api/health`.
 
-## 8. Legal / privacy — ◐ pages live, contact mailbox + review pending
+## 8. Legal / privacy — ◐ pages live and contact mailbox works; only the review is left
 - ☑ **Privacy Policy at `/privacy` and Terms of Service at `/terms`**, bilingual
   EN+PL, in `src/lib/legal.ts` (document bodies) rendered by
   `src/pages/LegalPage.tsx`. Both routes are registered in **both** auth
@@ -447,10 +465,28 @@ These were shared during development and should be rotated before launch:
   enumerates, so it was wrong. Now four, in both languages. The lesson for the
   next audit: that paragraph is an **exhaustive** claim, so anything that
   touches `localStorage`/`sessionStorage` has to be added to it.
-- ☐ **Make `privacy@split-dec.app` actually receive mail** before launch — it
-  is the contact point in both documents and for GDPR requests. Resend inbound
-  or a registrar-level forward to a real inbox. An address that bounces is
-  worse than none.
+- ☑ **`privacy@split-dec.app` receives mail** (2026-08-15). It is the contact
+  point in both documents and for GDPR requests, and it used to bounce.
+  - **Forwarding, not a mailbox**: ImprovMX free tier catches mail for the
+    address and forwards it to a personal inbox. Chosen over Resend inbound
+    deliberately — Resend would deliver it to an API and a dashboard, and a
+    contact address carrying a 30-day statutory reply deadline belongs
+    somewhere already read daily, not somewhere that has to be remembered.
+  - Two `MX` records at the apex, `mx1`/`mx2.improvmx.com` (priority 10/20),
+    added in **Vercel's** DNS. The apex had no MX at all beforehand, so nothing
+    collided.
+  - **No SPF record was added, on purpose, and none should be.** ImprovMX
+    offers one; forwarding does not need it, and it is the only step here that
+    could disturb *outgoing* mail. The apex still carries exactly one TXT
+    record — the Google verification string from item 2. Resend's own SPF and
+    bounce path live on `send.split-dec.app` and were never touched.
+  - Verified rather than assumed: `MX` and `TXT` both re-read from DNS
+    afterwards, `send.split-dec.app` confirmed intact, and a real message sent
+    to the address arrived in the destination inbox.
+  - **Forwarding is one-way.** A reply goes out from the personal address
+    unless Gmail's "Send mail as" is pointed at the existing Resend SMTP
+    credentials. Not set up; worth doing the first time someone actually
+    writes in.
 - ☐ **§C1 — waiting on someone else, deliberately not a blocker.** Have the
   text reviewed. It was drafted to be accurate about this specific app, not run
   past a lawyer; the liability, consumer-rights and governing-law clauses in
@@ -607,5 +643,5 @@ The limitations this item used to carry were all closed on 2026-08-13.
 
 ---
 
-_Last updated: 2026-08-14. Maintained alongside the develop → PR → master
+_Last updated: 2026-08-15. Maintained alongside the develop → PR → master
 workflow; update statuses as items land._
