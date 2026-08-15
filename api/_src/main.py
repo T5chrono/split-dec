@@ -10,7 +10,38 @@ from .config import DEV_FRONTEND_ORIGIN, ENV
 from .db import get_db
 from .routers import expenses, groups, invitations, settlements, users
 
-app = FastAPI(title="SplitDec API", docs_url="/api/docs", openapi_url="/api/openapi.json")
+def docs_urls(env: str) -> dict[str, str | None]:
+    """Interactive API docs, and the schema that feeds them: development only.
+
+    FastAPI's Swagger page loads `swagger-ui-bundle.js` from cdn.jsdelivr.net at
+    an unpinned major version and with no SRI. Served from `/api/docs`, that is
+    a third-party script executing on the app's *own* origin — the origin whose
+    localStorage holds the Supabase session — so in production the routes are
+    not registered at all rather than merely being undocumented. `openapi_url`
+    goes with it: it is what the page fetches, and on its own it enumerates
+    every endpoint and schema in the API.
+
+    `redoc_url` too, which FastAPI would otherwise default to `/redoc`. Note
+    where that sits: *outside* the `/api` prefix, so today it is unreachable in
+    production only because `vercel.json`'s catch-all rewrite sends it to the
+    SPA before the function ever sees it. That is routing luck, not a decision,
+    and it would evaporate the day the rewrite changes.
+
+    Gated rather than deleted — like the CORS middleware below — because the
+    docs are genuinely useful against a local uvicorn. Anything that is not
+    exactly "development" gets nothing, so an unset or misspelled ENV fails
+    closed.
+    """
+    if env == "development":
+        return {
+            "docs_url": "/api/docs",
+            "redoc_url": "/api/redoc",
+            "openapi_url": "/api/openapi.json",
+        }
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+app = FastAPI(title="SplitDec API", **docs_urls(ENV))
 
 # CORS is a local-dev-only concern: in production the SPA and the API are
 # served same-origin under one Vercel domain (spec §1). Never enable this

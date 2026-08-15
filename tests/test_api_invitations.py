@@ -170,10 +170,27 @@ class TestNoRegistrationOracle:
 
         assert known.status_code == unknown.status_code == 201
         a, b = known.json(), unknown.json()
+        # Presence is the half that guards the oracle: a field appearing in only
+        # one of the two responses would be a signal whatever its value.
         assert a.keys() == b.keys()
-        # Everything except the row's own identity and the echoed address.
-        assert {k: v for k, v in a.items() if k not in ("id", "email", "group_id")} == {
-            k: v for k, v in b.items() if k not in ("id", "email", "group_id")
+        # Values, minus the ones that differ between any two rows whoever was
+        # invited. `created_at` belongs in that list and used to be missing from
+        # it, which made this assertion a coin flip: the two invitations come
+        # from sequential requests, so their timestamps match only when both
+        # land inside the same wall-clock second, and CI failed the moment they
+        # straddled one (13:00:51 vs 13:00:52). Comparing it never tested
+        # anything either — a creation timestamp cannot reveal whether an
+        # address is registered. Uniform *latency* is a real part of this
+        # invariant, but it is not something two timestamps from two different
+        # requests could ever have asserted.
+        #
+        # Worth knowing before trusting this line: against today's schema the
+        # exclusions leave `status` on its own, so the comparison earns its keep
+        # forward rather than now — any *new* field that is constant per invitee
+        # must match, and any new field that is not has to be argued for here.
+        VARIES_PER_ROW = ("id", "email", "group_id", "created_at")
+        assert {k: v for k, v in a.items() if k not in VARIES_PER_ROW} == {
+            k: v for k, v in b.items() if k not in VARIES_PER_ROW
         }
         assert "user_exists" not in a
         assert "email_sent" not in a
