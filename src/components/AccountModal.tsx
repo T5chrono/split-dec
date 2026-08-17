@@ -4,6 +4,7 @@ import { LogOut, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n } from "../lib/i18n";
+import { safeAvatarUrl } from "../lib/avatarUrl";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import LegalLinks from "./LegalLinks";
@@ -18,7 +19,8 @@ export default function AccountModal({ onClose }: { onClose: () => void }) {
     | undefined;
   const displayName = meta?.full_name ?? meta?.name ?? "";
   const email = session?.user.email ?? "";
-  const avatar = meta?.avatar_url ?? meta?.picture;
+  // The viewer's own avatar; filtered for the same consistency reason as Layout.
+  const avatar = safeAvatarUrl(meta?.avatar_url ?? meta?.picture);
 
   const deleteAccount = useMutation({
     mutationFn: () => api.delete<void>("/users/me"),
