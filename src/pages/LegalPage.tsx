@@ -13,6 +13,23 @@ import { CoinMark, Wordmark } from "../components/Logo";
  *  removes any question of rendering untrusted input. */
 const INLINE_RE = /\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
 
+/** Schemes a legal-document link is allowed to use.
+ *
+ *  `javascript:` is the whole reason this exists. React warns about such URLs
+ *  but does not block them, so `[click](javascript:…)` in a document body would
+ *  be a working XSS — harmless today, because the only input is the static copy
+ *  in `lib/legal.ts`, and a real hole the moment that copy comes from anywhere
+ *  else. Adding the check now costs nothing and means the future change that
+ *  makes these documents dynamic cannot quietly introduce one.
+ *
+ *  Both documents together use exactly three link shapes — `/privacy`,
+ *  `https://…` and one `mailto:` — so nothing needs rewriting to satisfy this.
+ *  A link with any other scheme renders as plain label text rather than
+ *  disappearing, because silently dropping words from a legal document is worse
+ *  than showing them unlinked.
+ */
+const SAFE_HREF = /^(?:https:|mailto:)/i;
+
 export function renderLegalText(text: string): ReactNode {
   const out: ReactNode[] = [];
   let last = 0;
@@ -31,8 +48,8 @@ export function renderLegalText(text: string): ReactNode {
           {label}
         </Link>,
       );
-    } else {
-      const external = href!.startsWith("http");
+    } else if (SAFE_HREF.test(href!)) {
+      const external = href!.toLowerCase().startsWith("https:");
       out.push(
         <a
           key={start}
@@ -43,6 +60,9 @@ export function renderLegalText(text: string): ReactNode {
           {label}
         </a>,
       );
+    } else {
+      // Unknown scheme: keep the words, drop the link.
+      out.push(label);
     }
     last = start + m[0].length;
   }

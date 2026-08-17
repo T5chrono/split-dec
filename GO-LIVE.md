@@ -4,10 +4,10 @@ Things to do before treating SplitDec as a real, publicly-usable product.
 The app is fully functional today at https://split-dec.app; the items below
 are production-readiness, deliverability, security hardening and polish — not
 missing features. The app itself is feature-complete and green (149 backend
-tests, 159 frontend, build), so **almost everything outstanding is ops, config
+tests, 179 frontend, build), so **almost everything outstanding is ops, config
 or legal**. Two entries carry code: item 7 (wire an error tracker) and item 12
 (security hardening — none of it a live vulnerability, all of it blast radius;
-its one same-day fix, 12.2, is already done).
+12.2, 12.3, 12.4 and 12.5 are done and only the CSP, 12.1, remains).
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -150,7 +150,19 @@ invitation quotas, which turned out to have the identical hole.
   default sat outside the `/api` prefix and was unreachable in production only
   by routing luck. 149 backend tests (8 new in `tests/test_docs_exposure.py`,
   one of which skips on a machine with `ENV=development` — the docstring
-  explains why that is deliberate). Frontend untouched.
+  explains why that is deliberate). Frontend untouched. **Merged and confirmed
+  live**: all three paths now return FastAPI's own `{"detail":"Not Found"}`,
+  with `/api/health` probed alongside as the control.
+- **One flaky test fixed on the way** (PR #45). `TestNoRegistrationOracle::
+  test_response_identical_for_registered_and_unregistered` compared the two
+  invitation responses without excluding `created_at`, so it passed only when
+  both sequential creates landed inside the same wall-clock second — a coin
+  flip that went red in CI that day. Excluding it loses nothing: the key-set
+  assertion that actually guards the enumeration oracle **was already passing
+  during the failure**, and a creation timestamp cannot reveal whether an
+  address is registered. Worth knowing for the next reader: with today's schema
+  the exclusions leave `status` alone, so that value comparison earns its keep
+  forward, not now.
 
 **What that leaves in section A**: the Google consent screen itself (A1,
 prerequisite done), secret rotation (A3), pasting the email templates (A4, copy
@@ -660,7 +672,7 @@ The limitations this item used to carry were all closed on 2026-08-13.
     lazy `/privacy` route both loading clean — `npm run dev` does not apply
     this chunking, so it cannot show you this.
 
-## 12. Security hardening (XSS defence in depth) — ☐
+## 12. Security hardening (XSS defence in depth) — ◐ only 12.1 (the CSP) left
 An XSS review on 2026-08-15 found **no exploitable injection anywhere in the
 app**, and nothing in this item is a live vulnerability. It is a checklist entry
 anyway because every sub-item is *blast radius*: these are the reasons an
@@ -745,11 +757,17 @@ Verified on both branches by real requests through the ASGI transport, not just
 by route registration: production 404s `/api/docs`, `/api/redoc`,
 `/api/openapi.json`, `/redoc` and `/openapi.json`; development serves the three
 `/api`-prefixed ones and nothing at FastAPI's bare defaults.
-**Still to do: re-probe `https://split-dec.app/api/docs` after this deploys** —
-it should 404 rather than render. Per the stale-shell trap noted above, that is
-a CDN-cached path, so cache-bust before believing a 200.
 
-### 12.3 Constrain `avatar_url` before it reaches `<img src>`
+☑ **Confirmed live on `https://split-dec.app` after the PR #45 merge**
+(2026-08-15), cache-busted. All three doc paths return **`{"detail":"Not
+Found"}`** — note the body, because it is the part that proves the point: that
+is FastAPI's own 404, so the request reached the function and the route is
+genuinely unregistered. An HTML body would have meant the SPA catch-all
+answered and told us nothing about the function. `/api/health` was probed in
+the same pass as a control, returning 200: without it, three 404s are equally
+consistent with the whole API being down.
+
+### 12.3 ☑ `avatar_url` is allow-listed before it reaches `<img src>` — done 2026-08-15
 `src/components/Avatar.tsx` renders `user.avatar_url` unvalidated, and that
 value is attacker-influenceable: `handle_new_user` copies
 `raw_user_meta_data->>'avatar_url'` (or `'picture'`) verbatim from client-supplied
@@ -759,27 +777,61 @@ signup metadata, which a crafted `signUp` call controls.
 - What it is: any group member can make every other member's browser issue a
   request to a host of their choosing — IP address, rough location and
   presence disclosure. `referrerPolicy="no-referrer"` already caps the leak.
-- Either an `https:` scheme allow-list at the component, or `img-src` under
-  12.1. The allow-list is the smaller change and does not wait on the CSP.
-- `Layout.tsx` and `AccountModal.tsx` read the *viewer's own* metadata, so
-  those two are self-only and need nothing.
+Fixed by `safeAvatarUrl` in `src/lib/avatarUrl.ts`, applied at all three render
+sites. It accepts **only `https:` on `googleusercontent.com` or a subdomain**;
+anything else returns null and the existing initials badge renders instead, so a
+rejected avatar looks like an ordinary empty state rather than a broken image.
+- **The host list was checked against the database, not guessed.** Every avatar
+  in production is `https://lh3.googleusercontent.com/…`, so restricting to
+  Google's CDN breaks nobody. Subdomains are allowed as a group because Google
+  rotates the shard (`lh3`–`lh6` all appear in the wild).
+- **The leading dot in the suffix test is load-bearing**, and there are tests
+  for it: without it `evilgoogleusercontent.com` matches, and a suffix test is
+  also what rejects `googleusercontent.com.attacker.example`.
+- **Adding a second OAuth provider means adding its avatar host here**, or its
+  users silently get initials. Deliberate trade: a cosmetic regression the new
+  provider's first test login reveals, against leaving a request-to-anywhere
+  open for every existing member.
+- `Layout.tsx` and `AccountModal.tsx` read the *viewer's own* metadata and were
+  never exposed, but they go through the same helper anyway — so "avatar URLs
+  are filtered" has no exceptions to remember, and a future `img-src` cannot be
+  widened by one component quietly disagreeing with the other two.
 
-### 12.4 Keep `renderLegalText`'s input static — latent, currently unreachable
-`src/pages/LegalPage.tsx:39` passes the `href` parsed out of `[label](href)`
-straight to `<a href>` with no scheme check. Safe today because the only input
-is `src/lib/legal.ts`, which is ours. If legal copy ever becomes data-driven,
-`[click](javascript:…)` is a live XSS — React 19 *warns* on `javascript:` URLs,
-it does not block them. The invariant is already stated in the comment there;
-this is a note to keep it stated, and to add the scheme check in the same
-change that ever makes the input dynamic.
+### 12.4 ☑ `renderLegalText` only links known schemes — done 2026-08-15
+`LegalPage.tsx` passed the `href` parsed out of `[label](href)` straight to
+`<a href>` with no scheme check. Safe as written, because the only input is the
+static copy in `src/lib/legal.ts` — and a live XSS the day that copy comes from
+anywhere else, since React 19 *warns* on `javascript:` URLs without blocking
+them. The check went in now rather than being left as a note, because it costs
+nothing and the future change that makes these documents dynamic is exactly the
+change least likely to remember it.
 
-### 12.5 Encode the address in `mailtoHref` — cosmetic
-`src/components/MembersTab.tsx:54` encodes the subject and body but interpolates
-the address raw. Backend validation (`^[^@\s]+@[^@\s]+\.[^@\s]+$`) excludes
-whitespace but permits `&` and `?`, so an address could inject extra `mailto:`
-parameters into the user's own draft. One line, no security consequence beyond
-a confusing draft — listed so the next reader does not have to re-derive that
-it is harmless.
+`SAFE_HREF` allows `https:` and `mailto:`; in-app `/…` paths keep their own
+branch and stay client-side `Link`s. Both documents together use exactly those
+three shapes, so nothing needed rewriting. An unknown scheme renders as **plain
+label text rather than vanishing** — silently dropping words from a legal
+document is worse than showing them unlinked.
+
+Verified in a browser against the real rendered document, not only in tests: all
+nine links on `/privacy` still resolve (3 `mailto`, 4 `https` — every one of
+them carrying `rel="noreferrer"` — and 2 in-app), with no leftover `](` or `**`
+in the text and a clean console.
+
+One incidental find, deliberately not chased: the href group is `[^)]+`, so a
+parenthesised URL ends the match early and leaves a stray `)` in the text. That
+is the minimal parser working as written, it cannot arise in the real documents,
+and "deliberately not a markdown parser" is a decision worth keeping.
+
+### 12.5 ☑ The address in `mailtoHref` is encoded — done 2026-08-15
+`MembersTab.tsx` encoded the subject and body but interpolated the address raw.
+Backend validation (`^[^@\s]+@[^@\s]+\.[^@\s]+$`) excludes whitespace but
+permits `&` and `?`, so an address containing them ended the recipient and began
+a new mailto field instead of staying part of it. Cosmetic — a confusing draft
+in the user's own mail client, nothing more.
+
+Now `encodeURIComponent(address)` with `%40` mapped back to `@`, which RFC 6068
+permits literally in the address and which keeps the raw URI readable where the
+mail client shows it.
 
 ---
 

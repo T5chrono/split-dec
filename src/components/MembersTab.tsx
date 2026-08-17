@@ -51,8 +51,14 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     },
   });
 
+  // The address gets the same percent-encoding the subject and body already
+  // had. It arrives from the API, whose validation (`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+  // excludes whitespace but permits `?` and `&` — unencoded, those would end the
+  // recipient and start a new mailto field instead of staying part of it. `@` is
+  // put back because RFC 6068 allows it literally in the address and mail
+  // clients show the raw URI to the user.
   const mailtoHref = (address: string) =>
-    `mailto:${address}?subject=${encodeURIComponent(t("inviteEmailSubject"))}&body=${encodeURIComponent(
+    `mailto:${encodeURIComponent(address).replace(/%40/g, "@")}?subject=${encodeURIComponent(t("inviteEmailSubject"))}&body=${encodeURIComponent(
       t("inviteEmailBody").replace("{group}", group.name) + "\n\nhttps://split-dec.vercel.app",
     )}`;
 

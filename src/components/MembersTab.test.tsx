@@ -67,6 +67,25 @@ describe("MembersTab invitations", () => {
     expect(screen.queryByText(/isn't on SplitDec/i)).not.toBeInTheDocument();
   });
 
+  it("percent-encodes an address that would otherwise start a new mailto field", async () => {
+    // The API's email pattern excludes whitespace but permits `?` and `&`, and
+    // unencoded those end the recipient and begin a header instead of staying
+    // part of the address. `@` stays literal — RFC 6068 allows it, and the raw
+    // URI is what the mail client shows the user.
+    const awkward = "a&cc=x?b@test.dev";
+    vi.mocked(api.post).mockResolvedValue(invitation(awkward));
+    renderTab();
+    await invite(awkward);
+
+    await waitFor(() => expect(screen.getByText(/invitation saved/i)).toBeInTheDocument());
+    const href = screen
+      .getByRole("link", { name: /open email draft/i })
+      .getAttribute("href")!;
+    const recipient = href.slice("mailto:".length, href.indexOf("?subject="));
+    expect(decodeURIComponent(recipient)).toBe(awkward);
+    expect(recipient).not.toContain("&");
+  });
+
   it("surfaces the rate-limit error instead of a success message", async () => {
     vi.mocked(api.post).mockRejectedValue(
       new Error("Too many invitations sent recently. Please try again later."),

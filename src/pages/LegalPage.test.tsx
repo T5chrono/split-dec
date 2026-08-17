@@ -132,4 +132,57 @@ describe("renderLegalText", () => {
     expect(link).not.toHaveAttribute("target");
     expect(screen.getByText(/before/)).toHaveTextContent("before bold label after");
   });
+
+  it("keeps the words but drops the link for a javascript: URL", () => {
+    // Static repo-owned copy today, so this is unreachable — and it is exactly
+    // what would become a working XSS the day these documents stop being
+    // static, because React warns about javascript: URLs without blocking them.
+    // Payload deliberately free of parentheses: the href group is `[^)]+`, so
+    // `javascript:alert(1)` would end the match at the inner bracket and leave
+    // a stray `)` in the text. That is the minimal parser working as written
+    // rather than anything to do with this check — and it cannot arise in the
+    // real documents, which contain no parenthesised hrefs.
+    renderWithProviders(
+      <MemoryRouter>
+        <p>{renderLegalText("read the [notice](javascript:void 0) first")}</p>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText(/read the/)).toHaveTextContent("read the notice first");
+  });
+
+  it.each(["data:text/html,<script>alert(1)</script>", "vbscript:msgbox(1)", "http://plain"])(
+    "refuses to link %s",
+    (href) => {
+      renderWithProviders(
+        <MemoryRouter>
+          <p>{renderLegalText(`x [label](${href}) y`)}</p>
+        </MemoryRouter>,
+      );
+
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    },
+  );
+
+  it("still links the three shapes the documents actually use", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <p>
+          {renderLegalText(
+            "[a](/privacy) [b](https://example.com) [c](mailto:privacy@split-dec.app)",
+          )}
+        </p>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "a" })).toHaveAttribute("href", "/privacy");
+    const external = screen.getByRole("link", { name: "b" });
+    expect(external).toHaveAttribute("href", "https://example.com");
+    expect(external).toHaveAttribute("target", "_blank");
+    const mail = screen.getByRole("link", { name: "c" });
+    expect(mail).toHaveAttribute("href", "mailto:privacy@split-dec.app");
+    // A mail client is not a new browsing context.
+    expect(mail).not.toHaveAttribute("target");
+  });
 });

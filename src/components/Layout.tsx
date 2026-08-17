@@ -4,6 +4,7 @@ import { Languages, Moon, Sun, UserRound } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useI18n } from "../lib/i18n";
+import { safeAvatarUrl } from "../lib/avatarUrl";
 import AccountModal from "./AccountModal";
 import { CoinMark, Wordmark } from "./Logo";
 
@@ -16,7 +17,11 @@ export default function Layout() {
   const meta = session?.user.user_metadata as
     | { avatar_url?: string; picture?: string }
     | undefined;
-  const avatar = meta?.avatar_url ?? meta?.picture;
+  // Only ever the viewer's own metadata, so nobody else can aim this — it goes
+  // through the allow-list anyway so that "avatar URLs are filtered" is a rule
+  // with no exceptions to remember, and so a future `img-src` cannot be widened
+  // by one component quietly disagreeing with the other two.
+  const avatar = safeAvatarUrl(meta?.avatar_url ?? meta?.picture);
 
   return (
     <div className="min-h-screen">
