@@ -60,8 +60,19 @@ on `ENV=development`):
   function is deliberately collocated with the database (Paris); moving it re-adds
   ~500ms/request — and sets the security headers (HSTS, nosniff, `frame-ancestors 'none'` +
   `X-Frame-Options: DENY`, referrer and permissions policy), asserted by
-  `tests/test_vercel_config.py`. The CSP is intentionally framing-only; a `default-src`
-  policy would need the Supabase endpoints and the PWA's generated SW audited first.
+  `tests/test_vercel_config.py`. **The script-level CSP is staged**: the enforced
+  `Content-Security-Policy` is still framing-only, while the full policy
+  (`default-src 'self'`, hash-pinned `script-src`, `connect-src` limited to self +
+  the Supabase project) ships alongside it as `Content-Security-Policy-Report-Only`
+  until the flows it could break — OAuth, recovery, installed PWAs — have been
+  exercised in production. Promoting it is a one-key rename; the tests read
+  whichever header carries the policy, so they survive the flip. Two things there
+  are load-bearing and non-obvious: `font-src` must allow `data:` (Vite inlines the
+  smallest Manrope woff2 into the built CSS), and the one inline script in
+  `index.html` — the pre-mount theme flip — is allowed **by hash**, because a nonce
+  is impractical when a single static `index.html` is served through a rewrite. The
+  test recomputes that hash from `index.html`, so editing that script fails CI
+  rather than silently reverting the app to a light-mode flash.
   A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing
   with the apex in search — it has to be a header, because every route rewrites to one
   `index.html` and a `<link rel="canonical">` in it would also claim `/privacy` and
