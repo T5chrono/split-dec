@@ -5,11 +5,10 @@ The app is fully functional today at https://split-dec.app; the items below
 are production-readiness, deliverability, security hardening and polish — not
 missing features. The app itself is feature-complete and green (149 backend
 tests, 179 frontend, build), so **almost everything outstanding is ops, config
-or legal**. Two entries carry code: item 7 (wire an error tracker) and item 12
-(security hardening — none of it a live vulnerability, all of it blast radius;
-12.2, 12.3, 12.4 and 12.5 are done, and the CSP, 12.1, is written and shipping
-report-only — what is left there is the production soak and the flip to
-enforcing).
+or legal**. One entry carries code: item 7 (wire an error tracker).
+Security hardening has moved out of this file entirely — see **`SECURITY.md`**,
+which owns the security model, the shipped controls, the accepted risks and the
+incident runbook. The launch-gating security items (4, 5, 6, 7) stayed here.
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -139,12 +138,9 @@ invitation quotas, which turned out to have the identical hole.
   inbox rather than Resend inbound, and **no SPF record at the apex**.
   Verified by an actual round-trip, not by the forwarder turning green.
 - **XSS audit — clean, and item 12 opened for what it did find.** No exploitable
-  injection anywhere: no HTML sinks in `src/`, an i18n layer that returns
-  strings rather than markup, a JSON-only backend that reflects nothing, and the
-  one HTML generator (invitation email) escaping properly. Everything recorded
-  in item 12 is defence in depth — the CSP has no `script-src` (12.1), `/api/docs`
-  was live in production pulling an unpinned CDN script onto the session origin
-  (12.2), and `avatar_url` reaches an `<img src>` unvalidated (12.3, not XSS).
+  injection anywhere. The full record, and the reason several later decisions
+  depend on it, is now `SECURITY.md` §2.4; the three findings it produced are
+  controls in §2.3.
 - **§A10 closed — Swagger UI is development-only** (item 12.2), the one finding
   from that audit worth fixing the same day. `docs_urls(ENV)` in
   `api/_src/main.py` now gates `/api/docs`, `/api/redoc` and
@@ -170,8 +166,8 @@ invitation quotas, which turned out to have the identical hole.
 prerequisite done), secret rotation (A3), pasting the email templates (A4, copy
 already in the repo), error tracking and an uptime check (A5), buycoffee.to
 (A6), the branch-protection decision (A7), and the anon-key REST probe (A8).
-A5 is no longer the only code left — item 12 still carries 12.1, now down to
-a production soak and the flip from report-only to enforcing.
+A5 is the only code left in this file; the CSP work that used to sit beside it
+moved to `SECURITY.md` (OA-1).
 
 Still unverified on the wire from yesterday: the analytics fold. The check is
 at the end of the 2026-08-14 entry below.
@@ -420,7 +416,9 @@ These were shared during development and should be rotated before launch:
 - Email/password auth: enable **leaked-password protection** (HaveIBeenPwned
   check, Pro-only) and review Auth rate limits once on Pro. Keep the dashboard
   minimum password length in sync with `MIN_PASSWORD_LENGTH` in
-  `src/lib/authErrors.ts` (both 8 today).
+  `src/lib/authErrors.ts` (both 8 today). Confirmed still disabled by the
+  Supabase advisor on 2026-08-18 — background in `SECURITY.md` OA-3, and the
+  token-lifetime settings to check in the same pass are OA-2.
 
 ## 6. Branch protection / CI gating — ☐ (but the blocker turned out to be gone)
 - **The repo is public** (`gh repo view` → `"visibility": "PUBLIC"`, checked
@@ -675,218 +673,24 @@ The limitations this item used to carry were all closed on 2026-08-13.
     lazy `/privacy` route both loading clean — `npm run dev` does not apply
     this chunking, so it cannot show you this.
 
-## 12. Security hardening (XSS defence in depth) — ◐ only 12.1 (the CSP) left
-An XSS review on 2026-08-15 found **no exploitable injection anywhere in the
-app**, and nothing in this item is a live vulnerability. It is a checklist entry
-anyway because every sub-item is *blast radius*: these are the reasons an
-injection bug, if one is ever introduced, would go from "a bug" to "account
-takeover". Ordered by that leverage, not by effort.
+## 12. Security hardening — moved to `SECURITY.md`
 
-**What the audit confirmed, and what the items below are protecting.** A future
-change that breaks one of these is what would make this section urgent:
-- **No HTML sinks exist.** `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
-  `insertAdjacentHTML`, `document.write`, `eval`, `new Function`, string-form
-  `setTimeout`, `srcDoc` and `postMessage` handlers are **absent from `src/`**.
-  Every user-controlled string — group name, expense description, `full_name`,
-  email — reaches the DOM as a JSX text child, so React escapes it.
-- **`t()` returns a `string`, not markup** (`src/lib/i18n.tsx`). An i18n layer
-  is the usual quiet place for this to go wrong; here the two `{email}` /
-  `{group}` placeholders are `String.replace` results that land in a text node
-  and inside `encodeURIComponent` respectively.
-- **`renderLegalText` emits React elements, not HTML**, and runs only over
-  repo-owned copy in `src/lib/legal.ts`.
-- **The backend serves JSON only** — no `HTMLResponse`, no templates — and every
-  `HTTPException` detail is a constant or interpolates an already-validated
-  value (`currency` is `^[A-Z]{3}$`, `split_type` a `Literal`). Nothing reflects
-  arbitrary input, and `X-Content-Type-Options: nosniff` means a JSON body could
-  not be sniffed into HTML even if it did.
-- **The one HTML generator escapes.** `invitation_email_content`
-  (`api/_src/emailer.py`) is the only place the codebase builds markup from user
-  input — a group named `<img src=x onerror=…>` would otherwise inject into mail
-  sent under our own sending domain — and both fields go through `html.escape`.
+This section used to carry the XSS defence-in-depth work (12.1–12.5). All of it
+now lives in **`SECURITY.md`**, which also holds the security model, the
+accepted-risk records and the incident runbook — none of which end at launch,
+which is why they no longer sit in a launch checklist.
 
-### 12.1 ◐ A script-level CSP — written, shipping report-only, not yet enforced
-**Status 2026-08-18.** The policy is written and rides on
-`Content-Security-Policy-Report-Only`; the enforcing header still carries
-`frame-ancestors 'none'` alone, so nothing about the app's behaviour has
-changed yet. `tests/test_vercel_config.py` asserts the whole thing. The audit
-the old note said was a prerequisite has been done — see "What the audit
-found" below — and the remaining work is the production soak and the flip.
+Nothing was dropped in the move. 12.2–12.5 shipped on 2026-08-15 and are
+recorded as controls in `SECURITY.md` §2.3; 12.1 (the script-level CSP) shipped
+report-only in PR #47 and its remaining work is `SECURITY.md` OA-1.
 
-The policy:
-
-```
-default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self';
-img-src 'self' https://googleusercontent.com https://*.googleusercontent.com;
-font-src 'self' data:; connect-src 'self' https://<ref>.supabase.co;
-worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self';
-frame-ancestors 'none'; object-src 'none'; frame-src 'none';
-upgrade-insecure-requests
-```
-
-**What the audit found** (built the app, served `dist/` with the policy
-*enforcing*, drove it in a real browser — not reasoned about):
-- **Only one inline script exists.** `vite-plugin-pwa` injects its service-worker
-  registration as an external `/registerSW.js`, not inline, so the pre-mount
-  theme flip in `index.html` is the only thing needing a hash. Verified the hash
-  is identical in `index.html` and `dist/index.html`.
-- **`font-src` must allow `data:`.** Vite inlines the smallest Manrope woff2
-  subset as a base64 URI in the built CSS. `'self'` alone drops a font that is
-  really used — the single most likely thing to have broken on enforcement.
-- **`style-src 'self'` is enough; no `'unsafe-inline'` needed.** The 6 uses of
-  React's `style={{…}}` go through the CSSOM, which CSP does not police —
-  confirmed by reading a computed `animation-delay` back off a live element.
-- **The `/_vercel/*` measurement scripts are same-origin**, so `'self'` covers
-  both Analytics and Speed Insights. (Locally they 404 into the SPA fallback and
-  log `Unexpected token '<'` — a dev artifact, not a violation.)
-- **Verified blocked under enforcement**: `fetch()` to an off-origin host
-  (`connect-src`) and `eval()` (`script-src`). Verified still working: the
-  hashed theme script, the service-worker registration, the Supabase auth
-  origin, the lazy-loaded `/privacy` chunk, and the signed-out deep link.
-
-**What is left before flipping to enforcing** — the flows a signed-out local
-probe cannot reach, which is exactly why it ships report-only first:
-- Google OAuth round trip, password recovery link, email confirmation.
-- An installed PWA upgrading to a deploy that carries the policy.
-- A signed-in session: group screens, avatars actually rendering from
-  `lh3.googleusercontent.com`.
-
-Then promote it: rename the `Content-Security-Policy-Report-Only` key to
-`Content-Security-Policy` and fold `frame-ancestors 'none'` out of the old
-entry. The tests read whichever header carries `script-src`, so they follow the
-rename without edits — but they *do* insist the enforcing header keeps
-`frame-ancestors`, so the flip cannot quietly demote framing protection.
-
-**Why this was worth more than everything else in item 12 combined**, kept from
-the original note because the reasoning is what justifies the work:
-- Nothing would stop an injected script from executing or exfiltrating.
-- No `base-uri` means an injected `<base>` could redirect every relative
-  script load.
-- **The session is in `localStorage`** (`persistSession: true` in
-  `src/lib/supabase.ts` — the supabase-js default), so any XSS yields a
-  stealable *refresh* token: full account takeover, not a session that dies
-  with the tab. There is no clean fix for that in a static SPA — cookie-backed
-  storage wants a server session — which is exactly why the CSP carries the
-  weight instead.
-- **The concrete blocker was the inline theme script** at `index.html:38`, which
-  exists to avoid a light-mode flash before React mounts. A nonce is awkward
-  when one static `index.html` is served through a rewrite, so the route taken
-  is a hash. It has to be regenerated if that script is ever edited — so the
-  test does not hard-code it: it recomputes the hash from `index.html` and
-  fails with the exact replacement string to paste into `vercel.json`.
-- The assertions live in `tests/test_vercel_config.py` alongside the existing
-  header checks, so the policy cannot be reverted as silently as it was added.
-
-### 12.2 ☑ Swagger UI closed in production (§A10) — done 2026-08-15
-`https://split-dec.app/api/docs` was publicly reachable — verified on the wire,
-not inferred. FastAPI's `get_swagger_ui_html` defaults to
-`https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js`: an
-unpinned floating major tag, no SRI. That was **third-party script executing on
-the canonical origin**, the same origin holding the session in `localStorage`
-(12.1) — not XSS, but sitting on exactly the boundary XSS attacks, and the
-largest arbitrary-script-execution surface the app had. `/api/openapi.json` was
-public alongside it, enumerating every endpoint and schema.
-
-Fixed by `docs_urls(ENV)` in `api/_src/main.py`: gated on `ENV` like the CORS
-middleware rather than deleted, because the docs are useful against a local
-uvicorn. Three things worth not re-deriving:
-- **It fails closed.** The test is `== "development"`, not `!= "production"`,
-  so an unset or misspelled ENV costs a dev convenience instead of exposing a
-  CDN script.
-- **`redoc_url` had to go too, and it was the sneaky one.** FastAPI defaults it
-  to bare `/redoc` — *outside* the `/api` prefix, so it was unreachable in
-  production only because `vercel.json`'s catch-all rewrite sent it to the SPA
-  first. That is routing luck, not a decision, and it would evaporate the day
-  the rewrite changes. It is now `/api/redoc` in dev and absent otherwise.
-- **`tests/test_docs_exposure.py` mostly asserts the helper, not the live app,
-  on purpose** — and the module docstring says why: `app` is built at *import*
-  time from the developer's `.env`, so conftest's `_hermetic_env` cannot reach
-  back and rebuild it. A plain route-absence test passes in CI (no `.env` →
-  production) and fails on any machine running `ENV=development`. The one
-  whole-app assertion is therefore conditional; it is what CI actually runs,
-  and it was confirmed locally by forcing `ENV=production`.
-
-Verified on both branches by real requests through the ASGI transport, not just
-by route registration: production 404s `/api/docs`, `/api/redoc`,
-`/api/openapi.json`, `/redoc` and `/openapi.json`; development serves the three
-`/api`-prefixed ones and nothing at FastAPI's bare defaults.
-
-☑ **Confirmed live on `https://split-dec.app` after the PR #45 merge**
-(2026-08-15), cache-busted. All three doc paths return **`{"detail":"Not
-Found"}`** — note the body, because it is the part that proves the point: that
-is FastAPI's own 404, so the request reached the function and the route is
-genuinely unregistered. An HTML body would have meant the SPA catch-all
-answered and told us nothing about the function. `/api/health` was probed in
-the same pass as a control, returning 200: without it, three 404s are equally
-consistent with the whole API being down.
-
-### 12.3 ☑ `avatar_url` is allow-listed before it reaches `<img src>` — done 2026-08-15
-`src/components/Avatar.tsx` renders `user.avatar_url` unvalidated, and that
-value is attacker-influenceable: `handle_new_user` copies
-`raw_user_meta_data->>'avatar_url'` (or `'picture'`) verbatim from client-supplied
-signup metadata, which a crafted `signUp` call controls.
-- **This is not XSS.** `javascript:` does not execute in `img src`, and SVG
-  loaded through `<img>` cannot script. Do not treat it as one.
-- What it is: any group member can make every other member's browser issue a
-  request to a host of their choosing — IP address, rough location and
-  presence disclosure. `referrerPolicy="no-referrer"` already caps the leak.
-Fixed by `safeAvatarUrl` in `src/lib/avatarUrl.ts`, applied at all three render
-sites. It accepts **only `https:` on `googleusercontent.com` or a subdomain**;
-anything else returns null and the existing initials badge renders instead, so a
-rejected avatar looks like an ordinary empty state rather than a broken image.
-- **The host list was checked against the database, not guessed.** Every avatar
-  in production is `https://lh3.googleusercontent.com/…`, so restricting to
-  Google's CDN breaks nobody. Subdomains are allowed as a group because Google
-  rotates the shard (`lh3`–`lh6` all appear in the wild).
-- **The leading dot in the suffix test is load-bearing**, and there are tests
-  for it: without it `evilgoogleusercontent.com` matches, and a suffix test is
-  also what rejects `googleusercontent.com.attacker.example`.
-- **Adding a second OAuth provider means adding its avatar host here**, or its
-  users silently get initials. Deliberate trade: a cosmetic regression the new
-  provider's first test login reveals, against leaving a request-to-anywhere
-  open for every existing member.
-- `Layout.tsx` and `AccountModal.tsx` read the *viewer's own* metadata and were
-  never exposed, but they go through the same helper anyway — so "avatar URLs
-  are filtered" has no exceptions to remember, and a future `img-src` cannot be
-  widened by one component quietly disagreeing with the other two.
-
-### 12.4 ☑ `renderLegalText` only links known schemes — done 2026-08-15
-`LegalPage.tsx` passed the `href` parsed out of `[label](href)` straight to
-`<a href>` with no scheme check. Safe as written, because the only input is the
-static copy in `src/lib/legal.ts` — and a live XSS the day that copy comes from
-anywhere else, since React 19 *warns* on `javascript:` URLs without blocking
-them. The check went in now rather than being left as a note, because it costs
-nothing and the future change that makes these documents dynamic is exactly the
-change least likely to remember it.
-
-`SAFE_HREF` allows `https:` and `mailto:`; in-app `/…` paths keep their own
-branch and stay client-side `Link`s. Both documents together use exactly those
-three shapes, so nothing needed rewriting. An unknown scheme renders as **plain
-label text rather than vanishing** — silently dropping words from a legal
-document is worse than showing them unlinked.
-
-Verified in a browser against the real rendered document, not only in tests: all
-nine links on `/privacy` still resolve (3 `mailto`, 4 `https` — every one of
-them carrying `rel="noreferrer"` — and 2 in-app), with no leftover `](` or `**`
-in the text and a clean console.
-
-One incidental find, deliberately not chased: the href group is `[^)]+`, so a
-parenthesised URL ends the match early and leaves a stray `)` in the text. That
-is the minimal parser working as written, it cannot arise in the real documents,
-and "deliberately not a markdown parser" is a decision worth keeping.
-
-### 12.5 ☑ The address in `mailtoHref` is encoded — done 2026-08-15
-`MembersTab.tsx` encoded the subject and body but interpolated the address raw.
-Backend validation (`^[^@\s]+@[^@\s]+\.[^@\s]+$`) excludes whitespace but
-permits `&` and `?`, so an address containing them ended the recipient and began
-a new mailto field instead of staying part of it. Cosmetic — a confusing draft
-in the user's own mail client, nothing more.
-
-Now `encodeURIComponent(address)` with `%40` mapped back to `@`, which RFC 6068
-permits literally in the address and which keeps the raw URI readable where the
-mail client shows it.
+**Security items that are genuinely launch gates stayed here**: secret rotation
+(item 4), Supabase Pro and leaked-password protection (item 5), branch
+protection (item 6), and error tracking (item 7). `SECURITY.md` cross-references
+each rather than duplicating it.
 
 ---
 
-_Last updated: 2026-08-15. Maintained alongside the develop → PR → master
-workflow; update statuses as items land._
+_Last updated: 2026-08-18. Maintained alongside the develop → PR → master
+workflow; update statuses as items land. Security topics that outlive the launch
+live in `SECURITY.md`._
