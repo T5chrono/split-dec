@@ -20,3 +20,10 @@ SplitDec DesignSystem/
 
 # Local Claude Code tool config (dev-server launcher for the preview browser)
 .claude/
+
+# Launch checklist and security record — deliberately untracked.
+# The repo is public. Individually the facts in these are public or derivable
+# from the code; aggregated they inventory where the app is weak and
+# unmonitored. Kept on the maintainer's machine instead.
+GO-LIVE.md
+SECURITY.md

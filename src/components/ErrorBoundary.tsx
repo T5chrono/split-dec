@@ -80,8 +80,8 @@ export default class ErrorBoundary extends Component<
       window.location.reload();
       return;
     }
-    // No error tracking wired up yet (GO-LIVE item 7); until then the console
-    // is the only record, and swallowing it silently would be worse.
+    // The console is the record of last resort here: swallowing a render
+    // failure silently would be worse than a noisy log.
     console.error("Unhandled error", error, info.componentStack);
   }
 
