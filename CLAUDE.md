@@ -320,4 +320,14 @@ free Resend sender only delivers to the account owner until a domain is verified
 
 - `GO-LIVE.md` — pre-launch checklist (email domain, OAuth publishing, secret rotation,
   Supabase Pro, funding via buycoffee.to). Update statuses as items land.
+- `SECURITY.md` — the security record, and the file to read **before** touching `auth.py`,
+  `deps.py`, `vercel.json` or `index.html`. It owns the five invariants the codebase relies
+  on (FastAPI as the sole authz boundary, stateless auth, the browser-held session,
+  same-origin production, tokens outliving account deletion), the shipped controls, the
+  **accepted risks** — each with a review date, including the `localStorage` session — the
+  incident runbook, and the dated phase-2 decision. Security work that ends at launch stayed
+  in `GO-LIVE.md`; everything that outlives it moved here. Two rules: adding a third-party
+  script to the origin or rendering user content as markup invalidates the reasoning behind
+  several accepted risks, so both are review-scoped changes; and any new retention also
+  changes `src/lib/legal.ts`.
 - `/api/health/db` — DB latency probe, gated by `HEALTH_PROBE_KEY` header outside development.
