@@ -103,7 +103,7 @@ def test_vercel_domain_is_not_indexable():
     assert tags and all("noindex" in v for v in tags)
 
 
-# --- The script-level CSP (GO-LIVE 12.1) ------------------------------------
+# --- The script-level CSP ---------------------------------------------------
 #
 # The policy is rolled out in two stages: `Content-Security-Policy-Report-Only`
 # first, so a directive that turns out to be wrong reports instead of breaking

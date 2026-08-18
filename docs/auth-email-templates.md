@@ -5,7 +5,7 @@ up** and **Reset password**. Paste into **Supabase → Authentication → Emails
 Templates** — subject in the subject field, HTML block in the body.
 
 This file exists because these templates live in a dashboard, not in the
-codebase, and an earlier draft was lost that way (GO-LIVE item 1). **The
+codebase, and an earlier draft was lost that way. **The
 dashboard is what actually sends mail; this file is the source copy.** If you
 edit one, edit the other.
 
@@ -198,7 +198,7 @@ Zresetuj hasło · Reset your password — SplitDec
 1. Sign up a throwaway address (`delivered@resend.dev`) and confirm the mail
    arrives through Resend rather than Supabase's default sender.
 2. Click the button and check it lands on `https://split-dec.app/...` — the
-   apex, not `split-dec.vercel.app`. The Site URL is already fixed (GO-LIVE
-   item 3), but this is the one click that proves it end to end.
+   apex, not `split-dec.vercel.app`. The Site URL is already fixed, but this
+   is the one click that proves it end to end.
 3. For the reset template, confirm the link lands on `/reset-password` while
    signed out and that the app re-renders signed in on the same path.

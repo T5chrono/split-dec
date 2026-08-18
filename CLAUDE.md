@@ -44,9 +44,9 @@ A green `claude-review` check is not by itself proof a review happened: the job 
 even when it posts nothing (PR #29). Look for the tracking comment, not the tick.
 After merging, sync: `git checkout develop && git merge master && git push`.
 CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs.
-Branch protection is *available* (the repo is public, so protected branches are free)
-but **not enabled** — `master` is unprotected and the gate is by convention. See
-GO-LIVE item 6; the older "unavailable on a free private repo" note was stale.
+The develop → PR → master sequence is mandatory regardless of what the host enforces:
+treat it as the gate, and do not push to `master` even when a shortcut is technically
+available.
 
 ## Architecture
 
@@ -95,7 +95,7 @@ on `ENV=development`):
   stay deliberately enumeration-safe (don't distinguish existing emails). `/reset-password` is
   registered in **both** auth branches of `App.tsx` — the recovery link lands signed-out, the SDK
   exchanges the code, and the app re-renders signed-in on the same path (screen sits outside
-  `Layout`). Production auth emails need Supabase custom SMTP via Resend (GO-LIVE item 1).
+  `Layout`). Production auth emails need Supabase custom SMTP via Resend.
 
 ### Money invariants (the core of this codebase)
 
@@ -314,20 +314,18 @@ Invitation emails go through Resend (`api/_src/emailer.py`), best-effort: withou
 `RESEND_API_KEY` (or on failure) the UI falls back to a mailto draft. User-controlled names are
 HTML-escaped via `invitation_email_content`. Load any data the email needs **before**
 `db.commit()` — the provider call must never hold a checked-out pooler connection. Note: the
-free Resend sender only delivers to the account owner until a domain is verified (see GO-LIVE.md).
+free Resend sender only delivers to the account owner until a domain is verified.
 
 ## Other files
 
-- `GO-LIVE.md` — pre-launch checklist (email domain, OAuth publishing, secret rotation,
-  Supabase Pro, funding via buycoffee.to). Update statuses as items land.
-- `SECURITY.md` — the security record, and the file to read **before** touching `auth.py`,
-  `deps.py`, `vercel.json` or `index.html`. It owns the five invariants the codebase relies
-  on (FastAPI as the sole authz boundary, stateless auth, the browser-held session,
-  same-origin production, tokens outliving account deletion), the shipped controls, the
-  **accepted risks** — each with a review date, including the `localStorage` session — the
-  incident runbook, and the dated phase-2 decision. Security work that ends at launch stayed
-  in `GO-LIVE.md`; everything that outlives it moved here. Two rules: adding a third-party
-  script to the origin or rendering user content as markup invalidates the reasoning behind
-  several accepted risks, so both are review-scoped changes; and any new retention also
-  changes `src/lib/legal.ts`.
+- **Launch checklist and security record are deliberately not in this repo.** Both are
+  kept locally and untracked (`GO-LIVE.md`, `SECURITY.md` — see `.gitignore`). The repo is
+  public, and while every individual fact in them is either public or derivable from this
+  code, together they read as an inventory of where the app is weak and unmonitored. If you
+  need either file and it is absent, it exists on the maintainer's machine — ask rather
+  than reconstructing it here.
+  Two rules survive that move, because they are about *this code* rather than the launch:
+  adding a third-party script to the origin, or rendering user content as markup, both
+  invalidate assumptions the security posture rests on and are review-scoped changes; and
+  any new data retention also changes `src/lib/legal.ts`.
 - `/api/health/db` — DB latency probe, gated by `HEALTH_PROBE_KEY` header outside development.
