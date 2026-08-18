@@ -7,7 +7,9 @@ missing features. The app itself is feature-complete and green (149 backend
 tests, 179 frontend, build), so **almost everything outstanding is ops, config
 or legal**. Two entries carry code: item 7 (wire an error tracker) and item 12
 (security hardening — none of it a live vulnerability, all of it blast radius;
-12.2, 12.3, 12.4 and 12.5 are done and only the CSP, 12.1, remains).
+12.2, 12.3, 12.4 and 12.5 are done, and the CSP, 12.1, is written and shipping
+report-only — what is left there is the production soak and the flip to
+enforcing).
 
 Status legend: ☐ not started · ◐ partial · ☑ done
 
@@ -168,7 +170,8 @@ invitation quotas, which turned out to have the identical hole.
 prerequisite done), secret rotation (A3), pasting the email templates (A4, copy
 already in the repo), error tracking and an uptime check (A5), buycoffee.to
 (A6), the branch-protection decision (A7), and the anon-key REST probe (A8).
-A5 is no longer the only code left — item 12 still carries 12.1 and 12.3.
+A5 is no longer the only code left — item 12 still carries 12.1, now down to
+a production soak and the flip from report-only to enforcing.
 
 Still unverified on the wire from yesterday: the analytics fold. The check is
 at the end of the 2026-08-14 entry below.
@@ -702,12 +705,60 @@ change that breaks one of these is what would make this section urgent:
   input — a group named `<img src=x onerror=…>` would otherwise inject into mail
   sent under our own sending domain — and both fields go through `html.escape`.
 
-### 12.1 A script-level CSP — worth more than everything else here combined
-`vercel.json` sends `Content-Security-Policy: frame-ancestors 'none'` and
-nothing more: no `default-src`, `script-src`, `object-src`, `base-uri` or
-`form-action`. That is deliberate (see `CLAUDE.md`), and the reason is real —
-a `default-src` policy needs the Supabase endpoints and the PWA's generated
-service worker audited first. What the decision costs is worth writing down:
+### 12.1 ◐ A script-level CSP — written, shipping report-only, not yet enforced
+**Status 2026-08-18.** The policy is written and rides on
+`Content-Security-Policy-Report-Only`; the enforcing header still carries
+`frame-ancestors 'none'` alone, so nothing about the app's behaviour has
+changed yet. `tests/test_vercel_config.py` asserts the whole thing. The audit
+the old note said was a prerequisite has been done — see "What the audit
+found" below — and the remaining work is the production soak and the flip.
+
+The policy:
+
+```
+default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self';
+img-src 'self' https://googleusercontent.com https://*.googleusercontent.com;
+font-src 'self' data:; connect-src 'self' https://<ref>.supabase.co;
+worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self';
+frame-ancestors 'none'; object-src 'none'; frame-src 'none';
+upgrade-insecure-requests
+```
+
+**What the audit found** (built the app, served `dist/` with the policy
+*enforcing*, drove it in a real browser — not reasoned about):
+- **Only one inline script exists.** `vite-plugin-pwa` injects its service-worker
+  registration as an external `/registerSW.js`, not inline, so the pre-mount
+  theme flip in `index.html` is the only thing needing a hash. Verified the hash
+  is identical in `index.html` and `dist/index.html`.
+- **`font-src` must allow `data:`.** Vite inlines the smallest Manrope woff2
+  subset as a base64 URI in the built CSS. `'self'` alone drops a font that is
+  really used — the single most likely thing to have broken on enforcement.
+- **`style-src 'self'` is enough; no `'unsafe-inline'` needed.** The 6 uses of
+  React's `style={{…}}` go through the CSSOM, which CSP does not police —
+  confirmed by reading a computed `animation-delay` back off a live element.
+- **The `/_vercel/*` measurement scripts are same-origin**, so `'self'` covers
+  both Analytics and Speed Insights. (Locally they 404 into the SPA fallback and
+  log `Unexpected token '<'` — a dev artifact, not a violation.)
+- **Verified blocked under enforcement**: `fetch()` to an off-origin host
+  (`connect-src`) and `eval()` (`script-src`). Verified still working: the
+  hashed theme script, the service-worker registration, the Supabase auth
+  origin, the lazy-loaded `/privacy` chunk, and the signed-out deep link.
+
+**What is left before flipping to enforcing** — the flows a signed-out local
+probe cannot reach, which is exactly why it ships report-only first:
+- Google OAuth round trip, password recovery link, email confirmation.
+- An installed PWA upgrading to a deploy that carries the policy.
+- A signed-in session: group screens, avatars actually rendering from
+  `lh3.googleusercontent.com`.
+
+Then promote it: rename the `Content-Security-Policy-Report-Only` key to
+`Content-Security-Policy` and fold `frame-ancestors 'none'` out of the old
+entry. The tests read whichever header carries `script-src`, so they follow the
+rename without edits — but they *do* insist the enforcing header keeps
+`frame-ancestors`, so the flip cannot quietly demote framing protection.
+
+**Why this was worth more than everything else in item 12 combined**, kept from
+the original note because the reasoning is what justifies the work:
 - Nothing would stop an injected script from executing or exfiltrating.
 - No `base-uri` means an injected `<base>` could redirect every relative
   script load.
@@ -717,12 +768,14 @@ service worker audited first. What the decision costs is worth writing down:
   with the tab. There is no clean fix for that in a static SPA — cookie-backed
   storage wants a server session — which is exactly why the CSP carries the
   weight instead.
-- **The concrete blocker is the inline theme script** at `index.html:38`, which
+- **The concrete blocker was the inline theme script** at `index.html:38`, which
   exists to avoid a light-mode flash before React mounts. A nonce is awkward
-  when one static `index.html` is served through a rewrite, so the practical
-  route is a hash — and it has to be regenerated if that script is ever edited.
-- Add the assertion to `tests/test_vercel_config.py` alongside the existing
-  header checks, or the policy can be reverted as silently as it was added.
+  when one static `index.html` is served through a rewrite, so the route taken
+  is a hash. It has to be regenerated if that script is ever edited — so the
+  test does not hard-code it: it recomputes the hash from `index.html` and
+  fails with the exact replacement string to paste into `vercel.json`.
+- The assertions live in `tests/test_vercel_config.py` alongside the existing
+  header checks, so the policy cannot be reverted as silently as it was added.
 
 ### 12.2 ☑ Swagger UI closed in production (§A10) — done 2026-08-15
 `https://split-dec.app/api/docs` was publicly reachable — verified on the wire,
