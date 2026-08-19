@@ -1,5 +1,17 @@
-@import "tailwindcss";
+/* source(none) turns OFF Tailwind's automatic source detection, and the two
+   @source lines below declare the only places class names actually live.
+   Auto-detection scans the project root for anything not gitignored, which on
+   Vercel meant the Python packages installed during the build: it minted
+   utilities out of their comments, shipping rules like .[ticket:489] (from
+   sqlalchemy's mysql dialect) and .[lower:upper] (from asyncpg's array codec).
+   Locally .venv/ is gitignored and skipped, so production quietly carried
+   ~944 bytes of CSS the local build never produced. Declaring the sources
+   makes the two agree and keeps them agreeing. */
+@import "tailwindcss" source(none);
 @import "@fontsource-variable/manrope";
+
+@source "../index.html";
+@source "./";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
