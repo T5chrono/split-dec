@@ -17,6 +17,28 @@ concurrency:
 
 jobs:
   claude-review:
+    # Dependabot PRs get neither half of what this job needs. GitHub scopes
+    # their secrets to the Dependabot store ("Secret source: Dependabot" in the
+    # run log), so claude_code_oauth_token arrives empty; and dependabot[bot]
+    # is not in allowed_bots below, so the actor would be refused even with a
+    # token. The action then reports success having reviewed nothing, the guard
+    # at the bottom of this file correctly fails the job, and every dependency
+    # bump carries a permanent red check — which is the fastest way to train
+    # everyone here to stop reading checks at all.
+    #
+    # Skipped rather than allow-listed, deliberately. Restoring the review
+    # would mean copying the OAuth token into Dependabot secrets, and for
+    # `pull_request` the workflow runs from the PR's own head — a Dependabot PR
+    # can edit .github/workflows (#57 bumps action SHAs in this very file), so
+    # that token would be reachable from a branch nobody here wrote. Withholding
+    # it is the protection GitHub intends, not an oversight to work around. The
+    # bumps are still gated by backend/frontend CI, which is the check that
+    # actually decides whether a version change is safe.
+    #
+    # Keyed on the actor rather than the PR author on purpose: when a human
+    # pushes a fix to a Dependabot branch, the `synchronize` event runs under
+    # their name, secrets resolve normally, and the review happens as usual.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     # Already below the documented baseline (which is contents/issues write):
     # the reviewer only reads the diff and posts a verdict, so `pull-requests:
