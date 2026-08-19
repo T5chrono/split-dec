@@ -12,7 +12,9 @@ canonical origin; `split-dec.vercel.app` still serves the app but is `noindex`.
 ## Commands
 
 ```powershell
-# Backend (Python venv at .venv; local Python is 3.14, Vercel runs 3.12)
+# Backend (Python venv at .venv; local Python is 3.14, Vercel runs 3.12 —
+# pinned in .python-version, which also matches CI; deleting it hands the
+# choice back to Vercel's default, which moves)
 .\.venv\Scripts\python -m pytest -q                     # all backend tests
 .\.venv\Scripts\python -m pytest tests/test_api_expenses.py::test_create_expense  # one test
 npm run api                                             # uvicorn on :8000 (needs .env)
@@ -60,7 +62,14 @@ on `ENV=development`):
   function is deliberately collocated with the database (Paris); moving it re-adds
   ~500ms/request — and sets the security headers (HSTS, nosniff, `frame-ancestors 'none'` +
   `X-Frame-Options: DENY`, referrer and permissions policy), asserted by
-  `tests/test_vercel_config.py`. **The script-level CSP is staged**: the enforced
+  `tests/test_vercel_config.py`. It also sets `installCommand: "npm install"`,
+  which exists to *narrow* the inferred install step: Vercel would otherwise
+  also install the root `requirements.txt` into the build container, where
+  nothing uses it — the build command is `tsc -b && vite build`, and the
+  function gets its own install from the Python runtime afterwards. Removing
+  the override restores a wasted install and, with it, the Tailwind
+  source-detection problem described under Frontend patterns.
+  **The script-level CSP is staged**: the enforced
   `Content-Security-Policy` is still framing-only, while the full policy
   (`default-src 'self'`, hash-pinned `script-src`, `connect-src` limited to self +
   the Supabase project) ships alongside it as `Content-Security-Policy-Report-Only`
@@ -224,6 +233,19 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   signed-out visitor downloads, undoing the route splitting above. The dev
   server applies none of this — check chunking with `npm run build` then
   `npm run preview` (which serves `dist/`), never `npm run dev`.
+- **Tailwind's sources are declared, not auto-detected** (`src/index.css`):
+  `@import "tailwindcss" source(none)` followed by `@source "../index.html"`
+  and `@source "./"`. Do **not** restore the bare `@import "tailwindcss"`.
+  Auto-detection scans the project for anything not gitignored, which on
+  Vercel reached the Python packages the build had just installed and minted
+  utilities out of their comments — `.[ticket:489]` from sqlalchemy's mysql
+  dialect, `.[lower:upper]` from asyncpg's array codec. It never reproduced
+  locally, where `.venv/` is gitignored, so production quietly served ~944
+  bytes of CSS the local build did not generate. Two things there are
+  load-bearing: the `@source` lines must sit **after** both `@import`s,
+  because `@import` has to precede every other rule or the parser drops it and
+  the second one is the Manrope font; and a new location holding class names
+  has to be added to that list, or its classes silently never generate.
 - **Measurement lives in `App.tsx`, inside both auth branches**:
   `<Analytics beforeSend={foldAnalyticsUrl} />` (Vercel Web Analytics) and
   `<SpeedInsights route={insightsRoute(...)} />`.
