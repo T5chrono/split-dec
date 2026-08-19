@@ -2,6 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "regions": ["cdg1"],
+  "build": {
+    "env": {
+      "UV_LINK_MODE": "copy"
+    }
+  },
   "functions": {
     "api/index.py": {
       "maxDuration": 30
