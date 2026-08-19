@@ -1,0 +1,13 @@
+# Source of truth for the test/dev dependencies. requirements-dev.txt is
+# GENERATED from this file — see requirements.in for the regeneration commands
+# and why each flag is there. This one compiles with `-c requirements.txt` so
+# packages shared with the runtime (anyio, idna, h11, typing-extensions) resolve
+# to the versions the runtime already pinned rather than a second, conflicting
+# set.
+pytest>=8.0
+pytest-asyncio>=0.24
+httpx>=0.27
+aiosqlite>=0.20
+# Local dev only: validate TLS via the OS cert store (api/_src/dev_loop.py) —
+# required when antivirus (e.g. Norton) man-in-the-middles outbound HTTPS.
+truststore>=0.10

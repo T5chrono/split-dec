@@ -1,0 +1,22 @@
+# Source of truth for the runtime dependencies. requirements.txt is GENERATED
+# from this file and pins every package, including transitive ones — edit this
+# file, never that one, then regenerate:
+#
+#   uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt
+#   uv pip compile requirements-dev.in --universal --python-version 3.12 -c requirements.txt -o requirements-dev.txt
+#
+# --universal keeps the environment markers, so one lock serves Linux (CI and
+# Vercel) and Windows (local) — uvloop stays excluded on win32, colorama stays
+# included. --python-version 3.12 matches .python-version and CI; resolving on
+# the local 3.14 would pin versions production never sees.
+#
+# On a machine whose antivirus intercepts HTTPS (Norton, here), uv rejects the
+# substituted certificate — add --native-tls to read the OS trust store. Same
+# root cause as api/_src/dev_loop.py.
+fastapi>=0.115.14
+sqlalchemy[asyncio]>=2.0.41
+asyncpg>=0.30.0
+pydantic>=2.11.7
+PyJWT[crypto]>=2.10.1
+uvicorn[standard]>=0.35.0
+python-dotenv>=1.1.1
