@@ -338,6 +338,19 @@ HTML-escaped via `invitation_email_content`. Load any data the email needs **bef
 `db.commit()` — the provider call must never hold a checked-out pooler connection. Note: the
 free Resend sender only delivers to the account owner until a domain is verified.
 
+**Auth emails** (signup confirmation, password reset) are a different system: Supabase Auth
+sends them through custom SMTP, and the templates live in the **dashboard**, not in the
+codebase. `docs/auth-email-templates.md` is their source copy — bilingual PL+EN, the app's
+teal from `SplitDec DesignSystem/tokens/colors.css`. **The dashboard is what actually sends
+mail, so if one changes, change both**; an earlier draft was lost precisely because it existed
+only in the dashboard. Two rules in that file are load-bearing. The brand is **teal**
+(`#0d9488`) — an earlier revision used indigo that appears nowhere in the app, and nothing in
+CI checks an email template, so drift here is silent. And **the logo is drawn in HTML rather
+than linked as an image on purpose**: a hosted `<img>`, even first-party, turns every open into
+a request carrying the reader's IP and read time, which is undisclosed open-tracking — so
+converting it to a real image is a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump, not a
+cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/Outlook anyway.)
+
 ## Other files
 
 - **Launch checklist and security record are deliberately not in this repo.** Both are
