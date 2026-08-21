@@ -3,17 +3,28 @@
 # updates itself any more. These are the PRs that replace that drift — reviewed,
 # tested by CI, and merged deliberately instead of arriving at deploy time.
 #
-# Grouped on purpose. Ungrouped, a weekly run on ~500 npm packages and ~40
-# Python ones opens a PR per package and the whole thing gets muted within a
-# month. One PR per ecosystem per week is something a solo maintainer reads.
-# Majors stay ungrouped, because those are the ones worth looking at alone.
+# Grouped on purpose. Ungrouped, a run over ~500 npm packages and ~40 Python
+# ones opens a PR per package and the whole thing gets muted within a month.
+# One PR per ecosystem per run is something a solo maintainer reads.
+#
+# Monthly rather than weekly: the first run (2026-08-19) opened straight to the
+# per-ecosystem cap, and the leftovers landed two days later the moment merging
+# that batch freed the slots. That is the cap draining rather than the schedule
+# firing, but it reads as noise either way, and these get reviewed in one
+# sitting. Note that Dependabot *security* updates are a separate feature that
+# ignores this schedule entirely — slowing the version feed does not slow the
+# response to a published advisory, provided they are switched on in the repo
+# settings (they are not, as of 2026-08-21).
+#
+# Majors stay ungrouped, because those are the ones worth looking at alone —
+# except where packages are version-locked to each other, see vite-toolchain.
 version: 2
 
 updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 3
     groups:
       python-minor-patch:
@@ -23,9 +34,32 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 3
     groups:
+      # The build toolchain is peer-locked, so a major across it is one atomic
+      # change and has to arrive as one PR. Split in two, neither half installs:
+      # #64 (vite 6→8) and #65 (@vitejs/plugin-react 4→6) failed npm's peer
+      # resolution with mirror-image errors on CI *and* on the Vercel preview,
+      # because plugin-react 6 peers vite ^8 while plugin-react 4 peers ^4–^7.
+      # The same trap sits one step away under @vitest/ui (peers vitest at an
+      # exact version) and @tailwindcss/vite (depends on tailwindcss at an exact
+      # version) — both are in here before they fire, not after.
+      #
+      # Listed above npm-minor-patch deliberately: a dependency joins the first
+      # group whose patterns match, and patterns: ["*"] below would otherwise
+      # swallow these. Scoped to majors for the same reason — minor and patch
+      # bumps already ride together in that group, so they are already atomic.
+      vite-toolchain:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "vite-plugin-*"
+          - "vitest"
+          - "@vitest/*"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+        update-types: ["major"]
       npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
