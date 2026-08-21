@@ -223,11 +223,14 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   `Layout` and `NotFoundPage` stay eager — they are on one branch's first paint.
   Any new lazy route must sit inside one of the two `Suspense` boundaries, and
   `GroupsPage` warms the `GroupPage` chunk from the same hover/focus handler that
-  prefetches group data (same import specifier, so Rollup emits one chunk).
+  prefetches group data (same import specifier, so Rolldown emits one chunk).
 - **The vendor chunk is an explicit allow-list** (`vite.config.ts`
-  `manualChunks`): React, React-DOM, the router, TanStack Query and
+  `advancedChunks`): React, React-DOM, the router, TanStack Query and
   supabase-js — the runtime both auth branches need on first paint, so a
-  deploy that only touches app code leaves ~490 kB cached. Do **not** widen it
+  deploy that only touches app code leaves ~470 kB cached. It is a rolldown
+  group matched by regex, not the object form of `manualChunks` that vite 6
+  took: vite 8 accepts only a function there and fails the build on an object
+  ("Invalid type: Expected Function but received Object"). Do **not** widen it
   to "everything in `node_modules`": `lucide-react` is tree-shaken per route,
   and hoisting it would drag `GroupPage`'s icon table into the chunk a
   signed-out visitor downloads, undoing the route splitting above. The dev
