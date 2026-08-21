@@ -25,7 +25,7 @@ export default defineConfig({
               // anything else that only one branch imports — leave those to
               // rolldown.
               name: "vendor",
-              test: /[\\/]node_modules[\\/](?:react|react-dom|react-router|react-router-dom|scheduler|@tanstack[\\/]|@supabase[\\/])[\\/]?/,
+              test: /[\\/]node_modules[\\/](?:react|react-dom|react-router|react-router-dom|scheduler|@tanstack[\\/][^\\/]+|@supabase[\\/][^\\/]+)[\\/]/,
             },
           ],
         },
