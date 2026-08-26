@@ -18,6 +18,7 @@ import {
   trimAmount,
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
+import { useAmountError } from "../hooks/useAmountError";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
 import { guessCategory } from "../lib/categoryGuess";
@@ -116,6 +117,7 @@ export default function ExpenseFormModal({
 
   const parseNum = (s: string) => parseFloat(normalizeAmountInput(s)) || 0;
   const selected = group.members.filter((m) => participants.has(m.id));
+  const amountError = useAmountError(totalAmount, currency);
 
   // Percentage autofill: when exactly one selected member has no percentage,
   // it is obviously 100 minus the rest — fill it in automatically.
@@ -289,7 +291,11 @@ export default function ExpenseFormModal({
               value={totalAmount}
               onChange={(e) => setTotalAmount(e.target.value)}
               placeholder="120,50"
-              className={inputCls}
+              aria-invalid={amountError !== null}
+              aria-describedby={amountError ? "expense-amount-error" : undefined}
+              className={`${inputCls} ${
+                amountError ? "border-red-500 focus:border-red-500 dark:border-red-500" : ""
+              }`}
             />
           </div>
           <div>
@@ -305,6 +311,14 @@ export default function ExpenseFormModal({
             </select>
           </div>
         </div>
+        {amountError && (
+          <p
+            id="expense-amount-error"
+            className="-mt-2 text-sm text-red-600 dark:text-red-400"
+          >
+            {amountError}
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -417,7 +431,7 @@ export default function ExpenseFormModal({
 
         <button
           type="submit"
-          disabled={save.isPending || participants.size === 0}
+          disabled={save.isPending || participants.size === 0 || amountError !== null}
           className="w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50"
         >
           {save.isPending ? t("saving") : expense ? t("saveChanges") : t("addExpense")}

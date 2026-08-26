@@ -404,3 +404,50 @@ describe("ExpenseFormModal — editing a percentage expense", () => {
     expect(percentageInputs[1]).toHaveAttribute("placeholder", "30");
   });
 });
+
+describe("ExpenseFormModal — the amount is explained, not echoed back as a 422", () => {
+  // The labels are not `htmlFor`-associated, so the placeholder is the handle.
+  const amountField = () => screen.getByPlaceholderText("120,50");
+
+  it("explains a zero amount and refuses to submit it", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Dinner");
+    await user.type(amountField(), "0000.00");
+
+    expect(screen.getByText("Amount must be greater than 0.")).toBeInTheDocument();
+    expect(amountField()).toHaveAttribute("aria-invalid", "true");
+
+    const submit = screen.getByRole("button", { name: /add expense/i });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("clears the message once the amount is positive", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(amountField(), "0");
+    expect(screen.getByText("Amount must be greater than 0.")).toBeInTheDocument();
+
+    await user.clear(amountField());
+    await user.type(amountField(), "12,50");
+    expect(screen.queryByText("Amount must be greater than 0.")).not.toBeInTheDocument();
+    expect(amountField()).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("names the currency's own precision instead of letting the API reject it", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(amountField(), "10.123");
+    expect(
+      screen.getByText("PLN amounts can have at most 2 decimal places."),
+    ).toBeInTheDocument();
+  });
+});

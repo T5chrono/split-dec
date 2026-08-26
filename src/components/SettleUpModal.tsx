@@ -9,6 +9,7 @@ import {
   trimAmount,
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
+import { useAmountError } from "../hooks/useAmountError";
 import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
 
@@ -68,6 +69,8 @@ export default function SettleUpModal({
     },
   });
 
+  const amountError = useAmountError(amount, currency);
+
   const label = (id: string) => {
     const m = group.members.find((x) => x.id === id);
     return id === myId ? t("you") : (m?.full_name ?? m?.email ?? t("formerMember"));
@@ -119,7 +122,11 @@ export default function SettleUpModal({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="120,50"
-              className={inputCls}
+              aria-invalid={amountError !== null}
+              aria-describedby={amountError ? "settlement-amount-error" : undefined}
+              className={`${inputCls} ${
+                amountError ? "border-red-500 focus:border-red-500 dark:border-red-500" : ""
+              }`}
             />
           </div>
           <div>
@@ -136,6 +143,14 @@ export default function SettleUpModal({
           </div>
         </div>
 
+        {amountError && (
+          <p
+            id="settlement-amount-error"
+            className="-mt-2 text-sm text-red-600 dark:text-red-400"
+          >
+            {amountError}
+          </p>
+        )}
         {paidBy === paidTo && (
           <p className="text-sm text-amber-600 dark:text-amber-400">{t("samePersonWarning")}</p>
         )}
@@ -145,7 +160,7 @@ export default function SettleUpModal({
 
         <button
           type="submit"
-          disabled={save.isPending || paidBy === paidTo || !amount}
+          disabled={save.isPending || paidBy === paidTo || !amount || amountError !== null}
           className="w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50"
         >
           {save.isPending ? t("saving") : editing ? t("saveChanges") : t("recordPayment")}
