@@ -6,6 +6,7 @@ import {
   precisionFor,
   setMoneyLocale,
   toMinorUnits,
+  validateAmount,
   trimAmount,
 } from "./currency";
 
@@ -118,5 +119,43 @@ describe("trimAmount", () => {
 
   it("preserves a negative sign", () => {
     expect(trimAmount("-30.0000", "USD")).toBe("-30.00");
+  });
+});
+
+describe("validateAmount", () => {
+  it("passes an ordinary amount and either separator", () => {
+    expect(validateAmount("120.50", "PLN")).toBeNull();
+    expect(validateAmount("120,50", "PLN")).toBeNull();
+    expect(validateAmount("100", "JPY")).toBeNull();
+    expect(validateAmount("10.334", "KWD")).toBeNull();
+  });
+
+  it("stays quiet while the field is still empty", () => {
+    expect(validateAmount("", "PLN")).toBeNull();
+    expect(validateAmount("   ", "PLN")).toBeNull();
+  });
+
+  it("rejects zero however it is written", () => {
+    expect(validateAmount("0", "PLN")).toBe("amountNotPositive");
+    expect(validateAmount("0000.00", "PLN")).toBe("amountNotPositive");
+    expect(validateAmount("0,000", "KWD")).toBe("amountNotPositive");
+    expect(validateAmount("0", "JPY")).toBe("amountNotPositive");
+  });
+
+  it("rejects unparseable input", () => {
+    expect(validateAmount("abc", "PLN")).toBe("amountInvalid");
+    expect(validateAmount("12.", "PLN")).toBe("amountInvalid");
+    expect(validateAmount("-5", "PLN")).toBe("amountInvalid");
+  });
+
+  it("names the right precision problem per currency", () => {
+    expect(validateAmount("10.123", "PLN")).toBe("amountTooPrecise");
+    expect(validateAmount("100.5", "JPY")).toBe("amountNoDecimals");
+    expect(validateAmount("10.3345", "KWD")).toBe("amountTooPrecise");
+  });
+
+  it("rejects amounts wider than NUMERIC(14,4), ignoring leading zeros", () => {
+    expect(validateAmount("12345678901", "PLN")).toBe("amountTooLarge");
+    expect(validateAmount("0001234567890", "PLN")).toBeNull();
   });
 });

@@ -10,6 +10,26 @@ export class ApiError extends Error {
   }
 }
 
+/** FastAPI answers a schema violation with a *list* of Pydantic error objects,
+ *  not a string. Stringifying it put
+ *  `[{"type":"greater_than","loc":["body","total_amount"],…}]` in front of the
+ *  user; keep only the human-readable `msg` fields. The forms validate the same
+ *  rules before submitting, so this is the net under them rather than the
+ *  primary path — anything reaching it is a rule the UI does not know about yet. */
+export function detailToMessage(detail: unknown): string | null {
+  if (typeof detail === "string") return detail.trim() || null;
+  if (!Array.isArray(detail)) return null;
+  const messages = detail
+    .map((item) =>
+      item && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string"
+        ? (item as { msg: string }).msg.trim()
+        : null,
+    )
+    .filter((msg): msg is string => msg !== null && msg !== "");
+  if (messages.length === 0) return null;
+  return [...new Set(messages)].map((m) => (/[.!?]$/.test(m) ? m : `${m}.`)).join(" ");
+}
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; idempotencyKey?: string } = {},
@@ -31,8 +51,7 @@ async function request<T>(
     let detail = `Request failed (${res.status})`;
     try {
       const payload = await res.json();
-      if (typeof payload.detail === "string") detail = payload.detail;
-      else if (payload.detail) detail = JSON.stringify(payload.detail);
+      detail = detailToMessage(payload?.detail) ?? detail;
     } catch {
       /* non-JSON error body */
     }

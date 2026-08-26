@@ -74,3 +74,35 @@ export const COMMON_CURRENCIES = [
   "PLN", "EUR", "USD", "GBP", "CHF", "CZK", "SEK", "NOK", "DKK", "JPY",
   "AUD", "CAD", "HUF", "UAH", "KWD",
 ];
+
+/** Why an amount a user typed cannot be sent, as an i18n key — or null when
+ *  it is fine. Empty input is *not* an error here: the fields are `required`,
+ *  so the browser handles the pristine case and a red line on an untouched
+ *  form would be noise.
+ *
+ *  This mirrors the backend's Pydantic constraints (`gt=0`, NUMERIC(14,4),
+ *  plus the per-currency precision check in `splits.py`) on purpose. Without
+ *  it those violations came back as a raw 422 body and the user was shown
+ *  `[{"type":"greater_than","loc":["body","total_amount"],…}]`. Keep the two
+ *  in step: a rule that only exists here is a rule the API still rejects. */
+export type AmountError =
+  | "amountInvalid"
+  | "amountNotPositive"
+  | "amountNoDecimals"
+  | "amountTooPrecise"
+  | "amountTooLarge";
+
+/** Integer digits NUMERIC(14,4) has room for once the 4 decimals are taken. */
+const MAX_AMOUNT_INT_DIGITS = 10;
+
+export function validateAmount(raw: string, currency: string): AmountError | null {
+  const normalized = normalizeAmountInput(raw);
+  if (normalized === "") return null;
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return "amountInvalid";
+  const [intPart, frac = ""] = normalized.split(".");
+  const precision = precisionFor(currency);
+  if (frac.length > precision) return precision === 0 ? "amountNoDecimals" : "amountTooPrecise";
+  if (intPart.replace(/^0+/, "").length > MAX_AMOUNT_INT_DIGITS) return "amountTooLarge";
+  if (toMinorUnits(normalized, currency) === 0) return "amountNotPositive";
+  return null;
+}
