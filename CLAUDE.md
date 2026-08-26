@@ -225,7 +225,8 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   `GroupsPage` warms the `GroupPage` chunk from the same hover/focus handler that
   prefetches group data (same import specifier, so Rolldown emits one chunk).
 - **The vendor chunk is an explicit allow-list** (`vite.config.ts`
-  `advancedChunks`): React, React-DOM, the router, TanStack Query and
+  `codeSplitting`, named `advancedChunks` before rolldown 1.2 — the old key
+  still works but warns on every build): React, React-DOM, the router, TanStack Query and
   supabase-js — the runtime both auth branches need on first paint, so a
   deploy that only touches app code leaves ~470 kB cached. It is a rolldown
   group matched by regex, not the object form of `manualChunks` that vite 6

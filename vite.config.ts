@@ -9,8 +9,12 @@ export default defineConfig({
       output: {
         // Rolldown (vite 8) takes chunk groups here rather than the object
         // form of manualChunks, which it rejects outright: "Invalid type:
-        // Expected Function but received Object".
-        advancedChunks: {
+        // Expected Function but received Object". The option was named
+        // `advancedChunks` until rolldown 1.2, which kept it working but
+        // started warning on every build; `codeSplitting` is the same type
+        // under a new name (rolldown declares the old one as an alias), so
+        // this is a rename and not a change in how chunks are grouped.
+        codeSplitting: {
           groups: [
             {
               // The runtime every route needs, pinned into one chunk so a
