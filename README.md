@@ -57,8 +57,14 @@ and the UI offers a pre-written mailto draft instead.
 - When `develop` is green, open a PR to `master`. The Claude review runs
   automatically on open and on every push to the PR — no `@claude` mention
   needed (`.github/workflows/claude-code-review.yml`). Address the findings,
-  then merge. Note the job refuses to review PRs opened by a bot; pushing a
-  commit to such a branch re-triggers it as you.
+  then merge. The job always posts a verdict; if it somehow posts nothing, a
+  follow-up step fails the build rather than leaving a green tick that reads
+  like a clean review. `vercel[bot]` PRs are reviewed (it is allow-listed);
+  Dependabot PRs skip the review and are gated by CI alone.
+- **`master` is protected** and cannot be pushed to directly: a PR is required,
+  the `backend`, `frontend` and `claude-review` checks must pass, and
+  force-pushes and branch deletion are blocked. Approvals are set to 0 because
+  the repo has a single committer and GitHub does not allow self-approval.
 - Merging to `master` runs CI again and Vercel auto-deploys `master` to
   production (https://split-dec.app — the apex is the canonical origin;
   `split-dec.vercel.app` still serves the app but is `noindex`). Pushes to
