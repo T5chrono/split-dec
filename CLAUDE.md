@@ -49,7 +49,13 @@ included. Required approvals are deliberately **0**: GitHub does not let you app
 PR, so on a sole-committer repo any higher number makes every PR unmergeable.
 A green `claude-review` check now does mean a review was posted — the workflow's
 `Fail if no review was posted` step turns the PR #29 failure mode (success having said
-nothing) into a red check. Two gaps remain by design: a PR that edits
+nothing) into a red check. The verdict is no longer hostage to the reviewer's own `gh`
+call either: the action writes the whole run to disk, and a recovery step posts the final
+message whenever no comment appeared, as `github-actions[bot]` with a marker the guard
+matches on — author **and** marker, so pasting the marker into a comment buys nobody a
+green check. That failure is not hypothetical: PR #74's reviewer spent 14 of its 24 turns
+on denied tool calls and stopped without posting a verdict it had already written, and
+only a re-run rescued it. Two gaps remain by design: a PR that edits
 `claude-code-review.yml` passes with a warning, because the action refuses to run whenever
 that file differs from the default branch, and Dependabot PRs skip the job on its `if:`
 guard. In both cases the check is green with no review behind it, so read the comment there
