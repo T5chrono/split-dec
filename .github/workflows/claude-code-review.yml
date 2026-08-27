@@ -65,6 +65,7 @@ jobs:
       - name: Record start time
         run: echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Run Claude Code Review
+        id: review
         uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -93,8 +94,8 @@ jobs:
           # from the copy on the default branch (see the guard step below), so
           # a PR editing it can never exercise the reviewer. Changing modes
           # blind, on the job that reviews everything else, is not a trade
-          # worth taking — the guard below covers the failure they were meant
-          # to fix.
+          # worth taking — the recovery step below repairs the failure they
+          # were meant to fix, and does it without changing modes.
           prompt: |
             Review this pull request for the SplitDec app (FastAPI + React
             Splitwise clone). Read README.md, CLAUDE.md, and
@@ -151,24 +152,134 @@ jobs:
             formatting. Mark any security finding's severity (blocking vs.
             minor).
 
-            You MUST finish by posting an overall verdict as a PR comment
-            (`gh pr comment`) — even "reviewed, no issues found" is required
-            output, not optional. Nothing else surfaces your findings: a
-            final message that is only prose is discarded when the job ends,
-            and the job then reports success having said nothing. Post the
-            comment even if you were denied tools, ran short of context, or
-            are unsure — say so in the comment. A step after this one fails
-            the build if no comment appears.
+            Post an overall verdict as a PR comment (`gh pr comment`) as soon
+            as you have one — BEFORE writing inline comments, not after. Even
+            "reviewed, no issues found" is required output, not optional.
+            Posting first is what saves the review from a run that later runs
+            short of turns or context: a verdict left as your final message is
+            discarded when the job ends.
+
+            Write the body to a file and pass `--body-file`; you have the
+            Write tool for exactly that. Do not pipe a heredoc into `gh` — a
+            command starting with anything other than `gh pr comment` is
+            denied, and every denial costs you a turn.
+
+            Post the comment even if you were denied tools, ran short of
+            context, or are unsure — say so in the comment. A step after this
+            one fails the build if no verdict appears.
           # Wider than the reviewer strictly needs to *read* the diff, because
           # the prompt asks it to verify claims against surrounding code and
           # history — and every call outside this list costs a turn to be
           # denied. The run that failed to post on PR #29 burned 7 of its 13
-          # turns on denials; the one that succeeded burned 22 of 49.
-          # Still read-only: nothing here can write to the repo.
+          # turns on denials; the one that succeeded burned 22 of 49; the one
+          # that failed on #74 burned 14 of 24 and stopped without a verdict.
+          #
+          # `Write` is on the list for one reason: posting a multi-line verdict
+          # means `gh pr comment --body-file`, and with no way to create a file
+          # the reviewer reaches for `cat <<EOF | gh pr comment`, which starts
+          # with `cat` and is refused. It is the denial that costs the whole
+          # review. Still read-only where it counts: this job has
+          # `contents: read` and pushes nothing, so a write only touches the
+          # runner's throwaway disk. The plain shell verbs are here because the
+          # reviewer reaches for them out of habit instead of Read/Grep.
+          #
           # Kept on one line on purpose: a folded scalar (>-) would join the
           # continuations with spaces, and " Bash(git log:*)" is not the same
           # tool name as "Bash(git log:*)".
-          claude_args: '--allowed-tools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git blame:*)"'
+          claude_args: '--allowed-tools "Read,Grep,Glob,Write,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git blame:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(rg:*)"'
+
+      # The verdict is the reviewer's final message, and that message is
+      # thrown away when the job ends unless the reviewer managed to run
+      # `gh pr comment` itself. On PR #74 it did not: 14 of its 24 turns went
+      # on denied tool calls and it stopped without posting, so a review that
+      # had genuinely been done was lost and the check went red on what a
+      # re-run then turned green with no code change. The action writes the
+      # whole run to disk, final message included, so take the verdict from
+      # there rather than depending on the agent getting a shell invocation
+      # right.
+      #
+      # A fallback and nothing more. If the reviewer posted, this does
+      # nothing; if there is no verdict to recover, it posts nothing and
+      # leaves the guard below to fail the build. A green check standing on a
+      # review nobody wrote is the failure this file exists to prevent, and
+      # recovering silence into a comment would be exactly that.
+      - name: Recover the verdict if the reviewer could not post it
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+
+          # The action publishes the path as an output; RUNNER_TEMP is where it
+          # has always landed, kept as a fallback so an output rename degrades
+          # to a red check rather than a silent one.
+          log="${EXECUTION_FILE:-}"
+          if [ -z "$log" ] || [ ! -f "$log" ]; then
+            log="$RUNNER_TEMP/claude-execution-output.json"
+          fi
+
+          # Extraction runs on every job, including the ones where the reviewer
+          # posted for itself and nothing needs recovering. That is deliberate:
+          # this path only matters on the day it is needed, and a filter that
+          # has quietly stopped matching the log format would not be discovered
+          # until then. Every run now says whether it *could* have recovered a
+          # verdict, so the answer is in the log of the last green build rather
+          # than in the first red one.
+          #
+          # Slurped, so the same filter works whether the log is one JSON array
+          # or one object per line; try/catch so an unexpected shape yields
+          # nothing instead of failing the step. The last block of assistant
+          # text is the verdict the run ended on.
+          if [ -f "$log" ]; then
+            jq -s -r '
+              [ .. | objects
+                | select(.type == "assistant")
+                | try (.message.content[] | select(.type == "text") | .text)
+                  catch empty ]
+              | last // ""
+            ' "$log" > "$RUNNER_TEMP/verdict.txt" || true
+          fi
+          [ -f "$RUNNER_TEMP/verdict.txt" ] || : > "$RUNNER_TEMP/verdict.txt"
+          echo "Recoverable verdict: $(wc -c < "$RUNNER_TEMP/verdict.txt") bytes from ${log:-no log}."
+
+          already=$(gh api \
+            "repos/${{ github.repository }}/issues/$PR/comments?since=$REVIEW_STARTED_AT&per_page=100" \
+            --jq '[.[] | select(.user.login == "claude[bot]")] | length')
+          if [ "$already" -ne 0 ]; then
+            echo "The reviewer posted its own verdict; nothing to recover."
+            exit 0
+          fi
+
+          if [ ! -s "$RUNNER_TEMP/verdict.txt" ]; then
+            echo "::warning::No verdict could be recovered from the run log."
+            exit 0
+          fi
+
+          # The marker is what the guard below matches on, and it is only
+          # trusted together with the author: this posts as github-actions[bot],
+          # which nobody opening a PR against a public repo can impersonate. A
+          # marker alone would let anyone turn the check green by pasting it
+          # into a comment of their own.
+          {
+            echo '<!-- claude-review-recovered -->'
+            echo '> **Recovered from the run log.** The reviewer wrote this verdict'
+            echo '> but could not post it itself — its `gh` call was denied. The'
+            echo '> workflow posted it so the review is not lost. Treat it as the'
+            echo '> reviewer'"'"'s own output, and note that any inline comments it'
+            echo '> meant to leave are probably missing.'
+            echo
+            # -c drops a trailing partial character, since the cut is by bytes.
+            head -c 60000 "$RUNNER_TEMP/verdict.txt" | iconv -f utf-8 -t utf-8 -c
+            if [ "$(wc -c < "$RUNNER_TEMP/verdict.txt")" -gt 60000 ]; then
+              echo
+              echo '_(truncated — the full text is in the run log)_'
+            fi
+          } > "$RUNNER_TEMP/recovered-comment.md"
+
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/recovered-comment.md"
+          echo "Recovered the verdict from the run log and posted it."
 
       # The action reports success even when it reviews nothing and posts
       # nothing — that is exactly what happened on PR #29, and a green tick
@@ -208,11 +319,21 @@ jobs:
           # prints one count per page, and `[ "$posted" -eq 0 ]` would then be
           # comparing a multi-line string. `since` keeps the result to a
           # handful, well inside one page.
+          #
+          # Either the reviewer's own comment, or one the step above recovered
+          # from the run log. The recovered one is recognised by its marker
+          # *and* its author: github-actions[bot] is not something a PR author
+          # can post as, so pasting the marker into a comment does not buy a
+          # green check.
           posted=$(gh api \
             "repos/${{ github.repository }}/issues/$PR/comments?since=$REVIEW_STARTED_AT&per_page=100" \
-            --jq '[.[] | select(.user.login == "claude[bot]")] | length')
+            --jq '[.[] | select(
+                    .user.login == "claude[bot]"
+                    or (.user.login == "github-actions[bot]"
+                        and ((.body // "") | contains("<!-- claude-review-recovered -->")))
+                  )] | length')
           if [ "$posted" -eq 0 ]; then
-            echo "::error::Claude Code Review posted no comment. Failing rather than showing a green check that looks like a clean review — see PR #29 for this exact failure mode."
+            echo "::error::Claude Code Review posted no comment, and no verdict could be recovered from the run log. Failing rather than showing a green check that looks like a clean review — see PR #29 for this exact failure mode."
             exit 1
           fi
           echo "Review posted ($posted comment(s) since $REVIEW_STARTED_AT)."
