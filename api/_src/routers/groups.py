@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
@@ -28,6 +28,22 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/groups", tags=["groups"])
+
+
+async def purge_group(db: AsyncSession, group: Group) -> None:
+    """Delete a group and all its records, without committing.
+
+    Children go explicitly: Postgres also has ON DELETE CASCADE, but the ORM
+    FKs don't declare it and SQLite tests don't cascade. Callers must already
+    hold the group's exclusive lock, and own the transaction.
+    """
+    expense_ids = select(Expense.id).where(Expense.group_id == group.id)
+    await db.execute(delete(ExpenseSplit).where(ExpenseSplit.expense_id.in_(expense_ids)))
+    await db.execute(delete(Expense).where(Expense.group_id == group.id))
+    await db.execute(delete(Settlement).where(Settlement.group_id == group.id))
+    await db.execute(delete(GroupInvitation).where(GroupInvitation.group_id == group.id))
+    await db.execute(delete(GroupMember).where(GroupMember.group_id == group.id))
+    await db.delete(group)
 
 
 @router.get("", response_model=list[GroupOut])
@@ -137,16 +153,7 @@ async def delete_group(
                 + ", ".join(unsettled)
             ),
         )
-    group = await db.get(Group, group_id)
-    # Remove children explicitly (Postgres also has ON DELETE CASCADE, but the
-    # ORM FKs don't declare it and SQLite tests don't cascade) — one transaction.
-    expense_ids = select(Expense.id).where(Expense.group_id == group_id)
-    await db.execute(delete(ExpenseSplit).where(ExpenseSplit.expense_id.in_(expense_ids)))
-    await db.execute(delete(Expense).where(Expense.group_id == group_id))
-    await db.execute(delete(Settlement).where(Settlement.group_id == group_id))
-    await db.execute(delete(GroupInvitation).where(GroupInvitation.group_id == group_id))
-    await db.execute(delete(GroupMember).where(GroupMember.group_id == group_id))
-    await db.delete(group)
+    await purge_group(db, await db.get(Group, group_id))
     await db.commit()
 
 
@@ -174,6 +181,29 @@ async def remove_member(
             detail=(
                 "Cannot remove member with outstanding balances in: "
                 + ", ".join(sorted(unsettled))
+            ),
+        )
+    # A group with no members is unreachable: every route into it is
+    # membership-gated, so nobody could ever read it, settle it or delete it,
+    # and its rows would outlive everyone who could account for them. Refused
+    # rather than silently purged — deleting the group is the same gesture, one
+    # screen away (GroupSettingsModal), behind its own confirmation. Checked
+    # after the balances, so the message the caller gets is the one they can
+    # act on: an unsettled group says so, and a settled one is genuinely
+    # deletable.
+    remaining = (
+        await db.execute(
+            select(func.count())
+            .select_from(GroupMember)
+            .where(GroupMember.group_id == group_id, GroupMember.user_id != user_id)
+        )
+    ).scalar_one()
+    if remaining == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This is the group's last member. Delete the group instead of "
+                "leaving it empty."
             ),
         )
     await db.delete(member)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,12 @@ router = APIRouter(tags=["invitations"])
 async def _get_pending_for_invitee(
     db: AsyncSession, invitation_id: uuid.UUID, caller: uuid.UUID, *, lock_user: bool = False
 ) -> GroupInvitation:
+    """Authorization only: the caller may answer this invitation, as of now.
+
+    Deliberately an unlocked read. Whether the invitation is *still* pending
+    when the answer lands is decided by `_resolve_invitation`, which puts the
+    predicate in the UPDATE rather than trusting what this saw.
+    """
     invitation = (
         await db.execute(
             select(GroupInvitation).where(
@@ -41,6 +47,48 @@ async def _get_pending_for_invitee(
     if invitation.invited_user_id != caller and invitation.email != me.email.lower():
         raise HTTPException(status_code=403, detail="This invitation is not addressed to you")
     return invitation
+
+
+async def _resolve_invitation(
+    db: AsyncSession,
+    invitation_id: uuid.UUID,
+    *,
+    status: str,
+    invited_user_id: uuid.UUID | None = None,
+) -> bool:
+    """Move a PENDING invitation to a final status. Returns whether this call
+    is the one that moved it.
+
+    `status = 'PENDING'` belongs in the UPDATE itself, not only in the read
+    that preceded it. Accept, decline and cancel all read the row and then
+    write a different status, and a read that is not part of its own write can
+    be stale by the time the write lands: two of them would both see PENDING,
+    both succeed, and a cancelled invitation would still have granted
+    membership. Postgres re-evaluates this predicate after waiting out
+    whoever holds the row, so exactly one concurrent answer updates a row and
+    every other sees rowcount 0 — no row lock held across the caller's
+    decision, and nothing for the group-lock protocol (deps.py) to deadlock
+    against.
+    """
+    values: dict = {"status": status, "responded_at": datetime.now(timezone.utc)}
+    if invited_user_id is not None:
+        values["invited_user_id"] = invited_user_id
+    result = await db.execute(
+        update(GroupInvitation)
+        .where(
+            GroupInvitation.id == invitation_id,
+            GroupInvitation.status == "PENDING",
+        )
+        .values(**values)
+    )
+    return result.rowcount == 1
+
+
+def _already_answered() -> HTTPException:
+    """Lost the race for an invitation that was PENDING a moment ago. 404, the
+    same answer the loser would have got had it arrived a moment later — the
+    invitation no longer exists as something to answer."""
+    return HTTPException(status_code=404, detail="Invitation not found")
 
 
 @router.post(
@@ -192,8 +240,10 @@ async def cancel_invitation(
     # happened. The send quotas no longer depend on that — they count
     # write_events, which a delete here would not touch either way — but the
     # partial unique index only covers PENDING rows, so re-inviting still works.
-    invitation.status = "CANCELLED"
-    invitation.responded_at = datetime.now(timezone.utc)
+    # Conditional on it still being PENDING, so cancelling never overwrites an
+    # answer that landed while the caller was deciding.
+    if not await _resolve_invitation(db, invitation_id, status="CANCELLED"):
+        raise _already_answered()
     await db.commit()
 
 
@@ -237,9 +287,18 @@ async def accept_invitation(
     invitation = await _get_pending_for_invitee(db, invitation_id, caller, lock_user=True)
     if await db.get(GroupMember, (invitation.group_id, caller)) is None:
         db.add(GroupMember(group_id=invitation.group_id, user_id=caller))
-    invitation.status = "ACCEPTED"
-    invitation.invited_user_id = caller
-    invitation.responded_at = datetime.now(timezone.utc)
+        # Flushed before the invitation is touched, so this transaction takes
+        # the group's row (an FK insert takes FOR KEY SHARE on it) and then the
+        # invitation's — the order delete_group takes them in. The reverse
+        # order is the one that deadlocks.
+        await db.flush()
+    if not await _resolve_invitation(
+        db, invitation_id, status="ACCEPTED", invited_user_id=caller
+    ):
+        # Cancelled or answered elsewhere between the read above and here. The
+        # membership goes with the rollback — accepting is one decision.
+        await db.rollback()
+        raise _already_answered()
     await db.commit()
 
 
@@ -249,8 +308,9 @@ async def decline_invitation(
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    invitation = await _get_pending_for_invitee(db, invitation_id, caller)
-    invitation.status = "DECLINED"
-    invitation.invited_user_id = caller
-    invitation.responded_at = datetime.now(timezone.utc)
+    await _get_pending_for_invitee(db, invitation_id, caller)
+    if not await _resolve_invitation(
+        db, invitation_id, status="DECLINED", invited_user_id=caller
+    ):
+        raise _already_answered()
     await db.commit()

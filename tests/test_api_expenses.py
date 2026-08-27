@@ -422,3 +422,111 @@ async def test_expenses_ordered_by_occurrence_date(client, two_user_group):
     listing = await client.get(f"/api/groups/{g['group'].id}/expenses")
     dates = [e["expense_date"] for e in listing.json()["items"]]
     assert dates == ["2026-06-30", "2026-06-20", "2026-06-10"]
+
+
+class TestDebtCannotOutliveMembership:
+    """A member is only removable once their balance is zero — but nothing kept
+    it there afterwards. Withdrawing or rewriting an entry they were part of
+    moves their net off zero, and they cannot settle it: they are not a member,
+    so no expense or settlement may name them. The group would carry the debt
+    forever, and could never be deleted either, since that demands every
+    balance be zero too.
+    """
+
+    async def _settled_and_departed(self, client, g) -> str:
+        """Alice pays 30 for both, Bob settles his 15 and leaves. Returns the
+        expense id."""
+        gid = g["group"].id
+        expense = await client.post(
+            f"/api/groups/{gid}/expenses",
+            json=expense_payload(g["alice"], [g["alice"], g["bob"]]),
+            headers=idem(),
+        )
+        await client.post(
+            f"/api/groups/{gid}/settlements",
+            json={
+                "paid_by_user_id": str(g["bob"].id),
+                "paid_to_user_id": str(g["alice"].id),
+                "amount": "15.00",
+                "currency": "PLN",
+            },
+            headers=idem(),
+        )
+        r = await client.delete(f"/api/groups/{gid}/members/{g['bob'].id}")
+        assert r.status_code == 204
+        return expense.json()["id"]
+
+    async def test_delete_refused_when_it_would_strand_a_former_member(
+        self, client, two_user_group
+    ):
+        g = two_user_group
+        expense_id = await self._settled_and_departed(client, g)
+
+        r = await client.delete(f"/api/expenses/{expense_id}")
+        assert r.status_code == 400
+        assert "no longer in the group" in r.json()["detail"]
+        # Refused, not half-applied: the expense is still there.
+        listed = await client.get(f"/api/groups/{g['group'].id}/expenses")
+        assert [e["id"] for e in listed.json()["items"]] == [expense_id]
+
+    async def test_edit_refused_when_it_would_strand_a_former_member(
+        self, client, two_user_group
+    ):
+        """Splits can only name current members, which is exactly how it
+        happens: re-saving the expense drops the departed member's share."""
+        g = two_user_group
+        expense_id = await self._settled_and_departed(client, g)
+
+        r = await client.patch(
+            f"/api/expenses/{expense_id}",
+            json=expense_payload(g["alice"], [g["alice"]]),
+        )
+        assert r.status_code == 400
+        assert "no longer in the group" in r.json()["detail"]
+
+    async def test_metadata_edits_still_go_through(self, client, two_user_group):
+        """The guard is about money. Fixing a typo moves nobody's balance."""
+        g = two_user_group
+        expense_id = await self._settled_and_departed(client, g)
+
+        r = await client.patch(f"/api/expenses/{expense_id}", json={"description": "Lunch"})
+        assert r.status_code == 200
+        assert r.json()["description"] == "Lunch"
+
+    async def test_settlement_delete_is_refused_the_same_way(
+        self, client, two_user_group
+    ):
+        """The mirror image: withdrawing the settlement restores the debt Bob
+        cleared on his way out."""
+        g = two_user_group
+        gid = g["group"].id
+        await self._settled_and_departed(client, g)
+        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()
+
+        r = await client.delete(f"/api/settlements/{settlements[0]['id']}")
+        assert r.status_code == 400
+        assert "no longer in the group" in r.json()["detail"]
+
+    async def test_inviting_the_member_back_is_the_way_out(
+        self, client, two_user_group, current_user
+    ):
+        """Membership is what the guard reads, so a group that has to withdraw
+        an entry a departed member was part of brings them back first. This is
+        also the only route out for a group already stranded by the deletes
+        that used to be allowed."""
+        g = two_user_group
+        gid = g["group"].id
+        expense_id = await self._settled_and_departed(client, g)
+        assert (await client.post(
+            f"/api/groups/{gid}/invitations", json={"email": "bob@test.dev"}
+        )).status_code == 201
+        invitation = (await client.get(f"/api/groups/{gid}/invitations")).json()[0]
+
+        current_user.id = g["bob"].id
+        assert (await client.post(f"/api/invitations/{invitation['id']}/accept")).status_code == 204
+
+        current_user.id = g["alice"].id
+        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()
+        assert (await client.delete(f"/api/expenses/{expense_id}")).status_code == 204
+        assert (await client.delete(f"/api/settlements/{settlements[0]['id']}")).status_code == 204
+        assert (await client.get(f"/api/groups/{gid}/balances")).json() == {}

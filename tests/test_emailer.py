@@ -24,8 +24,11 @@ def test_html_escapes_user_controlled_names():
     assert "evil.example\">" not in content["html"]
     assert "&lt;script&gt;" in content["html"]
     assert "&lt;a href=" in content["html"]
-    # The one legitimate link is ours.
-    assert 'href="https://split-dec.vercel.app"' in content["html"]
+    # The one legitimate link is ours, and it names the canonical origin: an
+    # installed PWA pins the origin it was installed from, so an invitation
+    # opening the vercel.app alias lands the reader outside their own app.
+    assert f'href="{emailer.APP_URL}"' in content["html"]
+    assert emailer.APP_URL == "https://split-dec.app"
 
 
 def test_plain_names_render_unmangled():

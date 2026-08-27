@@ -15,7 +15,7 @@
 import type { Lang } from "./i18n";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-08-13";
+export const LEGAL_UPDATED = "2026-08-27";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -290,7 +290,7 @@ const TERMS_EN: LegalDoc = {
     {
       heading: "What SplitDec is — and what it is not",
       blocks: [
-        "SplitDec is a shared record of who paid what in a group, and a calculator that works out the smallest set of transfers that would even everybody up.",
+        "SplitDec is a shared record of who paid what in a group, and a calculator that works out a simplified set of transfers that would even everybody up.",
         "**SplitDec does not move money.** It is not a bank, a payment service, an e-money issuer or an escrow. It never touches your card, your account or your balance. Every payment between you and the people you split with happens outside the app, exactly as it would without it.",
         "The balances the app shows are a convenience calculation from the figures you entered. They are not an invoice, an accounting record, a tax document or a legally binding statement of debt, and SplitDec does not give financial, accounting, tax or legal advice.",
       ],
@@ -390,7 +390,7 @@ const TERMS_PL: LegalDoc = {
     {
       heading: "Czym SplitDec jest, a czym nie jest",
       blocks: [
-        "SplitDec to wspólny zapis tego, kto za co zapłacił w grupie, oraz kalkulator wyznaczający najmniejszy zestaw przelewów, który wyrówna rachunki między wszystkimi.",
+        "SplitDec to wspólny zapis tego, kto za co zapłacił w grupie, oraz kalkulator wyznaczający uproszczony zestaw przelewów, który wyrówna rachunki między wszystkimi.",
         "**SplitDec nie przelewa pieniędzy.** Nie jest bankiem, usługą płatniczą, instytucją pieniądza elektronicznego ani depozytem. Nigdy nie dotyka Twojej karty, konta ani salda. Każda płatność między Tobą a osobami, z którymi dzielisz koszty, odbywa się poza aplikacją — dokładnie tak, jak odbywałaby się bez niej.",
         "Salda pokazywane przez aplikację to wynik wyliczenia z wprowadzonych przez Was danych. Nie są fakturą, dokumentem księgowym, dokumentem podatkowym ani wiążącym prawnie oświadczeniem o długu, a SplitDec nie udziela porad finansowych, księgowych, podatkowych ani prawnych.",
       ],

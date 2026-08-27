@@ -8,8 +8,9 @@ from ..auth import verify_jwt
 from ..balances import net_balances
 from ..db import get_db
 from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
-from ..models import GroupInvitation, GroupMember, WriteEvent
-from ..ratelimit import recipient_key
+from ..models import Group, GroupInvitation, GroupMember, WriteEvent
+from ..ratelimit import INVITE, recipient_key
+from .groups import purge_group
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -67,6 +68,22 @@ async def delete_account(
     # Single transaction: leave groups, drop invitations, anonymize PII,
     # revoke sign-in.
     await db.execute(delete(GroupMember).where(GroupMember.user_id == caller))
+    # A group this empties goes with the account. Every route into a group is
+    # membership-gated, so one with no members can never again be read, settled
+    # or deleted by anybody — it would just outlive everyone who could account
+    # for it. remove_member refuses the same situation instead of deciding it
+    # (routers/groups.py); here there is nobody left to ask. The exclusive
+    # locks taken above already cover each of these groups.
+    for group_id in group_ids:
+        remaining = (
+            await db.execute(
+                select(func.count())
+                .select_from(GroupMember)
+                .where(GroupMember.group_id == group_id)
+            )
+        ).scalar_one()
+        if remaining == 0:
+            await purge_group(db, await db.get(Group, group_id))
     # Pending invitations are capabilities that never expire and are matched
     # by email (invitations.my_invitations), so leaving them behind would
     # hand group access to whoever registers this address next.
@@ -84,18 +101,29 @@ async def delete_account(
         .where(func.lower(GroupInvitation.email) == old_email)
         .values(email=f"deleted-{caller}{DELETED_EMAIL_SUFFIX}")
     )
-    # Rate-limit tombstones (ratelimit.py) are a per-user activity trace, and
-    # the opportunistic prune that normally retires them only runs when that
-    # user writes again — which this account never will. Dropping them resets
-    # no window worth having: sign-in is revoked below, and a replacement
-    # account is a different user id with a fresh one regardless. Rows keyed to
-    # this address as an invitation *recipient* go too, so nothing derived from
-    # it outlives the account that owned it.
+    # Rate-limit tombstones (ratelimit.py). The LEDGER and GROUP ones are a
+    # purely personal trace: they feed per-caller windows, and this caller will
+    # never write again — sign-in is revoked below, and a replacement account
+    # is a different user id with a fresh window regardless. They go.
     await db.execute(
         delete(WriteEvent).where(
-            (WriteEvent.user_id == caller)
-            | (WriteEvent.recipient_hash == recipient_key(old_email))
+            WriteEvent.user_id == caller, WriteEvent.kind != INVITE
         )
+    )
+    # The INVITE ones stay. Two of the three windows they feed count *shared*
+    # resources — the sending domain's reputation (global) and one address's
+    # share of it (per recipient) — so clearing them hands back allowance that
+    # was spent, and account deletion becomes the reset button: invite an
+    # address its three times, delete the account, sign up again, repeat. What
+    # cannot stay is the digest of *this* account's own address, which after
+    # the anonymization below would be the last thing on file derived from it.
+    # Nulling the column keeps the row counting toward the global window while
+    # erasing the address it was about — the per-recipient window it also fed
+    # belongs to an address nobody can reach any more.
+    await db.execute(
+        update(WriteEvent)
+        .where(WriteEvent.recipient_hash == recipient_key(old_email))
+        .values(recipient_hash=None)
     )
     user.email = f"deleted-{caller}{DELETED_EMAIL_SUFFIX}"
     user.full_name = "Deleted user"

@@ -190,7 +190,7 @@ function DemoWindow() {
           </span>
           <span className="mx-auto flex items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
             <Lock className="h-3 w-3" />
-            split-dec.vercel.app
+            split-dec.app
           </span>
           <span aria-hidden className="w-12" />
         </div>

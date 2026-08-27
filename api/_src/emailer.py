@@ -16,7 +16,10 @@ logger = logging.getLogger("splitdec.emailer")
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM = os.getenv("RESEND_FROM", "SplitDec <onboarding@resend.dev>")
-APP_URL = os.getenv("APP_URL", "https://split-dec.vercel.app")
+# The apex, not the vercel.app alias: that host is noindex and, more to the
+# point, an installed PWA pins the origin it was installed from, so a link that
+# opens the alias strands the reader outside their own installation.
+APP_URL = os.getenv("APP_URL", "https://split-dec.app")
 
 
 def _post_resend(payload: dict) -> None:

@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import select, text
 
 from conftest import expense_payload, idem, make_group, make_user
+from _src import ratelimit
 from _src.models import GroupInvitation, GroupMember, User, WriteEvent
 
 
@@ -56,13 +57,12 @@ async def test_delete_account_succeeds_when_settled(client, two_user_group, db_s
         assert remaining == 0
 
 
-async def test_delete_account_drops_its_rate_limit_tombstones(
+async def test_delete_account_drops_its_personal_rate_limit_tombstones(
     client, db_session, two_user_group
 ):
-    """write_events (ratelimit.py) are a per-user activity trace whose only
-    housekeeping is a prune that runs when that user writes again — which this
-    account never will. Clearing them frees no window worth having: sign-in is
-    revoked, and a replacement account is a different user id anyway."""
+    """The ledger and group windows are per-caller, and this caller will never
+    write again, so their tombstones are a pure activity trace: nothing else
+    counts them, and a replacement account is a different user id anyway."""
     g = two_user_group
     # Alice as the sole participant, so the group stays settled and deletable.
     await client.post(
@@ -79,12 +79,34 @@ async def test_delete_account_drops_its_rate_limit_tombstones(
         assert (await s.execute(select(WriteEvent))).scalars().all() == []
 
 
-async def test_delete_account_clears_tombstones_keyed_to_its_address(
+async def test_delete_account_keeps_the_invitations_it_sent_on_the_books(
+    client, db_session, two_user_group
+):
+    """Two of the three invitation windows count a shared resource — the
+    sending domain's reputation. Handing those slots back on deletion would
+    make signing up, inviting and deleting an unbounded send loop."""
+    g = two_user_group
+    await client.post(
+        f"/api/groups/{g['group'].id}/invitations", json={"email": "carol@test.dev"}
+    )
+    # Alice can only leave once nothing depends on her presence.
+    assert (await client.delete(f"/api/groups/{g['group'].id}/members/{g['bob'].id}")).status_code == 204
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        events = (await s.execute(select(WriteEvent))).scalars().all()
+    assert [e.kind for e in events] == [ratelimit.INVITE]
+    assert events[0].recipient_hash == ratelimit.recipient_key("carol@test.dev")
+
+
+async def test_delete_account_unlinks_tombstones_keyed_to_its_address(
     client, db_session, two_user_group, current_user
 ):
     """An invitation tombstone is charged to the *inviter* but keyed to a
-    digest of the recipient. Deleting the recipient's account has to take it
-    too, or something derived from the address outlives the account."""
+    digest of the recipient. Deleting the recipient's account cannot leave that
+    digest behind — it would be the last thing on file derived from an address
+    the users row no longer holds — but the row itself still owes the global
+    window its slot, so the key goes and the row stays."""
     g = two_user_group
     carol = await make_user(db_session, "carol@test.dev", "Carol")
     await client.post(
@@ -95,7 +117,9 @@ async def test_delete_account_clears_tombstones_keyed_to_its_address(
     assert (await client.delete("/api/users/me")).status_code == 204
 
     async with db_session() as s:
-        assert (await s.execute(select(WriteEvent))).scalars().all() == []
+        events = (await s.execute(select(WriteEvent))).scalars().all()
+    assert [e.kind for e in events] == [ratelimit.INVITE]  # charged to Alice
+    assert events[0].recipient_hash is None
 
 
 async def test_deleted_account_token_cannot_act(client, two_user_group, current_user):

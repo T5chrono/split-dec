@@ -236,3 +236,39 @@ def test_csp_allows_exactly_the_origins_the_app_uses():
     # The PWA service worker registers from /registerSW.js.
     assert "'self'" in directives["worker-src"]
     assert "'self'" in directives["manifest-src"]
+
+
+def test_staged_csp_has_somewhere_to_report_to():
+    """A report-only policy with no destination reports to nobody.
+
+    Violations land in each visitor's own console, which no one is watching, so
+    the condition for promoting this policy — that the reports come back clean
+    — could never be met and the staging would be permanent. Both directives
+    are present because no browser honours both: Firefox and Safari have only
+    `report-uri`, and Chrome ignores it whenever `report-to` is offered.
+    """
+    directives = _full_csp()
+    assert directives.get("report-uri") == ["/api/csp-report"]
+    assert directives.get("report-to") == ["csp-endpoint"]
+
+    # `report-to` names a group; the group is defined by this header, and an
+    # undefined group is silently inert.
+    endpoints = _headers_for("/").get("Reporting-Endpoints", "")
+    assert 'csp-endpoint="' in endpoints
+    assert "/api/csp-report" in endpoints
+    # Absolute, and on the apex: the Reporting API preflights a cross-origin
+    # endpoint and the production API sends no CORS headers, so only a URL that
+    # is same-origin *there* is ever delivered. Previews and the vercel.app
+    # alias fall back to `report-uri`, which is relative and always same-origin.
+    assert 'csp-endpoint="https://split-dec.app/api/csp-report"' in endpoints
+
+
+def test_reports_go_to_our_own_origin():
+    """Sending violations to a third party would be a new processor, and a
+    src/lib/legal.ts change with a LEGAL_UPDATED bump — not a header edit."""
+    destinations = [
+        _full_csp()["report-uri"][0],
+        _headers_for("/")["Reporting-Endpoints"].split('"')[1],
+    ]
+    for destination in destinations:
+        assert destination.startswith("/") or destination.startswith("https://split-dec.app/")
