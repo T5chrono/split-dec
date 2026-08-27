@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mail, MailPlus, UserMinus, X } from "lucide-react";
 import { api } from "../lib/api";
+import { APP_ORIGIN } from "../lib/canonicalHost";
 import type { GroupDetail, Invitation, InvitationCreated, User } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import Avatar from "./Avatar";
@@ -59,7 +60,7 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
   // clients show the raw URI to the user.
   const mailtoHref = (address: string) =>
     `mailto:${encodeURIComponent(address).replace(/%40/g, "@")}?subject=${encodeURIComponent(t("inviteEmailSubject"))}&body=${encodeURIComponent(
-      t("inviteEmailBody").replace("{group}", group.name) + "\n\nhttps://split-dec.vercel.app",
+      t("inviteEmailBody").replace("{group}", group.name) + `\n\n${APP_ORIGIN}`,
     )}`;
 
   return (

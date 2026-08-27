@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .balances import net_balances
 from .models import Expense, Group, GroupMember, Settlement, User
 
 # Anonymized users keep their public.users row for ledger history but must
@@ -120,6 +121,50 @@ async def require_membership(
     )
     row = (await db.execute(_with_group_lock(stmt, lock))).first()
     raise_unless_member(group_exists=row is not None, is_member=row is not None and row.user_id is not None)
+
+
+async def ensure_no_outsider_debt(db: AsyncSession, group_id: uuid.UUID) -> None:
+    """Refuse a ledger change that leaves a non-member owing or owed.
+
+    A member can only be removed while their balance is zero
+    (routers/groups.py), but nothing kept it there afterwards. Soft-deleting an
+    expense that former member had paid for — or rewriting its splits without
+    them — moves their net off zero, and they have no way back in to settle it:
+    they are not a member, so they cannot be a party to a settlement. The group
+    inherits the debt permanently, and can never be deleted either, since that
+    demands every balance be zero too. One delete could strand a group forever.
+
+    Call it after the mutation has been flushed, so the balances read here are
+    the ones about to be committed. The lock this endpoint already holds on the
+    group (shared) is what stops a concurrent removal from invalidating the
+    answer: remove_member takes the exclusive one.
+
+    A group already in that state — the damage predates this check — is
+    recoverable rather than bricked: invite the person back, and their balance
+    is theirs to settle again, with remove_member re-checking it is zero on the
+    way out.
+    """
+    buckets = await net_balances(db, group_id)
+    if not buckets:
+        return
+    members = set(
+        (
+            await db.execute(
+                select(GroupMember.user_id).where(GroupMember.group_id == group_id)
+            )
+        ).scalars().all()
+    )
+    stranded = sorted(
+        {c for c, users in buckets.items() if not users.keys() <= members}
+    )
+    if stranded:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This change would leave someone who is no longer in the group "
+                "with an unsettled balance in: " + ", ".join(stranded)
+            ),
+        )
 
 
 async def get_expense_for_member(

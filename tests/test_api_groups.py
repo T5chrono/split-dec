@@ -2,7 +2,10 @@
 
 import uuid
 
+from sqlalchemy import select
+
 from conftest import expense_payload, idem, make_user
+from _src.models import Expense, Group
 
 
 async def test_create_group_adds_creator_as_member(client, db_session, current_user):
@@ -80,6 +83,54 @@ async def test_remove_member_after_settling(client, two_user_group):
     )
     r = await client.delete(f"/api/groups/{g['group'].id}/members/{g['bob'].id}")
     assert r.status_code == 204
+
+
+async def test_last_member_cannot_leave_the_group_standing(client, two_user_group):
+    """Every route into a group is membership-gated, so a group with no members
+    could never be read, settled or deleted again by anyone. Deleting the group
+    is the gesture that was meant."""
+    g = two_user_group
+    gid = g["group"].id
+    assert (await client.delete(f"/api/groups/{gid}/members/{g['bob'].id}")).status_code == 204
+
+    r = await client.delete(f"/api/groups/{gid}/members/{g['alice'].id}")
+    assert r.status_code == 400
+    assert "last member" in r.json()["detail"]
+    # And the group is still hers to use, not half-dismantled.
+    assert (await client.get(f"/api/groups/{gid}")).status_code == 200
+    assert (await client.delete(f"/api/groups/{gid}")).status_code == 204
+
+
+async def test_deleting_the_last_account_takes_the_group_with_it(
+    client, db_session, two_user_group
+):
+    """The same invariant where nobody is left to ask: account deletion cannot
+    be refused on the group's behalf, so the emptied group goes too."""
+    g = two_user_group
+    gid = g["group"].id
+    await client.post(
+        f"/api/groups/{gid}/expenses",
+        json=expense_payload(g["alice"], [g["alice"]]),
+        headers=idem(),
+    )
+    assert (await client.delete(f"/api/groups/{gid}/members/{g['bob'].id}")).status_code == 204
+
+    assert (await client.delete("/api/users/me")).status_code == 204
+
+    async with db_session() as s:
+        assert await s.get(Group, gid) is None
+        assert (
+            await s.execute(select(Expense).where(Expense.group_id == gid))
+        ).scalars().all() == []
+
+
+async def test_deleting_an_account_leaves_groups_that_still_have_members(
+    client, db_session, two_user_group
+):
+    g = two_user_group
+    assert (await client.delete("/api/users/me")).status_code == 204
+    async with db_session() as s:
+        assert await s.get(Group, g["group"].id) is not None
 
 
 async def test_rename_group(client, two_user_group):

@@ -27,6 +27,13 @@ it, and a replay is answered before the quota is ever consulted, because a
 client retrying a request whose response it never saw has already paid for that
 slot.
 
+Counting and charging are two statements, so every window here is only as
+tight as what serializes them: without a lock, N requests fired in parallel all
+count the same N-1 rows and all insert, and the ceiling is exceeded by however
+many the client had in flight. Each `enforce_*` below therefore opens with a
+transaction-scoped advisory lock on its window, taken before the count and
+released by the same commit that stores the event.
+
 Deliberately no global cap on the ledger or group windows: a deployment-wide
 ceiling would turn one abusive account into an outage for everybody.
 Invitations do carry one, because the resource they burn — the sending
@@ -38,7 +45,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import Integer, case, cast, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import WriteEvent
@@ -70,6 +77,11 @@ INVITE_MAX_PER_INVITER = 20  # one person inviting, across all their groups
 INVITE_MAX_PER_RECIPIENT = 3  # one address, however many accounts aim at it
 INVITE_MAX_GLOBAL = 300  # whole-deployment brake on a compromised account
 
+# How many aged-out rows one write may retire (see record_write). A cap, not a
+# target: it keeps the sweep off the critical path of a request that happens to
+# follow a quiet spell, and whatever it leaves the next write takes.
+PRUNE_BATCH = 200
+
 
 def window_cutoff(db: AsyncSession, window: timedelta = WRITE_WINDOW) -> datetime:
     """Start of a rate-limit window, in the flavour the bound dialect stores
@@ -97,6 +109,48 @@ def recipient_key(email: str) -> str:
     silently reset every recipient window.
     """
     return hashlib.sha256(email.lower().encode()).hexdigest()
+
+
+# Advisory-lock namespaces, one per window, so a burst of ledger writes never
+# waits behind group creation or an invitation.
+_LOCK_SPACE = {LEDGER: 1, GROUP: 2, INVITE: 3}
+
+
+async def _hold_window(db: AsyncSession, kind: str, caller: uuid.UUID | None) -> None:
+    """Serialize one window's count-then-charge until this transaction ends.
+
+    `pg_advisory_xact_lock`, never the session-scoped variant: the connection
+    goes back to the transaction pooler at commit (db.py), and a session lock
+    would ride into the next borrower's transaction with nobody left to
+    release it. The transaction-scoped one is released by the same commit that
+    stores the event, which is exactly the span that has to be atomic.
+
+    Keyed per caller for the per-caller windows, so two people writing at once
+    never wait on each other. `caller=None` keys the whole deployment, which
+    the invitation quotas need: their recipient and global limits count rows
+    written by *other* callers, so nothing narrower makes them atomic. That is
+    affordable only because invitations are rare and the provider call happens
+    after the commit that drops the lock (invitations.py) — no outbound email
+    is ever sent while holding it.
+
+    A no-op outside Postgres: SQLite (tests) runs one connection at a time and
+    has nothing to serialize.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    # An int4 pair, cast explicitly: Postgres has a (bigint) form and an
+    # (int4, int4) form and no (bigint, bigint) one, so leaving the operand
+    # types to inference is a resolution failure waiting for a driver change.
+    # The low 4 bytes of the uuid are as good as any hash — a collision costs
+    # two unrelated callers a brief wait, nothing more.
+    key = 0 if caller is None else int.from_bytes(caller.bytes[:4], "big", signed=True)
+    await db.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                cast(_LOCK_SPACE[kind], Integer), cast(key, Integer)
+            )
+        )
+    )
 
 
 def _too_many(detail: str, window: timedelta = WRITE_WINDOW) -> HTTPException:
@@ -130,20 +184,31 @@ async def record_write(
     or roll back together. The event is added to the session rather than
     committed here — the endpoint owns the transaction.
     """
-    # Opportunistic prune, scoped to this caller: rows that have aged out of
-    # every window can never be counted again, and a serverless function has
-    # nowhere to hang a cron. Usually deletes nothing, and the
-    # (user_id, created_at) index makes finding that out cheap. Uses the
-    # longest window so a shorter one can never sweep rows another still needs,
-    # and runs before the insert below so it cannot sweep the row being
-    # written. An INVITE row is charged to its inviter, so it is pruned on the
-    # inviter's next write — no row is keyed only to someone who never writes.
-    await db.execute(
-        delete(WriteEvent).where(
-            WriteEvent.user_id == caller,
-            WriteEvent.created_at < window_cutoff(db, max(WRITE_WINDOW, INVITE_WINDOW)),
+    # Opportunistic prune: rows that have aged out of every window can never be
+    # counted again, and a serverless function has nowhere to hang a cron.
+    # Uses the longest window so a shorter one can never sweep rows another
+    # still needs, and runs before the insert below so it cannot sweep the row
+    # being written.
+    #
+    # Not scoped to the caller, deliberately: an account that is deleted while
+    # its invitation tombstones are still inside the window keeps them (those
+    # count toward the shared recipient and global limits — routers/users.py),
+    # and a caller-scoped sweep would never come back for them. Any writer
+    # retires them instead. SKIP LOCKED and the deterministic `id` order are
+    # what make that safe to run from every write at once: concurrent sweeps
+    # step over each other's rows rather than queueing or deadlocking, and the
+    # batch cap bounds the work one request can inherit. Usually deletes
+    # nothing, which the created_at index makes cheap to establish.
+    stale = (
+        select(WriteEvent.id)
+        .where(
+            WriteEvent.created_at < window_cutoff(db, max(WRITE_WINDOW, INVITE_WINDOW))
         )
+        .order_by(WriteEvent.id)
+        .limit(PRUNE_BATCH)
+        .with_for_update(skip_locked=True)
     )
+    await db.execute(delete(WriteEvent).where(WriteEvent.id.in_(stale)))
     db.add(
         WriteEvent(
             user_id=caller,
@@ -160,6 +225,7 @@ async def enforce_ledger_write_quota(db: AsyncSession, caller: uuid.UUID) -> Non
     The message can name the caller's own activity: unlike the invitation
     quotas it reveals nothing about anyone else.
     """
+    await _hold_window(db, LEDGER, caller)
     if await _slots_used(db, caller, LEDGER) >= MAX_LEDGER_WRITES_PER_CALLER:
         raise _too_many(
             "You have recorded too many entries recently. Please try again later."
@@ -168,6 +234,7 @@ async def enforce_ledger_write_quota(db: AsyncSession, caller: uuid.UUID) -> Non
 
 async def enforce_group_creation_quota(db: AsyncSession, caller: uuid.UUID) -> None:
     """429 once one account has created too many groups in the window."""
+    await _hold_window(db, GROUP, caller)
     if await _slots_used(db, caller, GROUP) >= MAX_GROUPS_PER_CALLER:
         raise _too_many("You have created too many groups recently. Please try again later.")
 
@@ -176,6 +243,10 @@ async def enforce_invitation_quota(
     db: AsyncSession, caller: uuid.UUID, email: str
 ) -> None:
     """429 once any of the three invitation windows is exhausted. One round trip."""
+    # Deployment-wide, not per caller: two accounts inviting the same address
+    # race on the per-recipient window, and every account races on the global
+    # one. See _hold_window for why that is affordable here.
+    await _hold_window(db, INVITE, None)
     by_caller, by_recipient, overall = (
         await db.execute(
             select(

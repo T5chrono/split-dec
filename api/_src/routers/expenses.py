@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import get_expense_for_member, require_membership
+from ..deps import ensure_no_outsider_debt, get_expense_for_member, require_membership
 from ..models import Expense, ExpenseSplit, GroupMember
 from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
@@ -195,6 +195,11 @@ async def update_expense(
     if body.expense_date is not None:
         expense.expense_date = body.expense_date
 
+    # Rewriting splits can only name current members, which is exactly how a
+    # former participant's balance moves off zero: their share disappears from
+    # an expense they had already settled for.
+    await db.flush()
+    await ensure_no_outsider_debt(db, expense.group_id)
     await db.commit()
     await db.refresh(expense)
     return ExpenseOut.model_validate(expense)
@@ -210,4 +215,8 @@ async def delete_expense(
     # every other ledger mutation (serializes against member/group removal).
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
     expense.deleted_at = datetime.now(timezone.utc)
+    await db.flush()
+    # Withdrawing an expense un-settles everyone it touched, including anyone
+    # who has since left and can no longer be a party to a settlement.
+    await ensure_no_outsider_debt(db, expense.group_id)
     await db.commit()

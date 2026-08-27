@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, newIdempotencyKey } from "../lib/api";
+import { api } from "../lib/api";
 import type { GroupDetail, Settlement, SettlementPayload } from "../lib/types";
 import {
   AMOUNT_PATTERN,
@@ -10,6 +10,7 @@ import {
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
 import { useAmountError } from "../hooks/useAmountError";
+import { useIdempotencyKey } from "../hooks/useIdempotencyKey";
 import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
 
@@ -42,6 +43,8 @@ export default function SettleUpModal({
   );
   const [currency, setCurrency] = useState(source?.currency ?? "PLN");
 
+  const idempotencyKey = useIdempotencyKey();
+
   const save = useMutation({
     mutationFn: async () => {
       const payload: SettlementPayload = {
@@ -53,10 +56,11 @@ export default function SettleUpModal({
       if (editing) {
         return api.put<Settlement>(`/settlements/${editing.id}`, payload);
       }
+      // The same key on every attempt — see useIdempotencyKey.
       return api.post<Settlement>(
         `/groups/${group.id}/settlements`,
         payload,
-        newIdempotencyKey(),
+        idempotencyKey,
       );
     },
     onSuccess: () => {

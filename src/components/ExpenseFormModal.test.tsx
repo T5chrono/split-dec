@@ -6,9 +6,17 @@ import ExpenseFormModal from "./ExpenseFormModal";
 import type { Expense, GroupDetail } from "../lib/types";
 import { api } from "../lib/api";
 
+// A different value on every call, so a test can tell a reused key from a
+// freshly minted one — which is the whole difference between a retry and a
+// duplicate expense.
+const { newIdempotencyKey } = vi.hoisted(() => {
+  let issued = 0;
+  return { newIdempotencyKey: () => `test-idempotency-key-${++issued}` };
+});
+
 vi.mock("../lib/api", () => ({
   api: { post: vi.fn(), patch: vi.fn() },
-  newIdempotencyKey: () => "test-idempotency-key",
+  newIdempotencyKey,
 }));
 
 const alice = { id: "alice-id", email: "alice@test.dev", full_name: "Alice", avatar_url: null };
@@ -449,5 +457,33 @@ describe("ExpenseFormModal — the amount is explained, not echoed back as a 422
     expect(
       screen.getByText("PLN amounts can have at most 2 decimal places."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("ExpenseFormModal — idempotency key across retries", () => {
+  it("resends the same key after a failed attempt", async () => {
+    // The failure that matters is the one where the request *arrived* and only
+    // the response was lost. The client cannot tell that apart from a request
+    // that never landed, so it must retry under the same key and let the
+    // server decide — a new key would record the expense twice.
+    vi.mocked(api.post)
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Dinner");
+    await user.type(screen.getByPlaceholderText("120,50"), "100,00");
+
+    const submit = screen.getByRole("button", { name: /add expense/i });
+    await user.click(submit);
+    expect(await screen.findByText("Failed to fetch")).toBeInTheDocument();
+    await user.click(submit);
+
+    const keys = vi.mocked(api.post).mock.calls.map(([, , key]) => key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[0]).toBeTruthy();
   });
 });

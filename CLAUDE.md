@@ -91,6 +91,17 @@ on `ENV=development`):
   is impractical when a single static `index.html` is served through a rewrite. The
   test recomputes that hash from `index.html`, so editing that script fails CI
   rather than silently reverting the app to a light-mode flash.
+  Violations are collected by `POST /api/csp-report`
+  (`routers/reports.py`) — without a destination a report-only policy
+  reports to each visitor's own console, so "promote once the reports are
+  clean" was a condition that could never be met. It is the one route on
+  the API reachable without a token, so it touches no database, stores
+  nothing, and logs only the violation's shape: the directive, the blocked
+  *origin*, and the route pattern folded exactly as `insightsRoute` folds
+  it — a group id, an OAuth `?code=` or a recovery `#access_token=` must
+  never reach a log line, and neither may a field forge one with a newline.
+  Pointing the reports at a third-party collector would be a new processor,
+  and a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump.
   A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing
   with the apex in search — it has to be a header, because every route rewrites to one
   `index.html` and a `<link rel="canonical">` in it would also claim `/privacy` and
@@ -105,6 +116,11 @@ on `ENV=development`):
 - **Auth**: Supabase Auth (PKCE) on the frontend — Google OAuth **plus email/password** (signup
   with confirmation required, forgot/reset flow); backend verifies JWTs statelessly
   (`auth.py`: ES256 via JWKS, HS256 fallback) and reads only the `sub` claim — provider-neutral.
+  The `alg` header may only *select* from `SYMMETRIC_ALGORITHMS`/`ASYMMETRIC_ALGORITHMS`;
+  anything else (including `none`) is refused before a key is fetched, because that header
+  travels inside the token being checked. `tests/test_auth.py` is the only place the boundary
+  is exercised for real — every other API test overrides `verify_jwt`, so a change here that
+  breaks authentication will not show up anywhere else in the suite.
   **RLS is intentionally disabled** — the FastAPI layer is the sole authorization boundary; the
   Data API's anon/authenticated grants were revoked by migration. Do not enable RLS and do not
   weaken the FastAPI checks. Password-auth specifics: `signUp` must pass `full_name` in metadata
@@ -139,6 +155,25 @@ query (`deps.py`: `require_membership`/`get_*_for_member` with `lock=`, `lock_gr
 for multi-group in sorted order). Any new balance-changing endpoint must join this protocol.
 SQLite silently drops these clauses — that's why `test_locks_pg.py` exists.
 
+Answering an invitation stays **out** of that protocol on purpose. Accept, decline and cancel
+each read a PENDING row and then write a different status, which without atomicity lets a
+cancelled invitation still grant membership; the fix is a conditional update
+(`invitations._resolve_invitation`: `status = 'PENDING'` in the `UPDATE`, `rowcount` decides,
+404 for the loser), **not** `SELECT … FOR UPDATE`. Locking the invitation before the caller's
+decision inverts the order `delete_group` takes — group row first, its invitations second —
+and deadlocks against it. For the same reason `accept_invitation` flushes the new membership
+before touching the invitation: the FK insert takes the group's `FOR KEY SHARE` first.
+
+**A ledger mutation may not leave a non-member with a non-zero balance**
+(`deps.ensure_no_outsider_debt`, called after the flush in expense/settlement update and
+delete). Removal already requires a zero balance, but nothing kept it there: withdrawing an
+expense a departed member paid for — or rewriting its splits without them, which is the only
+thing a rewrite *can* do, since splits may name only current members — moves their net off
+zero, and they cannot settle it or be settled with. The group then also fails the zero-balance
+check that group deletion needs, so a single delete could strand it forever. The way out of
+that state, and the reason the check is a flat refusal rather than a comparison, is to invite
+the person back.
+
 ### Write quotas (`api/_src/ratelimit.py`)
 
 Row-creating endpoints are volume-braked, counting rows in the database (never
@@ -164,7 +199,7 @@ Unpeppered on purpose: whoever can read that column can already read
 `public.users.email` in plaintext, so a pepper buys nothing real and adds a
 secret whose rotation would silently reset every recipient window.
 
-Three rules any new quota must follow:
+Four rules any new quota must follow:
 
 - **Count tombstones, not the rows you are protecting.** Soft-deleted rows
   keeping their `created_at` is not enough — the group above them can vanish.
@@ -175,16 +210,36 @@ Three rules any new quota must follow:
 - **Charge inside the endpoint's transaction.** `record_write` only adds to the
   session, so a validation failure or the idempotency-race rollback takes the
   charge with it and a replay is never charged twice.
+- **Serialize the count against the charge.** They are two statements, so
+  without a lock N parallel requests all count the same N−1 rows and all
+  insert. Each `enforce_*` opens with `_hold_window`, a
+  `pg_advisory_xact_lock` released by the same commit that stores the event —
+  keyed per caller for the per-caller windows, and to a constant for the
+  invitation ones, whose recipient and global limits count rows written by
+  *other* callers. Never the session-scoped variant: the connection goes back
+  to the transaction pooler at commit with nobody left to release it.
 
-`record_write` also opportunistically prunes the caller's rows that have aged
-out of the window — a serverless function has nowhere to hang a cron — and
-`delete_account` clears that user's outright, since nothing would ever prune
-them again.
+`record_write` also opportunistically prunes rows that have aged out of every
+window — a serverless function has nowhere to hang a cron. That sweep is
+deployment-wide rather than per caller, with `SKIP LOCKED`, a deterministic
+`id` order and a batch cap, so concurrent sweeps step over each other instead
+of queueing or deadlocking. It has to be: `delete_account` keeps the caller's
+`INVITE` tombstones (see below), and nobody would ever come back for them
+under a caller-scoped sweep.
 
 Deliberately **no global cap** on the ledger or group windows: a
 deployment-wide ceiling would turn one abusive account into an outage for
 everyone. Invitations do carry one, because the resource they burn — the
 sending domain's reputation — is shared and cannot be bought back.
+
+That shared resource is also why **account deletion does not clear the
+`INVITE` tombstones**. The per-caller `LEDGER`/`GROUP` rows go (nothing else
+counts them, and sign-in is revoked), but the invitation rows feed the global
+and per-recipient windows, so dropping them would make deletion the reset
+button: invite an address its three times, delete the account, sign up again,
+repeat. Rows keyed to the *deleted* address as a recipient keep their slot but
+lose their `recipient_hash`, which is the only thing left on file derived from
+an address the users row no longer holds.
 
 A second, narrower lock covers *membership creation* against account deletion:
 `get_active_user(..., lock=)` locks the `users` row — `"shared"` in every endpoint that hands
@@ -199,6 +254,9 @@ on `users` rows, which deadlocks against an expense write already holding the gr
 
 - `POST .../expenses` and `.../settlements` require an `Idempotency-Key` UUID header; replays
   return 200 with the existing row, **scoped to the path group** (cross-group key reuse → 409).
+  The client side of that contract is `useIdempotencyKey`: one key per open form, resent on
+  every attempt. A retry that mints a fresh key is not a retry — if the first request landed
+  and only its response was lost, the second one records the entry a second time.
 - `PATCH /expenses/{id}` is partial: metadata (description/category/expense_date) applies
   independently; the five split-affecting fields (split_type, total_amount, currency,
   paid_by_user_id, splits) are all-or-nothing and trigger a full splits rewrite. The frontend
@@ -214,7 +272,14 @@ on `users` rows, which deadlocks against an expense write already holding the gr
   global, 24h — counted from `write_events`, see above). Cancelling sets
   `status='CANCELLED'` rather than deleting: the quotas no longer depend on that, but the
   row is the group's record that the invitation happened, and the partial unique index
-  covers only `PENDING` rows so re-inviting still works.
+  covers only `PENDING` rows so re-inviting still works. Cancelling, accepting and declining
+  are all conditional on the row still being `PENDING` and answer 404 when it is not (see the
+  concurrency section).
+- **A group is never left without members.** `remove_member` refuses to remove the last one
+  (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
+  `delete_account` cannot refuse on the group's behalf, so it purges any group its departure
+  empties. Every route into a group is membership-gated, so a memberless one can never again
+  be read, settled or deleted by anybody.
 - Account deletion anonymizes `public.users` (email gets `DELETED_EMAIL_SUFFIX` from `deps.py`)
   and deletes the `auth.users` row; endpoints not gated by membership must call
   `get_active_user` because old JWTs stay valid until expiry. It also drops pending
@@ -343,7 +408,21 @@ live database separately (Supabase MCP/dashboard) — when adding one, both writ
 apply it, and keep the SQLAlchemy models in `api/_src/models.py` in sync (tests create schema
 from the models on SQLite).
 
+Two triggers on `auth.users` mirror it into `public.users`: `handle_new_user` on INSERT and
+`handle_user_updated` on UPDATE (email or `raw_user_meta_data` only — that table is written on
+every sign-in), with a one-off backfill alongside the second for drift that predates it.
+Everything downstream reads the copy, invitation matching included, so without the second one
+an address change desynchronizes them permanently. Neither trigger is represented in the
+models or exercised by the test suite, which creates its schema from the models on SQLite —
+changes there are verified against the database or not at all. The UPDATE trigger never
+repopulates a row anonymized by account deletion, and never overwrites a value with NULL.
+
 ### Email
+
+`APP_URL` (and its frontend twin `APP_ORIGIN` in `src/lib/canonicalHost.ts`, used by the
+mailto fallback) must name the **apex**: an installed PWA pins the origin it was installed
+from, so a link opening the `vercel.app` alias lands the reader outside their own app, and
+that host is `noindex` besides.
 
 Invitation emails go through Resend (`api/_src/emailer.py`), best-effort: without
 `RESEND_API_KEY` (or on failure) the UI falls back to a mailto draft. User-controlled names are

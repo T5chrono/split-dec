@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api, newIdempotencyKey } from "../lib/api";
+import { api } from "../lib/api";
 import type {
   Expense,
   ExpensePayload,
@@ -19,6 +19,7 @@ import {
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
 import { useAmountError } from "../hooks/useAmountError";
+import { useIdempotencyKey } from "../hooks/useIdempotencyKey";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
 import { guessCategory } from "../lib/categoryGuess";
@@ -213,6 +214,8 @@ export default function ExpenseFormModal({
     return true; // EQUAL with same participants and total
   };
 
+  const idempotencyKey = useIdempotencyKey();
+
   const save = useMutation({
     mutationFn: async () => {
       if (expense && financialsUnchanged()) {
@@ -237,7 +240,8 @@ export default function ExpenseFormModal({
       if (expense) {
         return api.patch<Expense>(`/expenses/${expense.id}`, payload);
       }
-      return api.post<Expense>(`/groups/${group.id}/expenses`, payload, newIdempotencyKey());
+      // The same key on every attempt — see useIdempotencyKey.
+      return api.post<Expense>(`/groups/${group.id}/expenses`, payload, idempotencyKey);
     },
     onSuccess: onSaved,
   });

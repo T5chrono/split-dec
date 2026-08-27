@@ -11,13 +11,16 @@ transaction.
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal as D
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from _src import ratelimit
 from _src.deps import (
     get_active_user,
     get_expense_for_member,
@@ -25,7 +28,15 @@ from _src.deps import (
     lock_groups_exclusive,
     require_membership,
 )
-from _src.models import Expense, ExpenseSplit, Group, GroupMember, Settlement, User
+from _src.models import (
+    Expense,
+    ExpenseSplit,
+    Group,
+    GroupMember,
+    Settlement,
+    User,
+    WriteEvent,
+)
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
@@ -142,5 +153,99 @@ async def test_deletion_user_lock_does_not_block_fk_inserts():
             )
             await cleanup.execute(delete(Group).where(Group.id == group_id))
             await cleanup.execute(delete(User).where(User.id == user_id))
+            await cleanup.commit()
+        await engine.dispose()
+
+
+async def test_quota_window_lock_is_exclusive_between_transactions():
+    """The write quotas count and then insert, two statements that are only a
+    ceiling if something serializes them (ratelimit.py). That something is a
+    transaction-scoped advisory lock, which SQLite never executes — here it
+    runs for real, and a second transaction must wait for it.
+    """
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+    )
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    caller = uuid.uuid4()
+    try:
+        async with Session() as first, Session() as second:
+            await ratelimit._hold_window(first, ratelimit.LEDGER, caller)
+
+            # Same caller, same window: blocked until the first commits.
+            await second.execute(text("SET LOCAL lock_timeout = '1s'"))
+            with pytest.raises(DBAPIError):
+                await ratelimit._hold_window(second, ratelimit.LEDGER, caller)
+            await second.rollback()
+
+            # A different caller, and the deployment-wide invitation window,
+            # are separate locks — neither waits on the one held above.
+            async with Session() as third:
+                await third.execute(text("SET LOCAL lock_timeout = '1s'"))
+                await ratelimit._hold_window(third, ratelimit.LEDGER, uuid.uuid4())
+                await ratelimit._hold_window(third, ratelimit.INVITE, None)
+                await third.rollback()
+
+            await first.rollback()  # releases it
+    finally:
+        await engine.dispose()
+
+
+async def test_prune_deletes_only_rows_it_can_lock():
+    """record_write's sweep runs from every quota-consuming write, so it uses
+    SKIP LOCKED and a deterministic order to step over rows another sweep is
+    already taking. Neither clause exists on SQLite; this executes the real
+    statement, and asserts a locked row survives instead of blocking.
+    """
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+    )
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    caller = uuid.uuid4()
+    aged = datetime.now(timezone.utc) - timedelta(days=2)
+    try:
+        async with Session() as setup:
+            setup.add(User(id=caller, email=f"prune-{caller}@test.invalid"))
+            for _ in range(2):
+                setup.add(
+                    WriteEvent(user_id=caller, kind=ratelimit.LEDGER, created_at=aged)
+                )
+            await setup.commit()
+
+        async with Session() as holder, Session() as sweeper:
+            # Hold one of the two aged rows.
+            held = (
+                await holder.execute(
+                    select(WriteEvent.id)
+                    .where(WriteEvent.user_id == caller)
+                    .order_by(WriteEvent.id)
+                    .limit(1)
+                    .with_for_update()
+                )
+            ).scalar_one()
+
+            await sweeper.execute(text("SET LOCAL lock_timeout = '5s'"))
+            await ratelimit.record_write(sweeper, caller, ratelimit.LEDGER)
+            await sweeper.commit()
+            await holder.rollback()
+
+        async with Session() as check:
+            remaining = (
+                await check.execute(
+                    select(WriteEvent.id).where(WriteEvent.user_id == caller)
+                )
+            ).scalars().all()
+        # The locked row was skipped, not waited on; the other aged row went,
+        # and the freshly charged one stays.
+        assert held in remaining
+        assert len(remaining) == 2
+    finally:
+        async with Session() as cleanup:
+            await cleanup.execute(delete(WriteEvent).where(WriteEvent.user_id == caller))
+            await cleanup.execute(delete(User).where(User.id == caller))
             await cleanup.commit()
         await engine.dispose()

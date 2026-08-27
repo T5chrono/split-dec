@@ -109,6 +109,52 @@ async def test_cancelled_invitation_is_kept_and_address_can_be_reinvited(
     assert again.json()["id"] != inv["id"]
 
 
+class TestOnlyOneAnswerLands:
+    """Accept, decline and cancel each read the invitation and then write a
+    different status. The status is part of the UPDATE, not just of the read
+    that preceded it, so whichever arrives second changes nothing and is told
+    so — a cancelled invitation must never still hand out membership."""
+
+    async def _pending(self, client, db_session, two_user_group):
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        inv = (await _invite(client, two_user_group["group"].id, "carol@test.dev")).json()
+        return carol, inv
+
+    async def test_accepting_a_cancelled_invitation_grants_nothing(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol, inv = await self._pending(client, db_session, two_user_group)
+        assert (await client.delete(f"/api/invitations/{inv['id']}")).status_code == 204
+
+        current_user.id = carol.id
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 404
+        assert (await client.get(f"/api/groups/{g['group'].id}")).status_code == 403
+
+    async def test_cancelling_an_accepted_invitation_is_refused(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol, inv = await self._pending(client, db_session, two_user_group)
+        current_user.id = carol.id
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 204
+
+        current_user.id = g["alice"].id
+        assert (await client.delete(f"/api/invitations/{inv['id']}")).status_code == 404
+        # The membership it granted stands, and the record says ACCEPTED.
+        async with db_session() as s:
+            row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+        assert row.status == "ACCEPTED"
+
+    async def test_declining_twice_is_answered_once(
+        self, client, db_session, two_user_group, current_user
+    ):
+        carol, inv = await self._pending(client, db_session, two_user_group)
+        current_user.id = carol.id
+        assert (await client.post(f"/api/invitations/{inv['id']}/decline")).status_code == 204
+        assert (await client.post(f"/api/invitations/{inv['id']}/decline")).status_code == 404
+
+
 async def test_invite_unknown_email_recorded_without_email_provider(client, two_user_group):
     g = two_user_group
     r = await _invite(client, g["group"].id, "future.user@test.dev")

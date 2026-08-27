@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import DEV_FRONTEND_ORIGIN, ENV
 from .db import get_db
-from .routers import expenses, groups, invitations, settlements, users
+from .routers import expenses, groups, invitations, reports, settlements, users
 
 def docs_urls(env: str) -> dict[str, str | None]:
     """Interactive API docs, and the schema that feeds them: development only.
@@ -62,6 +62,9 @@ app.include_router(groups.router, prefix="/api")
 app.include_router(invitations.router, prefix="/api")
 app.include_router(expenses.router, prefix="/api")
 app.include_router(settlements.router, prefix="/api")
+# Unauthenticated by necessity — browsers post violation reports with no
+# credentials. It touches no database and stores nothing; see the module.
+app.include_router(reports.router, prefix="/api")
 
 
 @app.get("/api/health")

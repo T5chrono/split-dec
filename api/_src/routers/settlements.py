@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import verify_jwt
 from ..currencies import precision_for
 from ..db import get_db
-from ..deps import get_settlement_for_member, require_membership
+from ..deps import (
+    ensure_no_outsider_debt,
+    get_settlement_for_member,
+    require_membership,
+)
 from ..models import GroupMember, Settlement
 from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
 from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
@@ -140,6 +144,10 @@ async def update_settlement(
     settlement.paid_to_user_id = paid_to
     settlement.amount = amount
     settlement.currency = currency
+    # Both parties must be current members, so an edit that moves a settlement
+    # off a former member leaves whatever they had settled unsettled again.
+    await db.flush()
+    await ensure_no_outsider_debt(db, settlement.group_id)
     await db.commit()
     return settlement
 
@@ -154,4 +162,8 @@ async def delete_settlement(
     # every other ledger mutation (serializes against member/group removal).
     settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
     settlement.deleted_at = datetime.now(timezone.utc)
+    await db.flush()
+    # Withdrawing a settlement restores the debt it cleared — including one a
+    # member cleared on their way out of the group.
+    await ensure_no_outsider_debt(db, settlement.group_id)
     await db.commit()

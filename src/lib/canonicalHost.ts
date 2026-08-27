@@ -17,6 +17,15 @@
  *  redirect is what caused the 2026-07-18 outage.
  */
 
+/** The origin every outbound link must name: invitation drafts, emails, the
+ *  address the landing page shows itself at. Deliberately a constant and never
+ *  `location.origin` — a preview deployment or the noindex `vercel.app` alias
+ *  would otherwise put a host the recipient should not be sent to into somebody
+ *  else's inbox, and an installed PWA pins the origin it was installed from.
+ *  Mirrors `APP_URL` in api/_src/emailer.py, which does the same for the mail
+ *  the backend sends. */
+export const APP_ORIGIN = "https://split-dec.app";
+
 /** The apex equivalent of a `www.` URL, or null if already canonical. */
 export function canonicalUrl(href: string): string | null {
   const url = new URL(href);
