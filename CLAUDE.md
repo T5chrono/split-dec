@@ -42,13 +42,22 @@ Claude GitHub Action auto-reviews every PR on open **and on every push to it**
 (`.github/workflows/claude-code-review.yml`; `@claude` mentions work too, but those workflows
 execute from `master`, the default branch) → address findings → merge on green CI → Vercel
 auto-deploys `master` to production.
-A green `claude-review` check is not by itself proof a review happened: the job reports success
-even when it posts nothing (PR #29). Look for the tracking comment, not the tick.
+**`master` is protected** — ruleset `SplitDecMaster`, active since 2026-08-27: a pull
+request is required, `backend` / `frontend` / `claude-review` must be green before the merge
+button works, force-push and deletion are blocked, and **nobody holds a bypass**, maintainer
+included. Required approvals are deliberately **0**: GitHub does not let you approve your own
+PR, so on a sole-committer repo any higher number makes every PR unmergeable.
+A green `claude-review` check now does mean a review was posted — the workflow's
+`Fail if no review was posted` step turns the PR #29 failure mode (success having said
+nothing) into a red check. Two gaps remain by design: a PR that edits
+`claude-code-review.yml` passes with a warning, because the action refuses to run whenever
+that file differs from the default branch, and Dependabot PRs skip the job on its `if:`
+guard. In both cases the check is green with no review behind it, so read the comment there
+rather than the tick.
 After merging, sync: `git checkout develop && git merge master && git push`.
 CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs.
-The develop → PR → master sequence is mandatory regardless of what the host enforces:
-treat it as the gate, and do not push to `master` even when a shortcut is technically
-available.
+The develop → PR → master sequence is now enforced by the ruleset rather than by convention
+alone — but treat it as the gate regardless of what any host or tool appears to allow.
 
 ## Architecture
 
