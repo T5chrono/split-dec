@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 
 from conftest import expense_payload, idem, make_user
-from _src.models import Expense, Group
+from _src.models import Expense, Group, GroupInvitation, User
 
 
 async def test_create_group_adds_creator_as_member(client, db_session, current_user):
@@ -347,3 +347,99 @@ async def test_balances_include_settlements_and_soft_deletes(client, two_user_gr
     await client.delete(f"/api/settlements/{s.json()['id']}")
     r = await client.get(f"/api/groups/{g['group'].id}/balances")
     assert r.json()["PLN"][0]["amount"] == "45.0000"
+
+
+async def test_removing_a_member_revokes_their_pending_invitations(
+    client, db_session, two_user_group, current_user
+):
+    """A removed member must not be able to walk back in on an invitation that
+    outlived their membership.
+
+    Reachable because one person can hold two live invitations to one group:
+    uq_group_invitations_pending is keyed on (group_id, email), so an address
+    change leaves the invitation sent to the old address PENDING while they
+    join through the new one.
+    """
+    g = two_user_group
+    gid = g["group"].id
+    carol = await make_user(db_session, "carol-old@test.dev", "Carol")
+
+    stale = (
+        await client.post(
+            f"/api/groups/{gid}/invitations", json={"email": "carol-old@test.dev"}
+        )
+    ).json()
+
+    # Carol changes her address in Supabase Auth; handle_user_updated mirrors it
+    # into public.users (migration 20260827000100).
+    async with db_session() as s:
+        row = await s.get(User, carol.id)
+        row.email = "carol-new@test.dev"
+        await s.commit()
+
+    fresh = (
+        await client.post(
+            f"/api/groups/{gid}/invitations", json={"email": "carol-new@test.dev"}
+        )
+    ).json()
+    assert fresh["id"] != stale["id"]
+
+    current_user.id = carol.id
+    assert (await client.post(f"/api/invitations/{fresh['id']}/accept")).status_code == 204
+
+    current_user.id = g["alice"].id
+    assert (await client.delete(f"/api/groups/{gid}/members/{carol.id}")).status_code == 204
+
+    # The stale invitation is spent, not merely unused: it is gone from her list
+    # and no longer answerable.
+    current_user.id = carol.id
+    assert (await client.get("/api/invitations/mine")).json() == []
+    assert (await client.post(f"/api/invitations/{stale['id']}/accept")).status_code == 404
+
+    current_user.id = g["alice"].id
+    detail = await client.get(f"/api/groups/{gid}")
+    assert {m["id"] for m in detail.json()["members"]} == {
+        str(g["alice"].id),
+        str(g["bob"].id),
+    }
+
+    # CANCELLED rather than deleted, like cancel_invitation: the group keeps its
+    # record, and the partial unique index covers only PENDING rows, so removal
+    # is not a ban — she can be invited back.
+    async with db_session() as s:
+        assert (await s.get(GroupInvitation, uuid.UUID(stale["id"]))).status == "CANCELLED"
+    assert (
+        await client.post(
+            f"/api/groups/{gid}/invitations", json={"email": "carol-new@test.dev"}
+        )
+    ).status_code == 201
+
+
+async def test_removal_revokes_an_invitation_with_no_invited_user_id(
+    client, db_session, two_user_group
+):
+    """The other half of the match. An invitation created before the invitee had
+    an account carries a NULL invited_user_id and is findable only by address,
+    so removal matches on both columns — the pair delete_account already uses.
+    Inserted directly: the invite endpoint refuses an address that is already a
+    member, which is exactly why only a regression test holds this branch open.
+    """
+    g = two_user_group
+    gid = g["group"].id
+    async with db_session() as s:
+        s.add(
+            GroupInvitation(
+                group_id=gid,
+                email="bob@test.dev",
+                invited_by=g["alice"].id,
+                invited_user_id=None,
+            )
+        )
+        await s.commit()
+
+    assert (await client.delete(f"/api/groups/{gid}/members/{g['bob'].id}")).status_code == 204
+
+    async with db_session() as s:
+        inv = (await s.execute(select(GroupInvitation))).scalars().one()
+        assert inv.status == "CANCELLED"
+        assert inv.responded_at is not None

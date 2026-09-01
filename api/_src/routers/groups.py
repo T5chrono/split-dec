@@ -1,7 +1,8 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
@@ -206,6 +207,43 @@ async def remove_member(
                 "leaving it empty."
             ),
         )
+    # Pending invitations to this group addressed to the departing member are
+    # revoked with the membership. An invitation is an unexpiring capability
+    # that recreates membership on accept (invitations.accept_invitation), and
+    # nothing else expires it, so one left behind lets the removed member walk
+    # back in without any current member acting. delete_account already treats
+    # them this way for the same reason (routers/users.py).
+    #
+    # Reachable because a person can hold more than one live invitation to a
+    # group: uq_group_invitations_pending is keyed on (group_id, email), so a
+    # changed address (handle_user_updated, migration 20260827000100) leaves the
+    # invitation sent to the old one PENDING while they join through the new.
+    # Matched on both columns, exactly as delete_account does — an invitation
+    # created before the invitee had an account carries a NULL invited_user_id
+    # and is only findable by address.
+    #
+    # Safe under the group-lock protocol (deps.py): the FOR UPDATE taken above
+    # conflicts with the FOR KEY SHARE that accept_invitation's membership
+    # insert takes on the group row, so a concurrent accept either commits
+    # first (and is then removed like any other member) or blocks here and
+    # loses on _resolve_invitation's `status = 'PENDING'` predicate. Group row
+    # first, invitations second — the order delete_group takes, not the one
+    # that deadlocks against it.
+    #
+    # CANCELLED rather than deleted, like cancel_invitation: the row is the
+    # group's record that the invitation happened, and the partial unique index
+    # covers only PENDING rows, so the member can still be re-invited.
+    removed = await db.get(User, user_id)
+    await db.execute(
+        update(GroupInvitation)
+        .where(
+            GroupInvitation.group_id == group_id,
+            GroupInvitation.status == "PENDING",
+            (GroupInvitation.invited_user_id == user_id)
+            | (func.lower(GroupInvitation.email) == removed.email.lower()),
+        )
+        .values(status="CANCELLED", responded_at=datetime.now(timezone.utc))
+    )
     await db.delete(member)
     await db.commit()
 
