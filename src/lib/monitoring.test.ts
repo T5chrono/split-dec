@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Breadcrumb, ErrorEvent } from "@sentry/react";
-import { redactSelector, redactUrl, scrubBreadcrumb, scrubEvent } from "./monitoring";
+import {
+  redactMessage,
+  redactSelector,
+  redactUrl,
+  scrubBreadcrumb,
+  scrubEvent,
+} from "./monitoring";
 
 /** Every case here corresponds to something the Sentry SDK would have sent if
  *  the two hooks in monitoring.ts were absent. None of them is hypothetical:
@@ -163,5 +169,43 @@ describe("scrubEvent", () => {
   it("leaves an event with no request or breadcrumbs alone", () => {
     const event = { exception: { values: [{ type: "TypeError" }] } } as unknown as ErrorEvent;
     expect(scrubEvent(event)).toEqual(event);
+  });
+
+  it("redacts the error message itself", () => {
+    // An ApiError carries the server's `detail` string, which this app does
+    // not compose — the one field the request and breadcrumb hooks never see.
+    const event = scrubEvent({
+      exception: {
+        values: [
+          {
+            type: "ApiError",
+            value: `Group ${GROUP_ID} has no member someone@example.com`,
+          },
+        ],
+      },
+    } as unknown as ErrorEvent);
+    expect(event.exception?.values?.[0].value).toBe("Group [id] has no member [email]");
+  });
+
+  it("leaves stack frames untouched", () => {
+    const stacktrace = { frames: [{ filename: "app:///assets/index.js", lineno: 16 }] };
+    const event = scrubEvent({
+      exception: { values: [{ type: "TypeError", stacktrace }] },
+    } as unknown as ErrorEvent);
+    expect(event.exception?.values?.[0].stacktrace).toEqual(stacktrace);
+  });
+});
+
+describe("redactMessage", () => {
+  it("blanks both identifier shapes and keeps the rest", () => {
+    expect(redactMessage(`failed for ${GROUP_ID} / a.b+c@sub.example.co.uk`)).toBe(
+      "failed for [id] / [email]",
+    );
+  });
+
+  it("leaves ordinary error text alone", () => {
+    expect(redactMessage("Cannot read properties of undefined")).toBe(
+      "Cannot read properties of undefined",
+    );
   });
 });

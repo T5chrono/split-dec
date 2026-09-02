@@ -125,6 +125,65 @@ class TestScrubEvent:
         assert monitoring.scrub_event(event, {}) == event
 
 
+class TestScrubMessages:
+    """The error's own text — written by Postgres or by a future log call,
+    never by us, and missed entirely by the request/breadcrumb hooks."""
+
+    def test_constraint_violation_loses_the_address_it_quotes(self):
+        # Verbatim shape of a Postgres unique violation on users.email.
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "IntegrityError",
+                        "value": (
+                            'duplicate key value violates unique constraint "users_email_key"\n'
+                            "DETAIL:  Key (email)=(someone@example.com) already exists."
+                        ),
+                    }
+                ]
+            }
+        }
+        scrubbed = monitoring.scrub_event(event, {})
+        value = scrubbed["exception"]["values"][0]["value"]
+        assert "someone@example.com" not in value
+        assert "[email]" in value
+        # The useful half survives: you can still tell which constraint blew up.
+        assert "users_email_key" in value
+
+    def test_identifiers_in_an_exception_message_are_blanked(self):
+        event = {
+            "exception": {"values": [{"type": "ValueError", "value": f"no group {GROUP_ID}"}]}
+        }
+        scrubbed = monitoring.scrub_event(event, {})
+        assert scrubbed["exception"]["values"][0]["value"] == "no group [id]"
+
+    def test_stack_frames_are_left_alone(self):
+        """They name our own files, and locals are off — nothing to redact."""
+        frames = {"frames": [{"filename": "/var/task/_src/routers/expenses.py", "lineno": 42}]}
+        event = {"exception": {"values": [{"type": "ValueError", "stacktrace": frames}]}}
+        scrubbed = monitoring.scrub_event(event, {})
+        assert scrubbed["exception"]["values"][0]["stacktrace"] == frames
+
+    def test_logentry_is_scrubbed(self):
+        """LoggingIntegration is on by default; integrations=[...] adds to the
+        defaults rather than replacing them, so this path is live."""
+        event = {
+            "logentry": {
+                "message": "invite %s failed for %s",
+                "formatted": f"invite {GROUP_ID} failed for someone@example.com",
+                "params": [GROUP_ID, "someone@example.com"],
+            }
+        }
+        scrubbed = monitoring.scrub_event(event, {})
+        assert scrubbed["logentry"]["formatted"] == "invite [id] failed for [email]"
+        assert scrubbed["logentry"]["params"] == ["[id]", "[email]"]
+
+    def test_capture_message_text_is_scrubbed(self):
+        event = {"message": f"group {GROUP_ID} is wedged"}
+        assert monitoring.scrub_event(event, {})["message"] == "group [id] is wedged"
+
+
 def test_init_is_a_no_op_without_a_dsn(monkeypatch):
     """The absence of a DSN is the only off switch, so it has to hold.
 

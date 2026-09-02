@@ -17,6 +17,10 @@
  *      the clicked element (see `_htmlElementAsString` in @sentry/core), and
  *      `ExpensesTab` puts the expense *description* in an aria-label. Clicking
  *      "edit" on a row would otherwise ship what the user typed.
+ *    - The error's own message, which none of the above covers and which this
+ *      app does not write: an `ApiError` carries the `detail` string the server
+ *      sent back. Nothing composes an identifier into one today, so this is the
+ *      hole being closed before it opens rather than after.
  *
  *  So nothing reaches Sentry unredacted. The two hooks below are not belt and
  *  braces around a safe default; they are the only thing standing between an
@@ -45,6 +49,10 @@ const ABSOLUTE = /^[a-z][a-z0-9+.-]*:/i;
 
 /** `[aria-label="Edit expense: Dinner"]` → `[aria-label]`. */
 const ATTRIBUTE_VALUE = /\[([a-zA-Z-]+)="[^"]*"\]/g;
+
+/** The other identifier shape this app holds. Reaches an error message by way
+ *  of an API error detail rather than anything the client composes itself. */
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
 /** A URL reduced to origin and path, with identifiers blanked.
  *
@@ -79,6 +87,18 @@ export function redactUrl(raw: string): string {
  */
 export function redactSelector(selector: string): string {
   return selector.replace(ATTRIBUTE_VALUE, "[$1]");
+}
+
+/** Free text with both identifier shapes blanked.
+ *
+ *  Separate from `redactUrl` because the input is different in kind: that one
+ *  folds a URL we constructed, while this handles text we did not write — an
+ *  error message, which on this side is often a `detail` string relayed
+ *  straight from the API. Stack frames are deliberately untouched; they name
+ *  our own bundle and carry no values.
+ */
+export function redactMessage(text: string): string {
+  return text.replace(UUID, "[id]").replace(EMAIL, "[email]");
 }
 
 /** Applied to every breadcrumb before it is recorded. */
@@ -130,6 +150,24 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent {
 
   if (typeof event.transaction === "string") {
     event.transaction = redactUrl(event.transaction);
+  }
+
+  // The error's own text — the one field none of the hooks above touches, and
+  // the one this app does not write: an ApiError carries the `detail` string
+  // the server sent, which a future endpoint could compose from a real value.
+  if (event.exception?.values) {
+    event.exception = {
+      ...event.exception,
+      values: event.exception.values.map((value) =>
+        typeof value.value === "string"
+          ? { ...value, value: redactMessage(value.value) }
+          : value,
+      ),
+    };
+  }
+
+  if (typeof event.message === "string") {
+    event.message = redactMessage(event.message);
   }
 
   if (event.breadcrumbs) {

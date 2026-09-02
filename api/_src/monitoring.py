@@ -21,6 +21,13 @@ specific hazards are different from the browser's, and worse:
   - **URLs.** `/api/groups/<uuid>/expenses` names a group; `?` and `#` never
     carry a credential on this side the way they do in the browser, but they
     are dropped anyway rather than reasoned about per endpoint.
+  - **The error's own message**, which is the one nothing above covers and the
+    one we do not write. A unique-violation on `users.email` reaches Sentry as
+    `DETAIL: Key (email)=(someone@example.com) already exists`. Same for
+    `logentry`, the field `LoggingIntegration` fills from any `logger.error()`
+    — that integration is on by default, and `integrations=[...]` adds to the
+    defaults rather than replacing them, so it is live whether or not this
+    codebase uses it yet.
 
 `transaction` is left alone deliberately: the FastAPI integration sets it to the
 *route pattern* (`/api/groups/{group_id}/expenses`), which is already folded and
@@ -48,6 +55,12 @@ _UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
 )
 
+# Free text can carry the other identifier this app holds. Postgres puts it
+# there without being asked: a unique-violation on `users.email` arrives as
+# `DETAIL: Key (email)=(someone@example.com) already exists`, and that string is
+# the exception's own message rather than anything this module chose to send.
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
 # Everything a stack trace is actually diagnosed with, and nothing else.
 # Allow-list rather than deny-list: the next header this API reads should not
 # reach a third party because nobody remembered to come back and exclude it.
@@ -57,6 +70,17 @@ _ALLOWED_HEADERS = frozenset({"user-agent", "content-type", "content-length", "a
 def redact_ids(text: str) -> str:
     """Every UUID in a string replaced by a placeholder."""
     return _UUID.sub("[id]", text)
+
+
+def redact_message(text: str) -> str:
+    """Free text with both identifier shapes blanked.
+
+    Separate from `redact_ids` because the inputs are different in kind: that
+    one folds URL *paths*, where an email can never appear, while this one
+    handles text somebody else wrote — an exception message, a log record — and
+    has to assume anything the app holds could be embedded in it.
+    """
+    return _EMAIL.sub("[email]", _UUID.sub("[id]", text))
 
 
 def redact_url(url: str) -> str:
@@ -118,11 +142,63 @@ def _scrub_breadcrumbs(values: list[Any]) -> list[Any]:
     return scrubbed
 
 
+def _scrub_exception(exception: dict[str, Any]) -> dict[str, Any]:
+    """The error's own message.
+
+    The most likely leak on this side, and the one every other hook here
+    misses: a database error's text is written by Postgres, not by us, and a
+    constraint violation quotes the offending row back verbatim. Stack frames
+    are left alone — they are our own file and function names, and with
+    `include_local_variables=False` they carry no values.
+    """
+    values = exception.get("values")
+    if not isinstance(values, list):
+        return exception
+    scrubbed = []
+    for value in values:
+        if isinstance(value, dict) and isinstance(value.get("value"), str):
+            value = {**value, "value": redact_message(value["value"])}
+        scrubbed.append(value)
+    return {**exception, "values": scrubbed}
+
+
+def _scrub_logentry(logentry: dict[str, Any]) -> dict[str, Any]:
+    """A log record promoted to an event.
+
+    `LoggingIntegration` is on by default and `integrations=[...]` *adds* to the
+    defaults rather than replacing them, so every `logger.error()` in this
+    codebase's future becomes an event whose body is this field. There are none
+    today; this exists so that the first one is not also the first leak.
+    """
+    scrubbed = dict(logentry)
+    for key in ("message", "formatted"):
+        if isinstance(scrubbed.get(key), str):
+            scrubbed[key] = redact_message(scrubbed[key])
+    params = scrubbed.get("params")
+    if isinstance(params, (list, tuple)):
+        scrubbed["params"] = [
+            redact_message(p) if isinstance(p, str) else p for p in params
+        ]
+    return scrubbed
+
+
 def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any]:
     """Last gate before an event leaves the function."""
     request = event.get("request")
     if isinstance(request, dict):
         event["request"] = _scrub_request(request)
+
+    exception = event.get("exception")
+    if isinstance(exception, dict):
+        event["exception"] = _scrub_exception(exception)
+
+    logentry = event.get("logentry")
+    if isinstance(logentry, dict):
+        event["logentry"] = _scrub_logentry(logentry)
+
+    # `capture_message` puts its text here rather than in `logentry`.
+    if isinstance(event.get("message"), str):
+        event["message"] = redact_message(event["message"])
 
     breadcrumbs = event.get("breadcrumbs")
     # The SDK wraps these as {"values": [...]}; older shapes hand back a bare

@@ -291,6 +291,14 @@ precisely what the rest of this codebase works to keep out of logs:
   ledger. Headers are **allow-listed, not deny-listed**: `send_default_pii=False`
   covers `Authorization` and `Cookie`, but the SDK has never heard of
   `X-Health-Key`.
+- **The error's own message**, which none of the above touches and which this
+  codebase does not write. A unique violation on `users.email` arrives as
+  `DETAIL: Key (email)=(someone@example.com) already exists`. Same for
+  `logentry`: `LoggingIntegration` is on by default and `integrations=[...]`
+  *adds* to the defaults rather than replacing them, so any future
+  `logger.error()` becomes an event body. Both get UUID **and** email
+  redaction; stack frames are left alone, because they name our own files and
+  `include_local_variables=False` means they carry no values.
 
 Identifiers are matched by **shape** — every id in `models.py` is a UUID — rather
 than by route list, so a new route is covered without anyone remembering to come
