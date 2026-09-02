@@ -140,6 +140,14 @@ export default defineConfig({
               );
             },
             sourcemaps: {
+              // Rolldown synthesizes this chunk (its module-loading runtime)
+              // rather than compiling it from anything, so it is the one
+              // emitted asset with no source map — and uploading a script
+              // whose map cannot exist made sentry-cli warn on every build
+              // ("could not determine a source map reference"). Excluding it
+              // loses nothing: there is no original source to resolve a frame
+              // in it back to, with or without the upload.
+              ignore: ["**/rolldown-runtime-*.js"],
               // Nothing that was uploaded may also be deployed. Without this
               // the maps sit in dist/ and Vercel serves them as static files,
               // which is the same disclosure as shipping unminified source.
