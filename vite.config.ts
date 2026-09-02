@@ -82,6 +82,14 @@ export default defineConfig({
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // Workbox mirrors `build.sourcemap` for the service worker it
+        // generates, and it does that in `closeBundle` — *after* the Sentry
+        // plugin's `writeBundle` has already swept dist/ for maps. So with
+        // source maps switched on, sw.js.map outlived the sweep and shipped.
+        // Nothing here is worth mapping (generated glue plus the workbox
+        // runtime), so the fix is not to emit it rather than to delete it
+        // later and hope the ordering never changes again.
+        sourcemap: false,
       },
     }),
     // Last in the list, and only when it has somewhere to upload to. The plugin
@@ -100,6 +108,23 @@ export default defineConfig({
             url: "https://de.sentry.io",
             authToken: process.env.SENTRY_AUTH_TOKEN,
             telemetry: false,
+            // Without this the plugin *throws* on any upload failure and takes
+            // the build down with it (its own README: "the plugin will simply
+            // throw an error, thereby stopping the bundling process"). That
+            // inverts what matters: an expired token, a revoked scope or a
+            // Sentry outage would block a deploy of the app itself — and a
+            // deploy is how this app recovers from its own incidents. Source
+            // maps are a debugging convenience and must never hold the
+            // release hostage, so failure is loud in the build log and
+            // otherwise survivable. The cost is that a silently missing
+            // upload only shows up as minified frames on the next crash.
+            errorHandler: (err) => {
+              console.warn(
+                "[sentry] source map upload failed; shipping without readable " +
+                  "stack traces for this release:",
+                err.message,
+              );
+            },
             sourcemaps: {
               // Nothing that was uploaded may also be deployed. Without this
               // the maps sit in dist/ and Vercel serves them as static files,

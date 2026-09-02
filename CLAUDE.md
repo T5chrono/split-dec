@@ -303,7 +303,20 @@ The browser SDK costs **~29 kB gzip on the first-paint chunk** (measured: entry
 went 20.8 → 49.9 kB gzip) and is deliberately **not** in the vendor allow-list.
 Source maps are generated only when `SENTRY_AUTH_TOKEN` is set, emitted
 `hidden`, and deleted from `dist/` after upload — a served `.map` is the whole
-bundle, readable, on the origin holding the Supabase session.
+bundle, readable, on the origin holding the Supabase session. Two non-obvious
+things guard that, both found by building with a deliberately invalid token:
+
+- **The service worker's map is suppressed separately** (`workbox.sourcemap:
+  false`). vite-plugin-pwa writes `sw.js` in `closeBundle`, *after* the Sentry
+  plugin's `writeBundle` has swept `dist/` for `*.map`, so `sw.js.map` and
+  `workbox-*.js.map` outlived the sweep and shipped. Not emitting them beats
+  deleting them later and trusting the hook order never changes.
+- **An upload failure must not fail the build.** The plugin throws by default
+  ("stopping the bundling process", per its README), which would let an expired
+  token or a Sentry outage block a deploy of the app itself — and a deploy is
+  how this app recovers from its own incidents. `errorHandler` downgrades it to
+  a build-log warning. The accepted cost is that a silently missing upload
+  surfaces only as minified frames on the next crash.
 
 `connect-src` in `vercel.json` carries the org's ingest host pinned exactly
 (`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would
