@@ -19,6 +19,15 @@ export default defineConfig({
     // debuggability nobody but Sentry needs.
     sourcemap: uploadSourceMaps ? "hidden" : false,
     rollupOptions: {
+      checks: {
+        // Rolldown warns when plugin hooks dominate the build, which they
+        // always will here: the app builds in about a second and the Sentry
+        // upload is a network round trip, so the ratio is a statement about
+        // how fast the build is rather than about a plugin misbehaving. It
+        // fired on every production build and there is nothing to act on.
+        // Flip back to true when actually investigating build performance.
+        pluginTimings: false,
+      },
       output: {
         // Rolldown (vite 8) takes chunk groups here rather than the object
         // form of manualChunks, which it rejects outright: "Invalid type:
@@ -97,15 +106,20 @@ export default defineConfig({
     // pair them later — so it has to see the final output, after the PWA plugin
     // has finished rewriting it.
     //
-    // `url` is not optional here: the org lives in Sentry's EU region, and the
-    // plugin defaults to the US ingest (sentry.io), where the upload would
-    // authenticate against the wrong tenant and fail.
+    // Deliberately no `url`. The org is in Sentry's EU region and an earlier
+    // revision pinned `https://de.sentry.io` here on the assumption that the
+    // plugin would otherwise default to the US ingest. The first production
+    // build disproved it: a modern org token (`sntrys_…`) carries its own
+    // region and sentry-cli prefers that over anything configured, so the
+    // option was inert *and* warned on every build ("Using https://sentry.io
+    // (embedded in token) rather than manually-configured URL"). A legacy
+    // token with no embedded region would need `SENTRY_URL` in the
+    // environment instead — there is no way to say it here without the noise.
     ...(uploadSourceMaps
       ? [
           sentryVitePlugin({
             org: "split-dec",
             project: "splitdec-frontend",
-            url: "https://de.sentry.io",
             authToken: process.env.SENTRY_AUTH_TOKEN,
             telemetry: false,
             // Without this the plugin *throws* on any upload failure and takes
