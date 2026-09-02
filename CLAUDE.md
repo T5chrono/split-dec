@@ -87,7 +87,7 @@ on `ENV=development`):
   **The script-level CSP is staged**: the enforced
   `Content-Security-Policy` is still framing-only, while the full policy
   (`default-src 'self'`, hash-pinned `script-src`, `connect-src` limited to self +
-  the Supabase project) ships alongside it as `Content-Security-Policy-Report-Only`
+  the Supabase project + the Sentry ingest host) ships alongside it as `Content-Security-Policy-Report-Only`
   until the flows it could break — OAuth, recovery, installed PWAs — have been
   exercised in production. Promoting it is a one-key rename; the tests read
   whichever header carries the policy, so they survive the flip. Two things there
@@ -255,6 +255,67 @@ membership committed mid-deletion escapes both the balance check and the unscope
 membership-gated routes don't re-check liveness. `"exclusive"` is `FOR NO KEY UPDATE`, not
 `FOR UPDATE`, on purpose: `FOR UPDATE` conflicts with the `FOR KEY SHARE` that FK inserts take
 on `users` rows, which deadlocks against an expense write already holding the group lock.
+
+### Error monitoring (Sentry)
+
+Two projects in the `split-dec` org, both in Sentry's **EU region**
+(`de.sentry.io` — which is what lets `legal.ts` say Germany): `splitdec-frontend`
+for the browser, `splitdec-api` for the function. **Errors only** — no tracing,
+no session replay. Speed Insights already measures performance, and a replay of
+this app is a recording of somebody's ledger.
+
+**A missing DSN is the off switch.** `VITE_SENTRY_DSN` (browser) and `SENTRY_DSN`
+(function) are read at init; nothing initialises without them, which is how dev,
+vitest and CI stay out of the issue stream with no second flag to keep in sync.
+The browser DSN is public by construction — it ships inside the bundle either
+way — so it lives in `.env.production` next to the Supabase publishable key; the
+API one is Vercel-only. The browser key carries a **100/hour** server-side rate
+limit, because a public DSN is a public write endpoint.
+
+**Nothing reaches Sentry unredacted** (`src/lib/monitoring.ts`,
+`api/_src/monitoring.py`). Not defensive tidying — the SDK defaults collect
+precisely what the rest of this codebase works to keep out of logs:
+
+- `location.href` on the OAuth callback is `?code=<live authorization code>`,
+  and on the recovery link `#access_token=`. Query and fragment are therefore
+  dropped **whole**, never filtered per parameter — an allow-list of safe
+  parameters is a list somebody has to maintain against every future endpoint.
+- Click breadcrumbs serialize `aria-label`, `title`, `name` and `alt` off the
+  clicked element (`_htmlElementAsString` in @sentry/core), and `ExpensesTab`
+  puts the expense *description* in an aria-label. Attribute **values** are
+  stripped from the selector; the structure stays.
+- Server side, `include_local_variables=False` is the single most load-bearing
+  option in the file: one frame up from any database error sits `DATABASE_URL`
+  with the pooler password, and inside `auth.py` the caller's raw bearer token.
+  `max_request_body_size="never"` for the same reason — an expense POST *is* the
+  ledger. Headers are **allow-listed, not deny-listed**: `send_default_pii=False`
+  covers `Authorization` and `Cookie`, but the SDK has never heard of
+  `X-Health-Key`.
+
+Identifiers are matched by **shape** — every id in `models.py` is a UUID — rather
+than by route list, so a new route is covered without anyone remembering to come
+back. That is a deliberate divergence from `insightsRoute` (src/App.tsx) and
+`fold_route` (routers/reports.py), which fold *named* patterns because their
+buckets have to line up with each other; nothing in monitoring has to line up
+with anything, so it can afford the stricter rule.
+
+The browser SDK costs **~29 kB gzip on the first-paint chunk** (measured: entry
+went 20.8 → 49.9 kB gzip) and is deliberately **not** in the vendor allow-list.
+Source maps are generated only when `SENTRY_AUTH_TOKEN` is set, emitted
+`hidden`, and deleted from `dist/` after upload — a served `.map` is the whole
+bundle, readable, on the origin holding the Supabase session.
+
+`connect-src` in `vercel.json` carries the org's ingest host pinned exactly
+(`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would
+admit every other tenant on the platform. Asserted in `tests/test_vercel_config.py`,
+which also refuses any wildcard host in `connect-src`.
+
+Sentry is a **processor**: adding it was a `src/lib/legal.ts` change with a
+`LEGAL_UPDATED` bump. It receives the reporting IP and stores a **city-level
+location** derived from it (observed, not assumed — `user.geo` on the first
+event), which is why the policy discloses coarse location rather than claiming
+anonymity. Turning on *Prevent Storing of IP Addresses* in the project's
+Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 
 ### API contracts worth knowing
 

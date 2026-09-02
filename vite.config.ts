@@ -2,9 +2,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+
+// Source maps are uploaded only where there is a token to upload them with, so
+// `npm run build` on a laptop and the build CI runs behave identically to the
+// old one. The token is a Vercel production env var and never reaches the repo.
+const uploadSourceMaps = Boolean(process.env.SENTRY_AUTH_TOKEN);
 
 export default defineConfig({
   build: {
+    // "hidden", not true: the maps are generated for the upload below and then
+    // deleted from dist/, and the omitted `//# sourceMappingURL=` comment means
+    // no browser ever asks for one in the window between. Minified sources plus
+    // a public map is the whole bundle, readable — this app's origin is the one
+    // holding the Supabase session, so that is not a trade worth making for
+    // debuggability nobody but Sentry needs.
+    sourcemap: uploadSourceMaps ? "hidden" : false,
     rollupOptions: {
       output: {
         // Rolldown (vite 8) takes chunk groups here rather than the object
@@ -71,5 +84,30 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
       },
     }),
+    // Last in the list, and only when it has somewhere to upload to. The plugin
+    // stamps a debug id into each bundle and its map, which is what lets Sentry
+    // pair them later — so it has to see the final output, after the PWA plugin
+    // has finished rewriting it.
+    //
+    // `url` is not optional here: the org lives in Sentry's EU region, and the
+    // plugin defaults to the US ingest (sentry.io), where the upload would
+    // authenticate against the wrong tenant and fail.
+    ...(uploadSourceMaps
+      ? [
+          sentryVitePlugin({
+            org: "split-dec",
+            project: "splitdec-frontend",
+            url: "https://de.sentry.io",
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            telemetry: false,
+            sourcemaps: {
+              // Nothing that was uploaded may also be deployed. Without this
+              // the maps sit in dist/ and Vercel serves them as static files,
+              // which is the same disclosure as shipping unminified source.
+              filesToDeleteAfterUpload: ["dist/**/*.map"],
+            },
+          }),
+        ]
+      : []),
   ],
 });

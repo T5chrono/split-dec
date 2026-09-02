@@ -20,3 +20,6 @@ pydantic>=2.11.7
 PyJWT[crypto]>=2.10.1
 uvicorn[standard]>=0.35.0
 python-dotenv>=1.1.1
+# The [fastapi] extra pulls nothing new — starlette and fastapi are already
+# here; it exists so the resolver fails loudly if that ever stops being true.
+sentry-sdk[fastapi]>=2.20

@@ -10,6 +10,8 @@ anyio==4.14.2
     #   watchfiles
 asyncpg==0.31.0
     # via -r requirements.in
+certifi==2026.7.22
+    # via sentry-sdk
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
 click==8.4.2
@@ -19,7 +21,9 @@ colorama==0.4.6 ; sys_platform == 'win32'
 cryptography==50.0.0
     # via pyjwt
 fastapi==0.141.1
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   sentry-sdk
 greenlet==3.5.5
     # via sqlalchemy
 h11==0.16.0
@@ -44,6 +48,8 @@ python-dotenv==1.2.3
     #   uvicorn
 pyyaml==6.0.3
     # via uvicorn
+sentry-sdk==2.68.1
+    # via -r requirements.in
 sqlalchemy==2.0.52
     # via -r requirements.in
 starlette==1.6.0
@@ -61,6 +67,8 @@ typing-inspection==0.4.4
     # via
     #   fastapi
     #   pydantic
+urllib3==2.7.0
+    # via sentry-sdk
 uvicorn==0.52.4
     # via -r requirements.in
 uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
