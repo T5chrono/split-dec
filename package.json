@@ -44,6 +44,7 @@
     "vitest": "^4.1.10"
   },
   "allowScripts": {
-    "esbuild@0.25.12": true
+    "esbuild@0.25.12": true,
+    "@sentry/cli@2.58.6": false
   }
 }
