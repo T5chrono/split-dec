@@ -134,7 +134,12 @@ def _scrub_breadcrumbs(values: list[Any]) -> list[Any]:
         crumb = dict(crumb)
         message = crumb.get("message")
         if isinstance(message, str):
-            crumb["message"] = redact_ids(message)
+            # `redact_message`, not `redact_ids`: this is the same formatted
+            # log text that reaches `logentry` when the level is ERROR, just
+            # arriving by the quieter door. Holding the two paths to different
+            # standards is how a future `logger.warning(f"... {email}")` gets
+            # through a module whose whole claim is that nothing does.
+            crumb["message"] = redact_message(message)
         data = crumb.get("data")
         if isinstance(data, dict) and isinstance(data.get("url"), str):
             crumb["data"] = {**data, "url": redact_url(data["url"])}

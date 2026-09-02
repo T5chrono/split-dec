@@ -105,9 +105,18 @@ export function redactMessage(text: string): string {
 export function scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb {
   const scrubbed: Breadcrumb = { ...crumb };
 
-  // ui.click / ui.input: the message is the serialized element path.
-  if (scrubbed.category?.startsWith("ui.") && typeof scrubbed.message === "string") {
-    scrubbed.message = redactSelector(scrubbed.message);
+  // Every breadcrumb's message, not just the `ui.*` ones. Those carry a
+  // serialized element path and need the attribute values stripped first, but
+  // stopping there left every other category untouched — and `console` is a
+  // default integration, so `ErrorBoundary`'s own
+  // `console.error("Unhandled error", error, ...)` put the error's text here
+  // verbatim. That is the same string `scrubEvent` redacts out of
+  // `event.exception`, arriving by a door that was not being watched.
+  if (typeof scrubbed.message === "string") {
+    const withoutAttributeValues = scrubbed.category?.startsWith("ui.")
+      ? redactSelector(scrubbed.message)
+      : scrubbed.message;
+    scrubbed.message = redactMessage(withoutAttributeValues);
   }
 
   // fetch/xhr carry `url`; navigation carries `from` and `to`.

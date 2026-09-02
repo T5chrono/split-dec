@@ -296,9 +296,15 @@ precisely what the rest of this codebase works to keep out of logs:
   `DETAIL: Key (email)=(someone@example.com) already exists`. Same for
   `logentry`: `LoggingIntegration` is on by default and `integrations=[...]`
   *adds* to the defaults rather than replacing them, so any future
-  `logger.error()` becomes an event body. Both get UUID **and** email
-  redaction; stack frames are left alone, because they name our own files and
-  `include_local_variables=False` means they carry no values.
+  `logger.error()` becomes an event body. **Breadcrumb text is held to the same
+  standard**, and that is the point rather than an extra: `logger.warning`
+  becomes a breadcrumb where `logger.error` becomes an event body, and in the
+  browser the default `console` integration puts `ErrorBoundary`'s own
+  `console.error("Unhandled error", …)` there — so scrubbing only the loud door
+  let the *level of a log call* decide whether an address shipped. All of them
+  get UUID **and** email redaction; stack frames are left alone, because they
+  name our own files and `include_local_variables=False` means they carry no
+  values.
 
 Identifiers are matched by **shape** — every id in `models.py` is a UUID — rather
 than by route list, so a new route is covered without anyone remembering to come

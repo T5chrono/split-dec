@@ -113,6 +113,28 @@ describe("scrubBreadcrumb", () => {
     expect(crumb.data).toEqual({ from: "/", to: "/groups/[id]" });
   });
 
+  it("redacts console breadcrumbs, not just ui ones", () => {
+    // `console` is a default integration and ErrorBoundary logs the caught
+    // error, so this is the same text scrubEvent removes from event.exception
+    // arriving by another route.
+    const crumb = scrubBreadcrumb({
+      category: "console",
+      level: "error",
+      message: `Unhandled error: group ${GROUP_ID} has no member someone@example.com`,
+    });
+    expect(crumb.message).toBe("Unhandled error: group [id] has no member [email]");
+  });
+
+  it("strips attribute values and identifiers from a ui breadcrumb", () => {
+    const crumb = scrubBreadcrumb({
+      category: "ui.click",
+      message: `a[href="/groups/${GROUP_ID}"]`,
+    });
+    // Both passes run: the value goes with the attribute, and nothing that
+    // survives the first pass carries an identifier out.
+    expect(crumb.message).toBe("a[href]");
+  });
+
   it("does not mutate the breadcrumb it was given", () => {
     const original: Breadcrumb = { category: "fetch", data: { url: `/groups/${GROUP_ID}` } };
     scrubBreadcrumb(original);

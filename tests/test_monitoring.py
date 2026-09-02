@@ -183,6 +183,21 @@ class TestScrubMessages:
         event = {"message": f"group {GROUP_ID} is wedged"}
         assert monitoring.scrub_event(event, {})["message"] == "group [id] is wedged"
 
+    def test_a_breadcrumb_is_held_to_the_same_standard_as_an_event(self):
+        """The quieter door to the same text.
+
+        `logger.warning` becomes a breadcrumb where `logger.error` becomes an
+        event body. Scrubbing only the loud one leaves the level of a log call
+        deciding whether an address ships.
+        """
+        event = {
+            "breadcrumbs": {
+                "values": [{"type": "log", "message": "invite to someone@example.com failed"}]
+            }
+        }
+        scrubbed = monitoring.scrub_event(event, {})
+        assert scrubbed["breadcrumbs"]["values"][0]["message"] == "invite to [email] failed"
+
 
 def test_init_is_a_no_op_without_a_dsn(monkeypatch):
     """The absence of a DSN is the only off switch, so it has to hold.
