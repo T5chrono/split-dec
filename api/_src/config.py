@@ -21,3 +21,15 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://kmlheefyzhhegxmtaovq.supabase.
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 DEV_FRONTEND_ORIGIN = os.getenv("DEV_FRONTEND_ORIGIN", "http://localhost:5173")
+
+# Error reporting for the API function (see monitoring.py). Unset means the SDK
+# is never initialised, which is what keeps local uvicorn runs and the test
+# suite out of the issue stream — there is no second switch to forget.
+# Unlike the browser DSN this one is not public: it is only in Vercel's env.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+
+# Vercel sets these on every deployment. `VERCEL_ENV` is production / preview /
+# development, which is a finer distinction than ENV makes and the one Sentry
+# buckets by; the commit SHA is what pairs an event with the code that threw.
+SENTRY_ENVIRONMENT = os.getenv("VERCEL_ENV", ENV)
+SENTRY_RELEASE = os.getenv("VERCEL_GIT_COMMIT_SHA", "")

@@ -225,6 +225,17 @@ def test_csp_allows_exactly_the_origins_the_app_uses():
     # Same-origin covers /api/* and the /_vercel measurement beacons.
     assert "'self'" in directives["connect-src"]
 
+    # Sentry's browser SDK posts envelopes to the org's own ingest subdomain
+    # (src/lib/monitoring.ts). Pinned to that host for the same reason Supabase
+    # is pinned to the project: `*.ingest.sentry.io` would allow every other
+    # tenant on the platform, which is the whole internet as far as this app is
+    # concerned. `de.` is load-bearing too — the org is in Sentry's EU region,
+    # which is what src/lib/legal.ts tells people.
+    assert "https://o4512011830886400.ingest.de.sentry.io" in directives["connect-src"]
+    assert not any(
+        src.startswith("https://*.") for src in directives["connect-src"]
+    ), "connect-src has a wildcard host; pin the exact origin"
+
     # Google avatars, mirroring src/lib/avatarUrl.ts's allow-list. If a second
     # OAuth provider is ever added, both places need its host.
     assert any("googleusercontent.com" in src for src in directives["img-src"])

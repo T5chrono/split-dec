@@ -15,7 +15,7 @@
 import type { Lang } from "./i18n";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-08-27";
+export const LEGAL_UPDATED = "2026-09-01";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -55,6 +55,7 @@ const PRIVACY_EN: LegalDoc = {
           "**Technical data** — our hosting providers keep short-lived server logs (IP address, time, requested address, browser user-agent) so the service can be operated and abuse investigated.",
           "**Aggregate usage measurement** — Vercel Web Analytics counts page views, so we can see which parts of SplitDec people actually use. It records the page address, the site you arrived from, and coarse device and country information. It sets no cookies, stores nothing on your device, and cannot follow you to other websites or link a visit to your account.",
           "**Performance measurement** — Vercel Speed Insights records how quickly pages load and respond on your device (the Core Web Vitals). It is told the route pattern rather than the exact address, so the identifier of a group you open is never part of it. Like the measurement above, it sets no cookies and identifies nobody.",
+          "**Error reports** — when something in SplitDec fails, a diagnostic report goes to Sentry so the fault can be found and fixed. It describes the failure: the error message, where in our code it happened, your browser and operating system, and a short trail of the steps that led there. What you record in the app is removed before the report is sent — identifiers of groups, expenses and settlements are replaced with a placeholder, web addresses are cut back to the page they name, and the labels of the buttons you pressed are stripped, because on this screen a button can be named after your expense. The report describes the fault, not you: no name, no email address, no account identifier. As with any service we send data to, Sentry sees the network address the report was sent from, and records the city and country it places that address in — never a precise location. It sets no cookies.",
           "**Settings kept on your device** — your language, your light/dark preference and your sign-in session live in your browser's local storage, not on our servers.",
         ],
         "SplitDec never asks for and never stores card numbers, bank details, your location or your contacts. **The app does not move money.** It records who owes whom; the actual transfers happen outside SplitDec, however you normally pay each other.",
@@ -69,6 +70,7 @@ const PRIVACY_EN: LegalDoc = {
           "**Sending you service email** — sign-up confirmation, password resets and group invitations. Also part of that agreement (Art. 6(1)(b)).",
           "**Keeping SplitDec safe** — verifying sign-ins, limiting how many invitations one account can send, investigating abuse. Our legitimate interest in a service that is not used to spam or attack people (Art. 6(1)(f)).",
           "**Understanding how SplitDec is used and how well it runs** — counting page views in aggregate, and measuring loading speed, so we know what is worth improving and can tell when a change made the app slower. Our legitimate interest in developing the service (Art. 6(1)(f)); neither uses cookies and neither identifies anybody.",
+          "**Finding and fixing faults** — collecting a diagnostic report when something in the app fails, so a bug that broke SplitDec for you can be reproduced and repaired rather than guessed at. Our legitimate interest in a service that works (Art. 6(1)(f)).",
           "**Meeting legal obligations**, where one applies to us (Art. 6(1)(c)).",
         ],
         "We do not profile you, do not advertise to you, do not make automated decisions about you with legal effects, and do not sell or rent personal data to anyone.",
@@ -82,6 +84,7 @@ const PRIVACY_EN: LegalDoc = {
           "**Supabase** — database and sign-in, hosted in the EU (Paris region). [Privacy policy](https://supabase.com/privacy).",
           "**Vercel** — hosting for the website and the API, with the API function pinned to the EU (Paris region), and the usage and performance measurement described above. [Privacy policy](https://vercel.com/legal/privacy-policy).",
           "**Resend** — delivery of the emails listed above, EU region (Ireland). [Privacy policy](https://resend.com/legal/privacy-policy).",
+          "**Sentry** — collection of the error reports described above, EU region (Germany). [Privacy policy](https://sentry.io/privacy/).",
           "**Google** — only if you choose to sign in with Google. Google confirms who you are and passes us your name, email address and profile-picture address. Your use of Google is governed by [Google's privacy policy](https://policies.google.com/privacy).",
         ],
         "Your account and everything you record is stored in the European Union. Where a provider's own support or infrastructure reaches outside the EEA, that transfer relies on the safeguards in their data-processing terms, such as the European Commission's standard contractual clauses.",
@@ -176,6 +179,7 @@ const PRIVACY_PL: LegalDoc = {
           "**Dane techniczne** — nasi dostawcy hostingu przechowują krótkotrwałe logi serwera (adres IP, czas, wywołany adres, identyfikator przeglądarki), aby można było prowadzić usługę i badać nadużycia.",
           "**Zbiorcze pomiary użycia** — Vercel Web Analytics zlicza odsłony stron, żebyśmy wiedzieli, z których części SplitDec faktycznie korzystacie. Zapisuje adres strony, witrynę, z której przyszedłeś(-łaś), oraz ogólne informacje o urządzeniu i kraju. Nie ustawia plików cookie, nic nie zapisuje na Twoim urządzeniu i nie może śledzić Cię na innych stronach ani powiązać wizyty z Twoim kontem.",
           "**Pomiary wydajności** — Vercel Speed Insights zapisuje, jak szybko strony wczytują się i reagują na Twoim urządzeniu (wskaźniki Core Web Vitals). Otrzymuje wzorzec ścieżki, a nie dokładny adres, więc identyfikator otwieranej grupy nigdy do niego nie trafia. Podobnie jak pomiary powyżej nie ustawia plików cookie i nikogo nie identyfikuje.",
+          "**Raporty o błędach** — gdy coś w SplitDec zawiedzie, do Sentry trafia raport diagnostyczny, żeby usterkę dało się znaleźć i naprawić. Opisuje awarię: komunikat błędu, miejsce w naszym kodzie, Twoją przeglądarkę i system operacyjny oraz krótki ślad kroków, które do niej doprowadziły. To, co zapisujesz w aplikacji, jest z raportu usuwane jeszcze przed wysłaniem — identyfikatory grup, wydatków i rozliczeń zastępujemy symbolem zastępczym, adresy internetowe skracamy do samej strony, a etykiety naciśniętych przycisków usuwamy, bo na tym ekranie przycisk bywa nazwany Twoim wydatkiem. Raport opisuje usterkę, a nie Ciebie: bez imienia, bez adresu e-mail, bez identyfikatora konta. Jak każda usługa, do której wysyłamy dane, Sentry widzi adres sieciowy, z którego raport został wysłany, i zapisuje miasto oraz kraj, do których ten adres przypisuje — nigdy dokładnej lokalizacji. Nie ustawia plików cookie.",
           "**Ustawienia zapisane na Twoim urządzeniu** — język, tryb jasny/ciemny i sesja logowania są przechowywane w pamięci lokalnej przeglądarki, a nie na naszych serwerach.",
         ],
         "SplitDec nigdy nie prosi o numery kart, dane bankowe, Twoją lokalizację ani kontakty i ich nie przechowuje. **Aplikacja nie przelewa pieniędzy.** Zapisuje, kto komu ile jest winien; same przelewy odbywają się poza SplitDec, tak jak zwykle płacicie sobie nawzajem.",
@@ -190,6 +194,7 @@ const PRIVACY_PL: LegalDoc = {
           "**Wysyłanie e-maili serwisowych** — potwierdzenie rejestracji, reset hasła i zaproszenia do grup. Również element tej umowy (art. 6 ust. 1 lit. b).",
           "**Bezpieczeństwo SplitDec** — weryfikacja logowań, ograniczanie liczby zaproszeń wysyłanych z jednego konta, badanie nadużyć. Nasz prawnie uzasadniony interes, aby usługa nie służyła do spamu ani ataków (art. 6 ust. 1 lit. f).",
           "**Zrozumienie, jak używany jest SplitDec i jak szybko działa** — zbiorcze zliczanie odsłon oraz pomiary szybkości wczytywania, żeby wiedzieć, co warto poprawić i rozpoznać, kiedy zmiana spowolniła aplikację. Nasz prawnie uzasadniony interes w rozwijaniu usługi (art. 6 ust. 1 lit. f); żadne z nich nie korzysta z plików cookie ani nikogo nie identyfikuje.",
+          "**Znajdowanie i naprawianie usterek** — zbieranie raportu diagnostycznego, gdy coś w aplikacji zawiedzie, żeby błąd, który zepsuł Ci SplitDec, dało się odtworzyć i naprawić, a nie zgadywać. Nasz prawnie uzasadniony interes w tym, żeby usługa działała (art. 6 ust. 1 lit. f).",
           "**Wypełnianie obowiązków prawnych**, jeśli nas dotyczą (art. 6 ust. 1 lit. c).",
         ],
         "Nie profilujemy Cię, nie wyświetlamy Ci reklam, nie podejmujemy wobec Ciebie zautomatyzowanych decyzji wywołujących skutki prawne i nikomu nie sprzedajemy ani nie wynajmujemy danych osobowych.",
@@ -203,6 +208,7 @@ const PRIVACY_PL: LegalDoc = {
           "**Supabase** — baza danych i logowanie, hosting w UE (region Paryż). [Polityka prywatności](https://supabase.com/privacy).",
           "**Vercel** — hosting strony i API, z funkcją API przypiętą do UE (region Paryż), oraz opisane wyżej pomiary użycia i wydajności. [Polityka prywatności](https://vercel.com/legal/privacy-policy).",
           "**Resend** — dostarczanie wymienionych wyżej e-maili, region UE (Irlandia). [Polityka prywatności](https://resend.com/legal/privacy-policy).",
+          "**Sentry** — zbieranie opisanych wyżej raportów o błędach, region UE (Niemcy). [Polityka prywatności](https://sentry.io/privacy/).",
           "**Google** — tylko jeśli wybierzesz logowanie przez Google. Google potwierdza Twoją tożsamość i przekazuje nam Twoje imię i nazwisko, adres e-mail oraz adres zdjęcia profilowego. Korzystanie z Google podlega [polityce prywatności Google](https://policies.google.com/privacy).",
         ],
         "Twoje konto i wszystko, co w nim zapisujesz, jest przechowywane w Unii Europejskiej. Jeżeli własne wsparcie lub infrastruktura dostawcy sięga poza EOG, taki transfer opiera się na zabezpieczeniach z jego warunków powierzenia przetwarzania, na przykład na standardowych klauzulach umownych Komisji Europejskiej.",

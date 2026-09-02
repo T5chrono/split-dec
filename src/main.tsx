@@ -7,6 +7,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./hooks/useAuth";
 import { I18nProvider } from "./lib/i18n";
 import { enforceCanonicalOrigin } from "./lib/canonicalHost";
+import { initMonitoring } from "./lib/monitoring";
 import "./index.css";
 
 // Before anything mounts: on a non-canonical origin the API is a cross-origin
@@ -23,6 +24,12 @@ const queryClient = new QueryClient({
 });
 
 if (!leaving) {
+  // Inside the guard, for the reason the measurement products sit in App.tsx:
+  // nothing may report from an origin we are already navigating away from.
+  // Ahead of the render, unlike them: a crash reporter installed after mount
+  // misses the mount that crashes.
+  initMonitoring();
+
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

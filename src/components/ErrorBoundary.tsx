@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useI18n } from "../lib/i18n";
+import { reportError } from "../lib/monitoring";
 
 /** Vite emits a rejected dynamic import when a chunk 404s. The wording differs
  *  per engine, so match on all three rather than one browser's phrasing. */
@@ -80,6 +81,12 @@ export default class ErrorBoundary extends Component<
       window.location.reload();
       return;
     }
+    // Reported from here rather than from the top of the method, so the
+    // reload path above stays silent: a chunk 404 on the first try is the
+    // ordinary cost of deploying while someone has the app open, and it
+    // heals itself. Reaching *this* line means either a real render failure
+    // or a chunk that is still missing after a reload — a broken deploy.
+    reportError(error, info.componentStack);
     // The console is the record of last resort here: swallowing a render
     // failure silently would be worse than a noisy log.
     console.error("Unhandled error", error, info.componentStack);

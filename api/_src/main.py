@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import DEV_FRONTEND_ORIGIN, ENV
 from .db import get_db
+from .monitoring import init_monitoring
 from .routers import expenses, groups, invitations, reports, settlements, users
+
+# Before the app exists, not after: the Starlette integration patches the class,
+# so an app constructed first would never be instrumented. A no-op without a
+# DSN, which is the state in tests and under a local uvicorn.
+init_monitoring()
 
 def docs_urls(env: str) -> dict[str, str | None]:
     """Interactive API docs, and the schema that feeds them: development only.

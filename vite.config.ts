@@ -2,9 +2,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+
+// Source maps are uploaded only where there is a token to upload them with, so
+// `npm run build` on a laptop and the build CI runs behave identically to the
+// old one. The token is a Vercel production env var and never reaches the repo.
+const uploadSourceMaps = Boolean(process.env.SENTRY_AUTH_TOKEN);
 
 export default defineConfig({
   build: {
+    // "hidden", not true: the maps are generated for the upload below and then
+    // deleted from dist/, and the omitted `//# sourceMappingURL=` comment means
+    // no browser ever asks for one in the window between. Minified sources plus
+    // a public map is the whole bundle, readable — this app's origin is the one
+    // holding the Supabase session, so that is not a trade worth making for
+    // debuggability nobody but Sentry needs.
+    sourcemap: uploadSourceMaps ? "hidden" : false,
     rollupOptions: {
       output: {
         // Rolldown (vite 8) takes chunk groups here rather than the object
@@ -69,7 +82,57 @@ export default defineConfig({
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // Workbox mirrors `build.sourcemap` for the service worker it
+        // generates, and it does that in `closeBundle` — *after* the Sentry
+        // plugin's `writeBundle` has already swept dist/ for maps. So with
+        // source maps switched on, sw.js.map outlived the sweep and shipped.
+        // Nothing here is worth mapping (generated glue plus the workbox
+        // runtime), so the fix is not to emit it rather than to delete it
+        // later and hope the ordering never changes again.
+        sourcemap: false,
       },
     }),
+    // Last in the list, and only when it has somewhere to upload to. The plugin
+    // stamps a debug id into each bundle and its map, which is what lets Sentry
+    // pair them later — so it has to see the final output, after the PWA plugin
+    // has finished rewriting it.
+    //
+    // `url` is not optional here: the org lives in Sentry's EU region, and the
+    // plugin defaults to the US ingest (sentry.io), where the upload would
+    // authenticate against the wrong tenant and fail.
+    ...(uploadSourceMaps
+      ? [
+          sentryVitePlugin({
+            org: "split-dec",
+            project: "splitdec-frontend",
+            url: "https://de.sentry.io",
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            telemetry: false,
+            // Without this the plugin *throws* on any upload failure and takes
+            // the build down with it (its own README: "the plugin will simply
+            // throw an error, thereby stopping the bundling process"). That
+            // inverts what matters: an expired token, a revoked scope or a
+            // Sentry outage would block a deploy of the app itself — and a
+            // deploy is how this app recovers from its own incidents. Source
+            // maps are a debugging convenience and must never hold the
+            // release hostage, so failure is loud in the build log and
+            // otherwise survivable. The cost is that a silently missing
+            // upload only shows up as minified frames on the next crash.
+            errorHandler: (err) => {
+              console.warn(
+                "[sentry] source map upload failed; shipping without readable " +
+                  "stack traces for this release:",
+                err.message,
+              );
+            },
+            sourcemaps: {
+              // Nothing that was uploaded may also be deployed. Without this
+              // the maps sit in dist/ and Vercel serves them as static files,
+              // which is the same disclosure as shipping unminified source.
+              filesToDeleteAfterUpload: ["dist/**/*.map"],
+            },
+          }),
+        ]
+      : []),
   ],
 });
