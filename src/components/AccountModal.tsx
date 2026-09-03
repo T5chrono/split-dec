@@ -8,6 +8,7 @@ import { safeAvatarUrl } from "../lib/avatarUrl";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import LegalLinks from "./LegalLinks";
+import SupportLink from "./SupportLink";
 
 export default function AccountModal({ onClose }: { onClose: () => void }) {
   const { session, signOut } = useAuth();
@@ -56,6 +57,12 @@ export default function AccountModal({ onClose }: { onClose: () => void }) {
           >
             <LogOut className="h-4 w-4" /> {t("signOut")}
           </button>
+
+          {/* Above the danger zone on purpose: immediately after "delete
+              account" is not where an ask for money belongs. */}
+          <div className="flex justify-center">
+            <SupportLink />
+          </div>
 
           <div className="rounded-lg border border-red-200 p-3 dark:border-red-900">
             <div className="mb-2 text-sm font-semibold text-red-600 dark:text-red-400">

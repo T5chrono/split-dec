@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import LandingPage from "./LandingPage";
+import { SUPPORT_URL } from "../lib/support";
 import { renderWithProviders } from "../test/utils";
 
 const signInWithGoogle = vi.fn();
@@ -67,6 +68,17 @@ describe("LandingPage", () => {
     await user.click(screen.getByRole("button", { name: "Sign in with email" }));
     expect(screen.getByText("login screen")).toBeInTheDocument();
     expect(signInWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("carries the support link in the footer", () => {
+    renderPage();
+
+    // By destination rather than by label: which variant of the button the
+    // footer carries is a design decision, that it links to the profile is not.
+    const link = screen
+      .getAllByRole("link")
+      .find((a) => a.getAttribute("href") === SUPPORT_URL);
+    expect(link).toBeDefined();
   });
 
   it("switches the whole page to Polish", async () => {

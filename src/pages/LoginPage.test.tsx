@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AuthError } from "@supabase/supabase-js";
 import LoginPage from "./LoginPage";
+import { SUPPORT_URL } from "../lib/support";
 import { renderWithProviders } from "../test/utils";
 
 const signInWithGoogle = vi.fn();
@@ -45,6 +46,18 @@ beforeEach(() => {
 });
 
 describe("LoginPage", () => {
+  it("never asks for money here", () => {
+    // This screen is where an invitation deep link lands a signed-out
+    // visitor. Asking someone to buy a coffee before they can even join the
+    // group they were invited to is the wrong first impression, so the
+    // support link stays off it — unlike the legal links beside it.
+    renderPage();
+
+    const links = screen.queryAllByRole("link");
+    expect(links.some((a) => a.getAttribute("href") === SUPPORT_URL)).toBe(false);
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toBeInTheDocument();
+  });
+
   it("shows the sign-in form with Google and email options", () => {
     renderPage();
     expect(screen.getByRole("button", { name: /continue with google/i })).toBeInTheDocument();

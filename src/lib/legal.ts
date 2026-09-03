@@ -13,9 +13,10 @@
  */
 
 import type { Lang } from "./i18n";
+import { SUPPORT_URL } from "./support";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-09-01";
+export const LEGAL_UPDATED = "2026-09-03";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -37,6 +38,10 @@ export interface LegalDoc {
 }
 
 const MAILTO = `[${LEGAL_CONTACT_EMAIL}](mailto:${LEGAL_CONTACT_EMAIL})`;
+
+/** Built from the same constant the link in the app uses, so the documents
+ *  cannot name a profile the button does not point at. */
+const SUPPORT_LINK = `[buycoffee.to](${SUPPORT_URL})`;
 
 const PRIVACY_EN: LegalDoc = {
   title: "Privacy Policy",
@@ -88,6 +93,7 @@ const PRIVACY_EN: LegalDoc = {
           "**Google** — only if you choose to sign in with Google. Google confirms who you are and passes us your name, email address and profile-picture address. Your use of Google is governed by [Google's privacy policy](https://policies.google.com/privacy).",
         ],
         "Your account and everything you record is stored in the European Union. Where a provider's own support or infrastructure reaches outside the EEA, that transfer relies on the safeguards in their data-processing terms, such as the European Commission's standard contractual clauses.",
+        `The voluntary support link is **not** one of these. Choosing to buy us a coffee takes you to ${SUPPORT_LINK}, a separate company that decides for itself what it collects — its pages carry their own analytics, advertising and session-recording tools, and their own cookie banner. Nothing about your SplitDec account goes with you, and the only thing the link passes on is that you arrived from split-dec.app — never which page you were on or which group you had open. What happens there is governed by [their privacy policy](https://buycoffee.to/privacy-policy).`,
       ],
     },
     {
@@ -212,6 +218,7 @@ const PRIVACY_PL: LegalDoc = {
           "**Google** — tylko jeśli wybierzesz logowanie przez Google. Google potwierdza Twoją tożsamość i przekazuje nam Twoje imię i nazwisko, adres e-mail oraz adres zdjęcia profilowego. Korzystanie z Google podlega [polityce prywatności Google](https://policies.google.com/privacy).",
         ],
         "Twoje konto i wszystko, co w nim zapisujesz, jest przechowywane w Unii Europejskiej. Jeżeli własne wsparcie lub infrastruktura dostawcy sięga poza EOG, taki transfer opiera się na zabezpieczeniach z jego warunków powierzenia przetwarzania, na przykład na standardowych klauzulach umownych Komisji Europejskiej.",
+        `Link do dobrowolnego wsparcia **nie** jest jednym z nich. Wybierając postawienie nam kawy, przechodzisz do serwisu ${SUPPORT_LINK} — odrębnej firmy, która sama decyduje, co zbiera; jej strony mają własne narzędzia analityczne, reklamowe i nagrywające sesję oraz własny baner zgody na pliki cookie. Nic z Twojego konta w SplitDecu tam nie wędruje, a jedyne, co przekazuje link, to informacja, że przychodzisz ze split-dec.app — nigdy to, na której stronie jesteś ani jaką grupę masz otwartą. To, co dzieje się tam, podlega [ich polityce prywatności](https://buycoffee.to/privacy-policy).`,
       ],
     },
     {
@@ -316,7 +323,7 @@ const TERMS_EN: LegalDoc = {
       heading: "What SplitDec costs",
       blocks: [
         "SplitDec is free to use. It has no ads and no paid tier.",
-        "If a voluntary support option is offered (for example a “buy me a coffee” link), contributions are exactly that — voluntary. They buy no extra features, no guarantees and no priority, they are not refundable, and they are handled entirely by the payment provider under its own terms. We never receive your card details.",
+        `There is a voluntary support link — a “buy me a coffee” profile we keep at ${SUPPORT_LINK}. Contributions there are exactly that: voluntary. They buy no extra features, no guarantees and no priority, they are not refundable, and they are handled entirely by the payment provider under its own terms. We never receive your card details.`,
       ],
     },
     {
@@ -416,7 +423,7 @@ const TERMS_PL: LegalDoc = {
       heading: "Ile SplitDec kosztuje",
       blocks: [
         "Korzystanie ze SplitDec jest bezpłatne. Nie ma w nim reklam ani wersji płatnej.",
-        "Jeśli udostępniona zostanie opcja dobrowolnego wsparcia (na przykład link „postaw kawę”), wpłaty są właśnie takie — dobrowolne. Nie dają dodatkowych funkcji, gwarancji ani pierwszeństwa, nie podlegają zwrotowi i są w całości obsługiwane przez dostawcę płatności na jego warunkach. Nigdy nie otrzymujemy danych Twojej karty.",
+        `Dostępny jest link do dobrowolnego wsparcia — profil „postaw kawę”, który prowadzimy w serwisie ${SUPPORT_LINK}. Wpłaty są właśnie takie: dobrowolne. Nie dają dodatkowych funkcji, gwarancji ani pierwszeństwa, nie podlegają zwrotowi i są w całości obsługiwane przez dostawcę płatności na jego warunkach. Nigdy nie otrzymujemy danych Twojej karty.`,
       ],
     },
     {

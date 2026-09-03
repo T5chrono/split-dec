@@ -117,6 +117,9 @@ const dict = {
     termsOfService: "Terms of Service",
     lastUpdated: "Last updated:",
     backToApp: "Back to SplitDec",
+    // voluntary support (buycoffee.to) — see lib/support.ts
+    supportTitle: "Buy SplitDec a coffee on buycoffee.to (opens in a new tab)",
+    supportCta: "Buy me a coffee",
     // not found
     notFoundTitle: "Page not found",
     notFoundBody:
@@ -346,6 +349,8 @@ const dict = {
     termsOfService: "Regulamin",
     lastUpdated: "Ostatnia aktualizacja:",
     backToApp: "Powrót do SplitDec",
+    supportTitle: "Postaw kawę dla SplitDec na buycoffee.to (otwiera nową kartę)",
+    supportCta: "Postaw kawę",
     notFoundTitle: "Nie znaleziono strony",
     notFoundBody:
       "Ten link donikąd nie prowadzi. Grupa mogła zostać usunięta albo adres zawiera literówkę.",

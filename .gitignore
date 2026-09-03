@@ -27,3 +27,10 @@ SplitDec DesignSystem/
 # unmonitored. Kept on the maintainer's machine instead.
 GO-LIVE.md
 SECURITY.md
+
+# Pre-launch working material for the buycoffee.to creator profile. Same reason
+# as the two files above: the notes alongside the copy record what the app does
+# not have yet (backups, point-in-time recovery), and the repo is public.
+# Anchored to the root on purpose — an unanchored `buycoffee/` also swallows
+# public/buycoffee/, the support button's artwork, which must ship.
+/buycoffee/
