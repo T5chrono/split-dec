@@ -495,6 +495,47 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   in tests). `.env.test` holds dummy Supabase values so importing `useAuth` doesn't throw;
   tests mock `../lib/api` / `../lib/supabase` per-file.
 
+### Voluntary support link (buycoffee.to)
+
+The app is funded by voluntary payments rather than ads or a paid tier. `SupportLink`
+carries that link in the landing footer and in `AccountModal`; the destination lives in
+**one constant** (`src/lib/support.ts`), because `legal.ts` names it too and a second copy
+is a second thing to forget.
+
+**Nothing is fetched from buycoffee.to.** The embed code their panel hands out hotlinks its
+artwork from their server, which would make every render of the landing footer a request
+carrying the visitor's IP and visit time to a third party — undisclosed view tracking, the
+same reason the auth emails draw their logo in HTML instead of linking one. Their JS widget
+would be worse: a buycoffee.to profile page loads Google Tag Manager and GA4, a Facebook
+pixel, Hotjar, Microsoft Clarity **session recording** and DoubleClick remarketing behind a
+Cookiebot banner, none of which may execute on the origin holding the Supabase session, and
+all of which would falsify the Privacy Policy's claim that there is no tracking pixel here.
+
+So the button is drawn here and only the **cup** is theirs — used unaltered, because they
+publish it as a monochrome file in black and in white, and repainting someone else's mark is
+the one thing their materials do not license. Which file shows follows the button's own text
+colour, so both themes work off one rule. Their own green (`#00A862` / `#1E3932`) is not our
+teal, and their service rules require no particular button, which is what makes drawing one
+allowed at all.
+
+Consequences worth keeping:
+
+- **`img-src 'self'` is untouched, and that is the test.** If a change here starts needing
+  `vercel.json` or `tests/test_vercel_config.py`, someone has reverted to the embed.
+- **The link stays off `LoginPage`** — that is where an invitation deep link lands a
+  signed-out visitor, and asking for money before someone can join the group they were
+  invited to is the wrong first impression. A test asserts its absence; `LegalLinks` sits in
+  all three places, `SupportLink` in two, which is why they are separate components.
+- In `AccountModal` it goes **above** the danger zone, never under "delete account".
+- The Terms clause "What SplitDec costs" names the provider and the Privacy Policy says the
+  link leaves for a company with its own analytics, advertising and session recording, and
+  that only the origin travels (thanks to `Referrer-Policy: strict-origin-when-cross-origin`) —
+  never the page or the group. Changing any of that is a `LEGAL_UPDATED` bump.
+- `.gitignore` carries **`/buycoffee/`, root-anchored**. Unanchored it also swallows
+  `public/buycoffee/` and the artwork 404s in production. The ignored directory is the local
+  working material for the profile itself (copy, cover art, decision notes), untracked for
+  the same reason as `GO-LIVE.md`.
+
 ### Database migrations
 
 Raw SQL files in `supabase/migrations/` are the source of truth, but they are applied to the
