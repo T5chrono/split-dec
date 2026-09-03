@@ -244,7 +244,9 @@ def test_csp_allows_exactly_the_origins_the_app_uses():
     # CSS, so 'self' alone would drop a font that is actually used.
     assert "data:" in directives["font-src"]
 
-    # The PWA service worker registers from /registerSW.js.
+    # worker-src gates /sw.js being *loaded* as a worker, whoever registers it
+    # (src/lib/serviceWorker.ts, from the app bundle); manifest-src gates the
+    # webmanifest the plugin still injects a <link> for.
     assert "'self'" in directives["worker-src"]
     assert "'self'" in directives["manifest-src"]
 
