@@ -8,6 +8,7 @@ import { AuthProvider } from "./hooks/useAuth";
 import { I18nProvider } from "./lib/i18n";
 import { enforceCanonicalOrigin } from "./lib/canonicalHost";
 import { initMonitoring } from "./lib/monitoring";
+import { registerServiceWorker } from "./lib/serviceWorker";
 import "./index.css";
 
 // Before anything mounts: on a non-canonical origin the API is a cross-origin
@@ -29,6 +30,12 @@ if (!leaving) {
   // Ahead of the render, unlike them: a crash reporter installed after mount
   // misses the mount that crashes.
   initMonitoring();
+
+  // Only the build generates a service worker, so only the build registers one
+  // — `npm run dev` has no `/sw.js` to point at. Behind the same guard as the
+  // rest: a worker registered on an origin we are navigating away from outlives
+  // the navigation.
+  if (import.meta.env.PROD) registerServiceWorker();
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

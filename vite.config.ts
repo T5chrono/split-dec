@@ -63,6 +63,14 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
+      // No injected registration script. The one the plugin emits is a bare
+      // `navigator.serviceWorker.register(...)` with no `.catch()`, so a
+      // browser that refuses to host a worker turns a graceful degradation
+      // into an unhandled rejection and a Sentry issue. `src/lib/serviceWorker.ts`
+      // does the same registration with the rejection handled, and gets to sit
+      // behind main.tsx's canonical-origin guard while it is there. Keep the URL
+      // and scope in that module in step with `filename` and `scope` here.
+      injectRegister: null,
       includeAssets: ["favicon.svg", "icons/apple-touch-icon.png"],
       manifest: {
         name: "SplitDec",
