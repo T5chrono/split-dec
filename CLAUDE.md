@@ -135,10 +135,13 @@ on `ENV=development`):
   **The in-process limits are a floor, not a ceiling**: a content-type
   check, a 16 kB body cap, ten reports per request (a `report-to` POST is
   an *array*) and a 60/min token bucket. The bucket is per warm instance,
-  and this is a serverless function with several of them — so a global
-  limit has to live at the edge (a Vercel Firewall rate-limit rule on
-  `/api/csp-report`) where one counter sees every request. Never mistake
-  the per-instance throttle for that.
+  and this is a serverless function with several of them — so it is a floor,
+  never the ceiling. **The ceiling is a Vercel Firewall rule** ("CSP report
+  flood limit": `path equals /api/csp-report`, 100 req/60s per IP, deny for
+  5m), which lives in the Vercel project rather than this repo and is
+  therefore invisible to CI — inspect it with `vercel firewall rules list`,
+  and if the in-function numbers change, change it too. Same
+  "the dashboard is what actually runs" trap as the auth email templates.
   Pointing the reports at a third-party collector would be a new processor,
   and a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump.
   A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing
