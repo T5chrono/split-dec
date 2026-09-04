@@ -19,6 +19,11 @@ PROD_DSN = (
     "@aws-0-eu-west-3.pooler.supabase.com:6543/postgres"
 )
 
+APP_DSN = (
+    f"postgresql+asyncpg://splitdec_app.{PROD_REF}:pa55w0rd"
+    "@aws-0-eu-west-3.pooler.supabase.com:6543/postgres"
+)
+
 
 class TestResolveEnv:
     """`ENV` is ours and can say anything; `VERCEL_ENV` is the platform's."""
@@ -70,6 +75,25 @@ class TestProjectRef:
         dsn = f"postgresql+asyncpg://postgres.{PROD_REF}:p@ss@host:6543/postgres"
         assert project_ref(dsn) == PROD_REF
 
+    def test_a_pooler_dsn_for_a_role_other_than_postgres(self):
+        """The app stopped connecting as `postgres` (20260904100000).
+
+        The username half of a pooler DSN is `<role>.<ref>`, and the pattern
+        used to hardcode the role. Nothing failed loudly when the role changed
+        -- project_ref simply returned None, which every caller reads as "a
+        local database, nothing to compare". The cross-check in
+        supabase_url_problem would have gone dead the moment the production
+        DSN was swapped.
+        """
+        assert project_ref(APP_DSN) == PROD_REF
+
+    def test_a_dotted_hostname_is_not_mistaken_for_a_ref(self):
+        """Why the role half of the pattern still refuses dots. Widened far
+        enough, `//db.example.com:5432` reads as role `db`, ref `example` --
+        and a ref invented out of a hostname produces a mismatch against a
+        perfectly good SUPABASE_URL."""
+        assert project_ref("postgresql+asyncpg://db.example.com:5432/splitdec") is None
+
     @pytest.mark.parametrize(
         "value",
         [
@@ -112,3 +136,26 @@ class TestSupabaseUrlProblem:
         compare, which is an absence rather than a conflict."""
         local = "postgresql+asyncpg://postgres:secret@localhost:5432/splitdec"
         assert supabase_url_problem(PROD_URL, local) is None
+
+    def test_the_app_role_dsn_matches(self):
+        """The pair production actually runs after the F9 swap."""
+        assert supabase_url_problem(PROD_URL, APP_DSN) is None
+
+    def test_a_supabase_host_with_no_readable_ref_is_refused(self):
+        """Fail closed on the shape of this check disabling itself.
+
+        A local Postgres with no ref is an absence and stays fine (above). A
+        *Supabase* host whose username the pattern cannot read is different:
+        the only reason to be here is that the DSN's shape moved, and skipping
+        the comparison is precisely the silent no-op that made the role swap
+        dangerous. The role name here contains a dot, which no role name the
+        pattern accepts may.
+        """
+        odd = (
+            f"postgresql+asyncpg://weird.role.{PROD_REF}:pa55w0rd"
+            "@aws-0-eu-west-3.pooler.supabase.com:6543/postgres"
+        )
+        assert project_ref(odd) is None  # precondition for what follows
+        problem = supabase_url_problem(PROD_URL, odd)
+        assert problem is not None
+        assert "no project ref" in problem

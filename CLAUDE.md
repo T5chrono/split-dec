@@ -200,7 +200,12 @@ on `ENV=development`):
   `SUPABASE_URL` has no default for the same reason: it is the trust anchor, and the old
   fallback to the production project meant a preview or a fork trusted our issuer while
   reading someone else's database. It is cross-checked against `DATABASE_URL`'s project
-  ref at first use, and a mismatch refuses to verify anything.
+  ref at first use, and a mismatch refuses to verify anything. The ref is read out of the
+  pooler DSN's `<role>.<ref>` username, for **any** role — it used to say `postgres`
+  literally, which meant the F9 role swap would have made `project_ref` return `None`,
+  and no ref reads as "nothing to compare". A Supabase host whose ref cannot be read is
+  now a refusal rather than a skip, because that is the shape this check takes when it
+  quietly stops working.
   Unauthenticated failures answer generically ("Authentication is unavailable") and put
   the specifics in the log — an anonymous 500 naming an environment variable hands a
   stranger the deployment's shape for nothing.
