@@ -34,6 +34,13 @@ outbound HTTPS, e.g. the JWKS fetch). Details in that module's docstring.
 There is no linter configured; `tsc` via `npm run build` is the frontend gate.
 Backend Postgres-only integration tests (`tests/test_balances_pg.py`, `tests/test_locks_pg.py`)
 skip unless `TEST_DATABASE_URL` is set — never point that at production.
+`tests/test_grants_pg.py` is the exception: it reads catalogs only, takes `AUDIT_DATABASE_URL`,
+and is *meant* for production (see Database migrations). All three connect through the
+transaction pooler, so any engine they build needs `statement_cache_size=0` /
+`prepared_statement_cache_size=0` exactly as `db.py` does — and on this machine they exit 1
+with **no output at all** unless `SSLKEYLOGFILE` is popped and `truststore` injected first,
+because the OpenSSL abort described under `npm run api` kills the process before pytest
+prints anything.
 
 ## Workflow (mandatory)
 
@@ -76,36 +83,62 @@ on `ENV=development`):
   service workers and breaks same-origin `/api` calls), pins `regions: ["cdg1"]` — the
   function is deliberately collocated with the database (Paris); moving it re-adds
   ~500ms/request — and sets the security headers (HSTS, nosniff, `frame-ancestors 'none'` +
-  `X-Frame-Options: DENY`, referrer and permissions policy), asserted by
-  `tests/test_vercel_config.py`. It also sets `installCommand: "npm install"`,
+  `X-Frame-Options: DENY`, COOP `same-origin-allow-popups`, CORP `same-origin`,
+  referrer and permissions policy), asserted by
+  `tests/test_vercel_config.py`. COOP is deliberately the `-allow-popups` variant:
+  the strict value also severs popups *we* open, and while supabase-js signs in by
+  full-page redirect today, an OAuth popup is one config change away — plus the
+  support link is a `target="_blank"`. It also sets `installCommand: "npm install"`,
   which exists to *narrow* the inferred install step: Vercel would otherwise
   also install the root `requirements.txt` into the build container, where
   nothing uses it — the build command is `tsc -b && vite build`, and the
   function gets its own install from the Python runtime afterwards. Removing
   the override restores a wasted install and, with it, the Tailwind
   source-detection problem described under Frontend patterns.
-  **The script-level CSP is staged**: the enforced
-  `Content-Security-Policy` is still framing-only, while the full policy
-  (`default-src 'self'`, hash-pinned `script-src`, `connect-src` limited to self +
-  the Supabase project + the Sentry ingest host) ships alongside it as `Content-Security-Policy-Report-Only`
-  until the flows it could break — OAuth, recovery, installed PWAs — have been
-  exercised in production. Promoting it is a one-key rename; the tests read
-  whichever header carries the policy, so they survive the flip. Two things there
-  are load-bearing and non-obvious: `font-src` must allow `data:` (Vite inlines the
+  **The script-level CSP is enforced** (`default-src 'self'`, hash-pinned
+  `script-src`, `connect-src` limited to self + the Supabase project + the
+  Sentry ingest host). It shipped staged on `Content-Security-Policy-Report-Only`
+  and was promoted once the policy had been checked against the actual build
+  rather than against intentions: `dist/index.html` carries exactly one inline
+  script (the theme flip, already hash-pinned), no inline `<style>` and no
+  `style=` attributes, every script/stylesheet/manifest is same-origin, and the
+  bundle contains no `eval`/`new Function`/`insertRule`. React's `style={{…}}`
+  and the landing page's `el.style.transform` are CSSOM writes, which CSP does
+  not govern — only markup `style=` attributes and `<style>` elements are. The
+  one trap worth knowing: `@vercel/analytics` and `@vercel/speed-insights` both
+  contain a `https://va.vercel-scripts.com` fallback, but it sits behind a
+  build-time `"production"` constant, so the shipped bundle only ever requests
+  the same-origin `/_vercel/...` paths. Verify a policy change the same way —
+  serve `dist/` with the real headers (`npm run preview` applies none of them)
+  and read the console; `upgrade-insecure-requests` has to be dropped for a
+  localhost run or nothing loads. `tests/test_vercel_config.py` now reads the
+  enforcing header only and fails if a report-only header reappears — a policy
+  that merely reports blocks nothing. Reporting stays on so a directive that is
+  wrong for an untested flow surfaces as a log line instead of a broken screen.
+  Two things there are load-bearing and non-obvious: `font-src` must allow `data:` (Vite inlines the
   smallest Manrope woff2 into the built CSS), and the one inline script in
   `index.html` — the pre-mount theme flip — is allowed **by hash**, because a nonce
   is impractical when a single static `index.html` is served through a rewrite. The
   test recomputes that hash from `index.html`, so editing that script fails CI
   rather than silently reverting the app to a light-mode flash.
   Violations are collected by `POST /api/csp-report`
-  (`routers/reports.py`) — without a destination a report-only policy
-  reports to each visitor's own console, so "promote once the reports are
-  clean" was a condition that could never be met. It is the one route on
+  (`routers/reports.py`) — without a destination a policy reports to each
+  visitor's own console, where nobody collects it. It is the one route on
   the API reachable without a token, so it touches no database, stores
   nothing, and logs only the violation's shape: the directive, the blocked
-  *origin*, and the route pattern folded exactly as `insightsRoute` folds
-  it — a group id, an OAuth `?code=` or a recovery `#access_token=` must
-  never reach a log line, and neither may a field forge one with a newline.
+  *origin*, the reporting host, and the route pattern folded exactly as
+  `insightsRoute` folds it — a group id, an OAuth `?code=` or a recovery
+  `#access_token=` must never reach a log line, and neither may a field
+  forge one with a newline. Reports are dropped unless the document URL is
+  a host we actually serve (apex, www, or the project's `*.vercel.app`),
+  since a page we never served was never handed our policy.
+  **The in-process limits are a floor, not a ceiling**: a content-type
+  check, a 16 kB body cap, ten reports per request (a `report-to` POST is
+  an *array*) and a 60/min token bucket. The bucket is per warm instance,
+  and this is a serverless function with several of them — so a global
+  limit has to live at the edge (a Vercel Firewall rate-limit rule on
+  `/api/csp-report`) where one counter sees every request. Never mistake
+  the per-instance throttle for that.
   Pointing the reports at a third-party collector would be a new processor,
   and a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump.
   A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing
@@ -116,15 +149,35 @@ on `ENV=development`):
   landing page is client-rendered.
 - **Backend**: FastAPI in `api/index.py` (single Vercel function; code lives in `api/_src/` —
   the underscore prevents Vercel treating those files as separate functions).
+  **`ENV=development` is not something a hosted deployment can ask for.** It switches on
+  the Swagger page (a third-party script from cdn.jsdelivr.net on the origin holding the
+  Supabase session), the CORS middleware and the open database probe, and nothing used to
+  cross-check it against where the code was running. `config.resolve_env` does: `VERCEL_ENV`
+  is set by the platform and cannot be overridden from project settings, so any value of it
+  other than `development` forces production regardless of `ENV`. An unset `VERCEL_ENV` —
+  a laptop, CI, pytest — is the only state where `development` is reachable, and an
+  unrecognised one fails closed, exactly like `docs_urls`.
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
   transaction pooler (port 6543, `postgresql+asyncpg://`) with `NullPool` and
   `statement_cache_size=0` (`api/_src/db.py`) — never per-request engines, never the session pooler.
 - **Auth**: Supabase Auth (PKCE) on the frontend — Google OAuth **plus email/password** (signup
   with confirmation required, forgot/reset flow); backend verifies JWTs statelessly
-  (`auth.py`: ES256 via JWKS, HS256 fallback) and reads only the `sub` claim — provider-neutral.
+  (`auth.py`: ES256 via JWKS) and reads only the `sub` claim — provider-neutral.
   The `alg` header may only *select* from `SYMMETRIC_ALGORITHMS`/`ASYMMETRIC_ALGORITHMS`;
   anything else (including `none`) is refused before a key is fetched, because that header
-  travels inside the token being checked. `tests/test_auth.py` is the only place the boundary
+  travels inside the token being checked. **HS256 is off unless `ALLOW_LEGACY_HS256`
+  is set**: the project's JWKS serves a single ES256 key (checked, not assumed), so the
+  symmetric path verified nothing the app issues while keeping a *symmetric* credential
+  live — anything that can read a shared secret can mint tokens with it, where the JWKS
+  key can only check them. Turning it back on takes the flag **and** the secret.
+  `SUPABASE_URL` has no default for the same reason: it is the trust anchor, and the old
+  fallback to the production project meant a preview or a fork trusted our issuer while
+  reading someone else's database. It is cross-checked against `DATABASE_URL`'s project
+  ref at first use, and a mismatch refuses to verify anything.
+  Unauthenticated failures answer generically ("Authentication is unavailable") and put
+  the specifics in the log — an anonymous 500 naming an environment variable hands a
+  stranger the deployment's shape for nothing.
+  `tests/test_auth.py` is the only place the boundary
   is exercised for real — every other API test overrides `verify_jwt`, so a change here that
   breaks authentication will not show up anywhere else in the suite.
   **RLS is intentionally disabled** — the FastAPI layer is the sole authorization boundary; the
@@ -469,6 +522,14 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   catch-all renders `NotFoundPage`.
 - Empty states share `EmptyState`; pass `action` where there is an obvious next
   step (suppressed on the expenses tab when a payer filter is what emptied it).
+- **`VITE_API_URL` is a dev-only escape hatch and is enforced as one.** `src/lib/api.ts`
+  reads it behind `import.meta.env.DEV`, which Vite inlines as a literal, so a production
+  build collapses to same-origin `"/api"` and the other branch is dropped — the variable's
+  value cannot reach the bundle even if it is set. It is a *build-time* value attached to
+  requests that carry the user's Supabase access token, so before the guard a `npm run build`
+  on a laptop with `.env` present baked `http://localhost:8000/api` into the production
+  bundle, and a Vercel env var could have redirected every authenticated request to an
+  arbitrary host without showing up in a diff.
 - Shared query definitions in `src/lib/queries.ts` — prefetchers and components must agree on
   keys. Query keys are NOT user-scoped; instead `useAuth` clears the whole cache when the
   authenticated user id changes. Keep both halves of that invariant.
@@ -542,6 +603,26 @@ Raw SQL files in `supabase/migrations/` are the source of truth, but they are ap
 live database separately (Supabase MCP/dashboard) — when adding one, both write the file and
 apply it, and keep the SQLAlchemy models in `api/_src/models.py` in sync (tests create schema
 from the models on SQLite).
+
+**A migration file is a statement of intent; `tests/test_grants_pg.py` is the only thing that
+checks what the database actually says.** It reads catalogs only, is skipped unless
+`AUDIT_DATABASE_URL` is set, and — unlike `TEST_DATABASE_URL`, which must never name
+production — it is *meant* to be pointed at production, because the drift it looks for is
+created by things that happen to the live project. Two variables so neither habit reaches the
+wrong one. Run it after adding a table, after enabling a Supabase feature, and before a
+release.
+
+The rule it enforces has a mechanism behind it: an object inherits the grants of whichever
+role created it. `20260702000001` locked down the postgres role's default privileges for
+tables and sequences but not **functions**, which is why `handle_user_updated` arrived
+`anon=X/postgres` a year later and why `20260901000000` had to fix one object where the class
+of object was the problem. `20260904000000` closes it — all three default ACLs for the
+postgres role now name postgres and service_role only. Supabase's parallel
+`FOR ROLE supabase_admin` defaults still grant to anon/authenticated and **cannot be changed
+from here**: `pg_has_role(current_user, 'supabase_admin', 'MEMBER')` and `rolsuper` both
+return false on production, and `ALTER DEFAULT PRIVILEGES FOR ROLE` requires that membership.
+They stay inert only while every object in `public` is created as postgres, which the test
+asserts directly.
 
 Two triggers on `auth.users` mirror it into `public.users`: `handle_new_user` on INSERT and
 `handle_user_updated` on UPDATE (email or `raw_user_meta_data` only — that table is written on

@@ -1,12 +1,15 @@
 """The CSP violation collector.
 
-Two things are being tested: that a report survives the trip at all (it is the
-prerequisite for ever promoting the staged policy), and that what reaches the
-log is narrower than what the browser sent — no group id, no `?code=`, no
-`#access_token=`, no page content.
+Three things are being tested: that a report survives the trip at all (it is how
+a wrong directive in the enforced policy becomes visible instead of silently
+breaking a flow), that what reaches the log is narrower than what the browser
+sent — no group id, no `?code=`, no `#access_token=`, no page content — and that
+the one endpoint a stranger can reach without a token cannot be turned into a
+log-flooding primitive.
 """
 
 import logging
+import time
 
 import pytest
 
@@ -51,6 +54,19 @@ def _report_to_body(**overrides) -> list:
 def logged(caplog):
     caplog.set_level(logging.WARNING, logger="splitdec.csp")
     return caplog
+
+
+@pytest.fixture(autouse=True)
+def _full_bucket():
+    """The token bucket is module state, so it leaks between tests.
+
+    Refilled before each one so a test that deliberately empties it cannot
+    silence the next test's reports — and so the order tests happen to run in
+    never decides whether they pass.
+    """
+    reports._tokens = float(reports.REPORTS_PER_MINUTE)
+    reports._last_refill = time.monotonic()
+    reports._suppressing = False
 
 
 async def test_report_uri_format_is_accepted_and_logged(client, logged):
@@ -195,11 +211,120 @@ def test_fold_route_mirrors_the_frontend():
 
 def test_normalize_handles_a_partial_report():
     """Browsers disagree about which fields they send; a missing one must not
-    cost the whole report."""
+    cost the whole report — except `document-uri`, whose absence leaves nothing
+    to attribute the report to. `origin: None` is how the endpoint is told to
+    drop it."""
     [report] = reports.normalize({"csp-report": {"violated-directive": "img-src"}})
     assert report == {
         "directive": "img-src",
         "blocked": "-",
         "route": "-",
+        "origin": None,
         "disposition": "report",
     }
+
+
+# --- What an unauthenticated stranger can make this do ----------------------
+
+
+async def test_a_body_that_does_not_claim_to_be_a_report_is_refused(client, logged):
+    """Rejected on the header, before the body is read.
+
+    Browsers send `application/csp-report` or `application/reports+json`;
+    anything else was never a violation report, and answering it without
+    touching the payload is the cheapest thing this route can do.
+    """
+    r = await client.post(
+        "/api/csp-report",
+        content=b'{"csp-report": {}}',
+        headers={"Content-Type": "text/plain"},
+    )
+    assert r.status_code == 415
+    assert logged.text == ""
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    ["application/csp-report", "application/reports+json", "application/json"],
+    ids=["report-uri", "report-to", "curl"],
+)
+async def test_the_content_types_browsers_actually_send_are_accepted(
+    client, logged, content_type
+):
+    import json as _json
+
+    r = await client.post(
+        "/api/csp-report",
+        content=_json.dumps(_report_uri_body()).encode(),
+        headers={"Content-Type": f"{content_type}; charset=utf-8"},
+    )
+    assert r.status_code == 204
+    assert "csp violation" in logged.text
+
+
+async def test_a_report_from_a_document_we_do_not_serve_is_dropped(client, logged):
+    """Anyone can point their own site's `report-uri` at this endpoint, or post
+    by hand. A page we never served was never handed our policy, so its
+    violations say nothing about ours — and every one of them would be a log
+    line of a stranger's choosing."""
+    for foreign in (
+        "https://attacker.example/anything",
+        "https://split-dec.app.attacker.example/",  # host merely starts right
+        "https://notsplit-dec.vercel.app/",
+        "http://split-dec.app/",  # https only
+        # Vercel project names are not globally reserved, so a stranger can
+        # own a project called `split-dec-anything`. Only the *account* slug
+        # is unique, which is why the pattern pins it.
+        "https://split-dec-anything-abc123-someoneelse.vercel.app/",
+        "https://split-dec-evil.vercel.app/",
+    ):
+        r = await client.post("/api/csp-report", json=_report_uri_body(**{"document-uri": foreign}))
+        assert r.status_code == 204, foreign
+    assert logged.text == ""
+
+
+async def test_preview_deployments_are_still_collected(client, logged):
+    """Previewing is where a policy change gets exercised before it ships, so
+    the project's own vercel.app hosts have to keep reporting."""
+    for host in (
+        "split-dec.vercel.app",  # the production alias
+        "split-dec-git-develop-t5chronos-projects.vercel.app",  # branch alias
+        "split-dec-abc123xyz-t5chronos-projects.vercel.app",  # per-deployment
+    ):
+        await client.post(
+            "/api/csp-report", json=_report_uri_body(**{"document-uri": f"https://{host}/groups"})
+        )
+        assert f"origin={host}" in logged.text
+
+
+async def test_the_reporting_host_is_logged(client, logged):
+    await client.post("/api/csp-report", json=_report_uri_body())
+    assert "origin=split-dec.app" in logged.text
+
+
+async def test_a_batch_cannot_multiply_into_unbounded_log_lines(client, logged):
+    """The body cap alone does not cap log lines: one `report-to` POST is an
+    array, and 16 kB of minimal envelopes is a few hundred entries."""
+    [envelope] = _report_to_body()
+    batch = [envelope] * (reports.MAX_REPORTS_PER_REQUEST + 25)
+    r = await client.post("/api/csp-report", json=batch)
+    assert r.status_code == 204
+    assert len(logged.records) == reports.MAX_REPORTS_PER_REQUEST
+
+
+async def test_the_token_bucket_clips_a_flood_and_says_so_once(client, logged, monkeypatch):
+    """Per warm instance, not global — the real ceiling is an edge rate limit
+    (see the module docstring). What this asserts is that the floor exists and
+    that the notice about it does not itself become the flood."""
+    monkeypatch.setattr(reports, "REPORTS_PER_MINUTE", 2)
+    reports._tokens = 2.0
+    reports._last_refill = time.monotonic()
+
+    for _ in range(6):
+        r = await client.post("/api/csp-report", json=_report_uri_body())
+        assert r.status_code == 204  # the sender is never told it was clipped
+
+    violations = [m for m in logged.messages if m.startswith("csp violation:")]
+    suppressed = [m for m in logged.messages if "suppressed" in m]
+    assert len(violations) == 2
+    assert len(suppressed) == 1, "the suppression notice must not repeat per drop"

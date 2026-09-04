@@ -28,6 +28,12 @@ def _hermetic_env(monkeypatch):
     # that need a specific value set it with monkeypatch themselves.
     monkeypatch.delenv("ENV", raising=False)
     monkeypatch.delenv("HEALTH_PROBE_KEY", raising=False)
+    # VERCEL_ENV belongs here for the same reason and is easier to miss: it is
+    # not something anyone puts in a .env, but `current_env()` lets it *override*
+    # ENV outright, so a shell that happens to export it (a `vercel` CLI
+    # session, some future CI image) would turn `monkeypatch.setenv("ENV",
+    # "development")` into a no-op and silently flip the dev-gated tests.
+    monkeypatch.delenv("VERCEL_ENV", raising=False)
 
 
 class CurrentUser:

@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import time
@@ -6,7 +7,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import DEV_FRONTEND_ORIGIN, ENV
+from .config import DEV_FRONTEND_ORIGIN, ENV, current_env
 from .db import get_db
 from .monitoring import init_monitoring
 from .routers import expenses, groups, invitations, reports, settlements, users
@@ -15,6 +16,9 @@ from .routers import expenses, groups, invitations, reports, settlements, users
 # so an app constructed first would never be instrumented. A no-op without a
 # DSN, which is the state in tests and under a local uvicorn.
 init_monitoring()
+
+logger = logging.getLogger("splitdec.health")
+
 
 def docs_urls(env: str) -> dict[str, str | None]:
     """Interactive API docs, and the schema that feeds them: development only.
@@ -92,11 +96,12 @@ async def health_db(
     """
     expected = os.getenv("HEALTH_PROBE_KEY", "")
     if not expected:
-        if os.getenv("ENV", "production") != "development":
-            raise HTTPException(
-                status_code=503,
-                detail="Database probe disabled: HEALTH_PROBE_KEY is not configured",
-            )
+        if current_env() != "development":
+            # Generic on the wire, specific in the log: this route is reachable
+            # by anyone, and naming the variable that switches it on tells a
+            # stranger what to go looking for.
+            logger.warning("Database probe refused: HEALTH_PROBE_KEY is not configured")
+            raise HTTPException(status_code=503, detail="Service unavailable")
     # Constant-time: a plain `!=` leaks the shared secret one character at a
     # time. Compared as bytes because compare_digest rejects non-ASCII str,
     # and header values arrive latin-1 decoded.

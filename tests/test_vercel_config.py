@@ -44,6 +44,31 @@ def test_security_headers_applied_to_every_response():
     assert headers.get("Referrer-Policy")
 
 
+def test_cross_origin_isolation_headers():
+    """COOP and CORP: the two that `frame-ancestors` does not cover.
+
+    `X-Frame-Options`/`frame-ancestors` stop the app being put *in* someone
+    else's frame. Neither says anything about a window that opened this one, or
+    about another origin loading our responses directly.
+
+    COOP `same-origin-allow-popups` severs the `window.opener` relationship with
+    any cross-origin page that opened the app — an attacker's page can still
+    navigate to us, but it cannot keep a handle on the resulting window. The
+    `-allow-popups` half is deliberate rather than lazy: the strict value also
+    severs popups *we* open, and while supabase-js signs in by full-page
+    redirect today, an OAuth popup is one config change away and would break
+    silently under `same-origin`. The support link (`target="_blank"`) is the
+    other reason.
+
+    CORP `same-origin` stops another site embedding our responses directly —
+    the icons, the manifest, the built JS. Nothing legitimately does: every
+    asset this app serves is loaded by this app.
+    """
+    headers = _headers_for("/")
+    assert headers.get("Cross-Origin-Opener-Policy") == "same-origin-allow-popups"
+    assert headers.get("Cross-Origin-Resource-Policy") == "same-origin"
+
+
 def _www_redirects() -> list[dict]:
     return [
         r
@@ -105,11 +130,12 @@ def test_vercel_domain_is_not_indexable():
 
 # --- The script-level CSP ---------------------------------------------------
 #
-# The policy is rolled out in two stages: `Content-Security-Policy-Report-Only`
-# first, so a directive that turns out to be wrong reports instead of breaking
-# the app, then the same string promoted onto the enforcing header. These tests
-# read whichever header carries the full policy, so promoting it is a one-word
-# change in vercel.json and not a test rewrite.
+# The policy was rolled out in two stages: `Content-Security-Policy-Report-Only`
+# first, so a directive that turned out to be wrong reported instead of breaking
+# the app, then the same string promoted onto the enforcing header. Stage two
+# has happened, and these tests now read the enforcing header only — a policy
+# that merely reports is a policy that stops nothing, and the whole point of the
+# staging was that it would end.
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -124,23 +150,23 @@ def _parse_csp(policy: str) -> dict[str, list[str]]:
 
 
 def _full_csp() -> dict[str, list[str]]:
-    """The script-level policy, whichever header is currently carrying it.
+    """The script-level policy, which must be on the *enforcing* header.
 
     `frame-ancestors 'none'` alone is not it — that is the framing-only policy
     that shipped long before this item.
     """
     headers = _headers_for("/")
-    carriers = [
-        value
-        for key in ("Content-Security-Policy", "Content-Security-Policy-Report-Only")
-        if "script-src" in (value := headers.get(key, ""))
-    ]
-    assert carriers, "no script-level CSP is served on any header"
-    assert len(carriers) == 1, (
-        "the full policy is on both headers: enforcing and report-only would "
-        "drift apart on the next edit — keep exactly one"
+    enforced = headers.get("Content-Security-Policy", "")
+    assert "script-src" in enforced, (
+        "the script-level CSP is not on Content-Security-Policy. A policy that "
+        "only reports blocks nothing: injection and exfiltration are governed "
+        "by the enforcing header alone."
     )
-    return _parse_csp(carriers[0])
+    assert "script-src" not in headers.get("Content-Security-Policy-Report-Only", ""), (
+        "the full policy is on both headers: enforcing and report-only would "
+        "drift apart on the next edit — keep exactly one, and keep it enforcing"
+    )
+    return _parse_csp(enforced)
 
 
 def _inline_script_hashes() -> set[str]:
@@ -168,6 +194,29 @@ def test_framing_is_enforced_not_merely_reported():
     """
     enforced = _headers_for("/").get("Content-Security-Policy", "")
     assert "frame-ancestors 'none'" in enforced
+
+
+def test_the_whole_policy_is_enforced_and_nothing_is_left_reporting():
+    """The staged rollout is over; it must not be reinstated by accident.
+
+    While the full policy sat on `Content-Security-Policy-Report-Only`, every
+    directive below — the hash pinning, the closed injection primitives, the
+    pinned connect-src origins — described something the browser watched and
+    allowed anyway. Moving any of it back to report-only would leave this file
+    asserting a policy that is not in force, which is worse than not asserting
+    one at all.
+
+    Reporting stays on: `report-uri`/`report-to` work on an enforcing policy
+    too, and that is how a directive that turns out to be wrong in the field
+    becomes visible rather than just breaking something.
+    """
+    headers = _headers_for("/")
+    assert "Content-Security-Policy-Report-Only" not in headers, (
+        "a report-only CSP is back in vercel.json; the enforcing header is the "
+        "one that protects anything"
+    )
+    directives = _full_csp()
+    assert directives.get("report-uri"), "the enforcing policy stopped reporting"
 
 
 def test_csp_pins_the_inline_theme_script_by_hash():
@@ -251,13 +300,15 @@ def test_csp_allows_exactly_the_origins_the_app_uses():
     assert "'self'" in directives["manifest-src"]
 
 
-def test_staged_csp_has_somewhere_to_report_to():
-    """A report-only policy with no destination reports to nobody.
+def test_the_csp_has_somewhere_to_report_to():
+    """A policy with no reporting destination reports to nobody.
 
-    Violations land in each visitor's own console, which no one is watching, so
-    the condition for promoting this policy — that the reports come back clean
-    — could never be met and the staging would be permanent. Both directives
-    are present because no browser honours both: Firefox and Safari have only
+    Violations land in each visitor's own console, which no one is watching.
+    That mattered while the policy was staged (the condition for promoting it
+    could never be met) and it still matters now that it is enforced: a
+    directive that is wrong for some flow nobody tested is a feature silently
+    broken in the field unless the block reaches a log. Both directives are
+    present because no browser honours both: Firefox and Safari have only
     `report-uri`, and Chrome ignores it whenever `report-to` is offered.
     """
     directives = _full_csp()
