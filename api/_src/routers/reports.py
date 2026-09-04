@@ -29,11 +29,18 @@ cap, and a per-process token bucket. None of them is a global rate limit and
 none of them can be — this is a serverless function with several instances and
 constant cold starts, so a caller spraying requests is spread across buckets
 that cannot see each other, and the effective ceiling is the bucket rate times
-however many instances the platform decided to run. **The global limit belongs
-at the edge** (a Vercel Firewall rate-limit rule on `/api/csp-report`), where
-one counter sees every request; what is here is the cheap floor that keeps a
-single caller from filling the log through one warm instance, and it should
-never be mistaken for the ceiling.
+however many instances the platform decided to run. What is here is the cheap
+floor that keeps a single caller from filling the log through one warm
+instance, and it must never be mistaken for the ceiling.
+
+**The ceiling is at the edge**, where one counter sees every request: a Vercel
+Firewall rule named "CSP report flood limit", `path equals /api/csp-report`,
+100 requests per 60s keyed by IP, denying for 5m once tripped. That rule lives
+in the Vercel project, not in this repo, so it is invisible from here and from
+CI — if the numbers below change, change it too (`vercel firewall rules list`),
+the same "the dashboard is what actually runs" trap the auth email templates
+carry. Denying is safe: browsers discard whatever this endpoint answers, so a
+throttled reporter loses telemetry and nothing else.
 """
 
 import json
