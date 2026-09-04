@@ -27,6 +27,10 @@ SplitDec DesignSystem/
 # unmonitored. Kept on the maintainer's machine instead.
 GO-LIVE.md
 SECURITY.md
+# Same class: the implementation plan for the least-privilege database role
+# opens by listing exactly what the current credential can reach, which is the
+# one paragraph least worth publishing next to the code it describes.
+DB-ROLE-PLAN.md
 
 # Pre-launch working material for the buycoffee.to creator profile. Same reason
 # as the two files above: the notes alongside the copy record what the app does
