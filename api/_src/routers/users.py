@@ -139,8 +139,10 @@ async def delete_account(
     # with `ATTACH ':memory:' AS auth` and no function exists. Dialect-aware SQL
     # has a precedent here (ratelimit.window_cutoff), but the cost is specific
     # and worth stating: **the production statement is not exercised by the
-    # default suite.** Only a real Postgres run covers it -- see DB-ROLE-PLAN
-    # step 6.3, and the account-deletion check in tests/test_locks_pg.py.
+    # default suite.** Only a real Postgres run covers it --
+    # tests/test_locks_pg.py calls the wrapper as the app role, which needs
+    # TEST_DATABASE_URL, and tests/test_grants_pg.py checks the EXECUTE grant
+    # behind it against the live catalogs.
     if db.get_bind().dialect.name == "sqlite":
         await db.execute(
             text("DELETE FROM auth.users WHERE id = :uid"), {"uid": str(caller)}

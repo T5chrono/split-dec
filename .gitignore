@@ -15,6 +15,10 @@ venv/
 # Playwright MCP browser artifacts (screenshots, logs, profile with auth session)
 .playwright-mcp/
 
+# Supabase CLI scratch. Today it holds one file caching the CLI's own latest
+# version number; it is machine state, not project state.
+supabase/.temp/
+
 # Local brand/design-system workspace (assets are copied into the app as needed)
 SplitDec DesignSystem/
 
@@ -38,3 +42,6 @@ DB-ROLE-PLAN.md
 # Anchored to the root on purpose — an unanchored `buycoffee/` also swallows
 # public/buycoffee/, the support button's artwork, which must ship.
 /buycoffee/
+
+# Local reporting-style instructions for Claude Code. Personal, not repo policy.
+CLAUDE.local.md
