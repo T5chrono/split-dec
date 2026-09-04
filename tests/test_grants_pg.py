@@ -241,3 +241,192 @@ async def test_rls_is_off_on_purpose_and_stays_measured(catalog):
         "codebase (FastAPI is the sole authorization boundary) -- if this is "
         "intended, CLAUDE.md and this test both need to change together."
     )
+
+
+# The role the API connects as since 20260904100000. Everything below is the
+# other half of that migration: the file says what was granted, these ask the
+# database what the role can actually reach.
+APP_ROLE = "splitdec_app"
+APP_TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
+
+
+async def test_the_app_role_can_reach_every_table_in_public(catalog):
+    """The outage-shaped failure, not the security-shaped one.
+
+    20260904100000 grants on ALL TABLES *and* sets the schema's default
+    privileges, so a table created later by postgres arrives reachable. A table
+    created any other way does not, and the first sign of it would be
+    `permission denied` from a production endpoint. Cheap to check here.
+    """
+    missing = (
+        await catalog.execute(
+            text(
+                """
+                SELECT c.relname, p.priv
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 CROSS JOIN unnest(:privs) AS p(priv)
+                 WHERE n.nspname = 'public'
+                   AND c.relkind IN ('r', 'p')
+                   AND NOT has_table_privilege(:role, c.oid, p.priv)
+                 ORDER BY c.relname, p.priv
+                """
+            ),
+            {"role": APP_ROLE, "privs": list(APP_TABLE_PRIVILEGES)},
+        )
+    ).all()
+    assert missing == [], (
+        f"{APP_ROLE} cannot reach table(s) in schema public: "
+        f"{[tuple(r) for r in missing]}. The app connects as this role -- these "
+        "are 'permission denied' in production. Grant them, and find out why the "
+        "default privileges in 20260904100000 did not cover it (most likely the "
+        "table was created by a role other than postgres)."
+    )
+
+
+async def test_the_app_role_holds_nothing_outside_public(catalog):
+    """The whole point of the exercise.
+
+    `postgres` -- what the app used to connect as -- has USAGE on `auth` and
+    SELECT/UPDATE/DELETE on `auth.users`, `auth.sessions` and
+    `auth.refresh_tokens`, plus USAGE on storage, vault, graphql and realtime
+    through its membership in anon/authenticated/service_role. A stolen
+    DATABASE_URL was worth all of that. This asserts the replacement is worth
+    exactly eight tables in one schema.
+
+    Account deletion still removes an `auth.users` row; it does it through
+    public.delete_auth_user, a SECURITY DEFINER wrapper that runs as postgres,
+    which is why no privilege in `auth` is needed here.
+    """
+    schemas = (
+        await catalog.execute(
+            text(
+                r"""
+                SELECT n.nspname,
+                       has_schema_privilege(:role, n.oid, 'USAGE')  AS usage,
+                       has_schema_privilege(:role, n.oid, 'CREATE') AS create_
+                  FROM pg_namespace n
+                 WHERE n.nspname NOT IN ('public', 'information_schema')
+                   AND n.nspname NOT LIKE 'pg\_%'
+                   AND (has_schema_privilege(:role, n.oid, 'USAGE')
+                        OR has_schema_privilege(:role, n.oid, 'CREATE'))
+                 ORDER BY n.nspname
+                """
+            ),
+            {"role": APP_ROLE},
+        )
+    ).all()
+    assert schemas == [], (
+        f"{APP_ROLE} holds schema privileges outside public: "
+        f"{[tuple(r) for r in schemas]}. Either it was granted them or it was "
+        "made a member of a role that has them -- see the memberships test below."
+    )
+
+    tables = (
+        await catalog.execute(
+            text(
+                """
+                SELECT table_schema, table_name, privilege_type
+                  FROM information_schema.role_table_grants
+                 WHERE grantee = :role AND table_schema <> 'public'
+                 ORDER BY table_schema, table_name, privilege_type
+                """
+            ),
+            {"role": APP_ROLE},
+        )
+    ).all()
+    assert tables == [], (
+        f"{APP_ROLE} holds table grants outside public: {[tuple(r) for r in tables]}"
+    )
+
+
+async def test_the_app_role_has_no_attributes_and_no_memberships(catalog):
+    """`postgres` carries CREATEROLE, CREATEDB and BYPASSRLS and is a member of
+    anon, authenticated, service_role, authenticator, pg_read_all_data and
+    more. Every one of those is a way for the role above to quietly grow back
+    what it was created without -- membership especially, since it is one GRANT
+    away and leaves the grants tests above still passing on their own terms.
+
+    NOINHERIT is asserted too: it is the second lock on the same door, so a
+    membership added by accident still needs an explicit SET ROLE to be worth
+    anything.
+    """
+    row = (
+        await catalog.execute(
+            text(
+                """
+                SELECT r.rolsuper, r.rolcreaterole, r.rolcreatedb,
+                       r.rolbypassrls, r.rolinherit, r.rolreplication,
+                       COALESCE((SELECT string_agg(g.rolname, ', ' ORDER BY g.rolname)
+                                   FROM pg_auth_members m
+                                   JOIN pg_roles g ON g.oid = m.roleid
+                                  WHERE m.member = r.oid), '') AS memberships
+                  FROM pg_roles r
+                 WHERE r.rolname = :role
+                """
+            ),
+            {"role": APP_ROLE},
+        )
+    ).first()
+    assert row is not None, (
+        f"role {APP_ROLE} does not exist. It is created out of band rather than "
+        "by a migration, because the statement carries a password and this repo "
+        "is public -- see 20260904100000."
+    )
+    super_, createrole, createdb, bypassrls, inherit, replication, memberships = row
+    assert not super_, f"{APP_ROLE} is a superuser"
+    assert not createrole, f"{APP_ROLE} has CREATEROLE"
+    assert not createdb, f"{APP_ROLE} has CREATEDB"
+    assert not bypassrls, f"{APP_ROLE} has BYPASSRLS"
+    assert not replication, f"{APP_ROLE} has REPLICATION"
+    assert not inherit, f"{APP_ROLE} is INHERIT -- it must be NOINHERIT"
+    assert memberships == "", (
+        f"{APP_ROLE} is a member of: {memberships}. It must be a member of "
+        "nothing; membership is how it silently re-inherits what this role "
+        "exists to do without."
+    )
+
+
+async def test_the_auth_user_wrapper_is_reachable_by_the_app_role_alone(catalog):
+    """public.delete_auth_user is a privilege-escalation surface by
+    construction: it runs as postgres and deletes any auth user by id. That is
+    acceptable only while EXECUTE reaches exactly one role.
+
+    The API-roles test above already forbids anon/authenticated/PUBLIC on every
+    function here. This is the positive half -- the app role can call it (or
+    account deletion 500s in production) and no other non-superuser can.
+    """
+    rows = (
+        await catalog.execute(
+            text(
+                r"""
+                SELECT r.rolname
+                  FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 CROSS JOIN pg_roles r
+                 WHERE n.nspname = 'public'
+                   AND p.proname = 'delete_auth_user'
+                   AND NOT r.rolsuper
+                   AND r.rolname NOT LIKE 'pg\_%'
+                   AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')
+                 ORDER BY r.rolname
+                """
+            )
+        )
+    ).all()
+    holders = {name for (name,) in rows}
+    assert holders, (
+        "public.delete_auth_user does not exist -- 20260904100000 was written "
+        "but never applied."
+    )
+    assert APP_ROLE in holders, (
+        f"{APP_ROLE} cannot execute public.delete_auth_user -- account deletion "
+        "fails in production. The GRANT from 20260904100000 was never applied."
+    )
+    # postgres owns it, so it holds EXECUTE unconditionally; service_role is
+    # Supabase's trusted server-side key and never reaches a browser.
+    unexpected = holders - {APP_ROLE, "postgres", "service_role"}
+    assert unexpected == set(), (
+        f"public.delete_auth_user is executable by {sorted(unexpected)}. Whoever "
+        "can call it can delete any auth user; EXECUTE must never be widened."
+    )

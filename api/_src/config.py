@@ -84,11 +84,26 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = os.getenv("VERCEL_ENV", ENV)
 SENTRY_RELEASE = os.getenv("VERCEL_GIT_COMMIT_SHA", "")
 
-# `https://<ref>.supabase.co`, and the pooler DSN's `postgres.<ref>` username.
+# `https://<ref>.supabase.co`, and the pooler DSN's `<role>.<ref>` username.
 # Two shapes, one identifier: the project ref is the only thing that ties the
 # token issuer to the database the tokens grant access to.
+#
+# The username half is `<role>.<ref>` for *any* role, not `postgres.<ref>`.
+# That mattered the day the app stopped connecting as the owner
+# (20260904100000): a hardcoded `postgres` stopped matching, project_ref
+# returned None, and "no ref" reads as "nothing to compare" — so the check
+# below would have gone quietly dead exactly when the production DSN changed.
+# Role names cannot contain a dot here, which is also what stops a userless
+# DSN's dotted *hostname* being read as a ref.
 _PROJECT_URL = re.compile(r"^https://([a-z0-9]+)\.supabase\.(?:co|in)/?$")
-_POOLER_DSN = re.compile(r"^[a-z0-9+.-]+://postgres\.([a-z0-9]+)[:@]")
+_POOLER_DSN = re.compile(r"^[a-z0-9+.-]+://[a-z0-9_-]+\.([a-z0-9]+)[:@]")
+
+# A database host that belongs to Supabase: the pooler
+# (`aws-0-*.pooler.supabase.com`) or a direct `db.<ref>.supabase.co`. Used only
+# to tell "there is no ref to compare" apart from "there should have been one".
+_SUPABASE_DB_HOST = re.compile(
+    r"@[a-z0-9.-]+\.supabase\.(?:com|co|in)(?=[:/]|$)", re.IGNORECASE
+)
 
 
 def project_ref(value: str) -> str | None:
@@ -120,7 +135,18 @@ def supabase_url_problem(supabase_url: str, database_url: str) -> str | None:
     if ref is None:
         return "SUPABASE_URL is not a Supabase project URL"
     db_ref = project_ref(database_url)
-    if db_ref is not None and db_ref != ref:
+    if db_ref is None:
+        # No ref is normally an absence, not a conflict — a local Postgres has
+        # none. But a Supabase host with no readable ref is the shape of this
+        # check silently switching itself off, which is how a username change
+        # nearly disabled it once. Refuse rather than skip.
+        if _SUPABASE_DB_HOST.search(database_url):
+            return (
+                "DATABASE_URL names a Supabase host but no project ref could be "
+                "read from it, so it cannot be checked against SUPABASE_URL"
+            )
+        return None
+    if db_ref != ref:
         # The interesting failure: tokens verified against one project's keys
         # while every `sub` in them is looked up in another project's tables.
         return f"SUPABASE_URL names project {ref} but DATABASE_URL names {db_ref}"
