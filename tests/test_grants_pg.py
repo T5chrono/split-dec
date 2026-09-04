@@ -20,6 +20,16 @@ release:
 
     AUDIT_DATABASE_URL='postgresql+asyncpg://postgres.<ref>:<pw>@...:6543/postgres' \
       python -m pytest tests/test_grants_pg.py -v
+
+**If that exits 1 with no output whatsoever**, the process aborted rather than
+failed: on a Windows machine behind TLS-inspecting antivirus, the uv-managed
+interpreter's statically linked OpenSSL kills the process on the first TLS
+handshake ("OPENSSL_Uplink ... no OPENSSL_Applink"), before pytest writes a
+byte. It is the same problem `api/_src/dev_loop.py` exists to solve for
+`npm run api`, and the same workaround applies -- pop `SSLKEYLOGFILE` and
+`truststore.inject_into_ssl()` before anything opens a socket. Nothing here can
+do it for you: pytest imports this module long after the interpreter has
+started. The Postgres tests keyed to TEST_DATABASE_URL hit it too.
 """
 
 import os
@@ -45,7 +55,18 @@ API_ROLES = ("anon", "authenticated")
 
 @pytest.fixture
 async def catalog():
-    engine = create_async_engine(AUDIT_DATABASE_URL, poolclass=NullPool)
+    # Same connect_args dance as api/_src/db.py, and for the same reason: this
+    # points at the transaction pooler (port 6543), where server-side prepared
+    # statements do not survive between statements, so asyncpg has to be told
+    # not to use them. Conditional rather than unconditional because psycopg —
+    # the fallback driver on setups where asyncpg's TLS stack will not build —
+    # takes neither argument.
+    connect_args: dict[str, int] = {}
+    if "+asyncpg" in AUDIT_DATABASE_URL:
+        connect_args = {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    engine = create_async_engine(
+        AUDIT_DATABASE_URL, poolclass=NullPool, connect_args=connect_args
+    )
     async with engine.connect() as conn:
         yield conn
     await engine.dispose()

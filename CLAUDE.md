@@ -34,6 +34,13 @@ outbound HTTPS, e.g. the JWKS fetch). Details in that module's docstring.
 There is no linter configured; `tsc` via `npm run build` is the frontend gate.
 Backend Postgres-only integration tests (`tests/test_balances_pg.py`, `tests/test_locks_pg.py`)
 skip unless `TEST_DATABASE_URL` is set — never point that at production.
+`tests/test_grants_pg.py` is the exception: it reads catalogs only, takes `AUDIT_DATABASE_URL`,
+and is *meant* for production (see Database migrations). All three connect through the
+transaction pooler, so any engine they build needs `statement_cache_size=0` /
+`prepared_statement_cache_size=0` exactly as `db.py` does — and on this machine they exit 1
+with **no output at all** unless `SSLKEYLOGFILE` is popped and `truststore` injected first,
+because the OpenSSL abort described under `npm run api` kills the process before pytest
+prints anything.
 
 ## Workflow (mandatory)
 
