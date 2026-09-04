@@ -1,6 +1,20 @@
 import { supabase } from "./supabase";
 
-const API_BASE: string = import.meta.env.VITE_API_URL || "/api";
+/** Where the bearer token gets sent.
+ *
+ *  Same-origin `/api` in every build that is not a dev build, and no way to
+ *  configure otherwise. `VITE_API_URL` is a *build-time* value baked into the
+ *  bundle, so a production build that picked it up would ship an app that
+ *  attaches the user's Supabase access token to requests aimed at whatever
+ *  host that variable named — a redirect of every authenticated request, set
+ *  by an environment variable rather than by code, and invisible in the diff.
+ *  It exists for one reason (pointing `npm run dev` at a local uvicorn on
+ *  :8000) and that reason only applies while `import.meta.env.DEV` is true.
+ *
+ *  Vite inlines `import.meta.env.DEV` as a literal, so in a production build
+ *  this collapses to `"/api"` and the other branch is dropped entirely — the
+ *  variable's value cannot end up in the bundle even if it is set. */
+const API_BASE: string = import.meta.env.DEV ? import.meta.env.VITE_API_URL || "/api" : "/api";
 
 export class ApiError extends Error {
   status: number;

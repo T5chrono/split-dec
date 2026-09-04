@@ -31,6 +31,12 @@ from _src import auth
 from _src.db import get_db
 from _src.main import app
 
+# Snapshotted before any fixture patches it: the algorithm set the module was
+# actually imported with, which is what `test_hs256_is_off_in_the_module_as_
+# imported` needs and what a monkeypatched `auth.SYMMETRIC_ALGORITHMS` can no
+# longer tell you.
+SHIPPED_SYMMETRIC_ALGORITHMS = auth.SYMMETRIC_ALGORITHMS
+
 # 64 bytes, so PyJWT does not warn about key length on any algorithm below.
 SECRET = "test-jwt-secret-" * 4
 WRONG_SECRET = "attacker-secret-" * 4
@@ -85,7 +91,15 @@ def _status(token: str | None) -> int:
 
 @pytest.fixture(autouse=True)
 def _shared_secret(monkeypatch):
+    """Configure *and enable* the legacy symmetric path.
+
+    HS256 is off unless `ALLOW_LEGACY_HS256` is set (auth.py), so without this
+    every symmetric test below would pass for the wrong reason — a 401 that
+    means "algorithm not enabled" rather than "signature rejected". The class
+    at the bottom of this file is the one that tests the gate itself.
+    """
     monkeypatch.setattr(auth, "SUPABASE_JWT_SECRET", SECRET)
+    monkeypatch.setattr(auth, "SYMMETRIC_ALGORITHMS", frozenset({"HS256"}))
 
 
 @pytest.fixture
@@ -120,7 +134,11 @@ def jwks(monkeypatch, signing_key):
 
 
 class TestSymmetricTokens:
-    """The legacy HS256 path, verified against the shared Supabase secret."""
+    """The legacy HS256 path, verified against the shared Supabase secret.
+
+    Enabled for this class by the autouse fixture above; `ALLOW_LEGACY_HS256`
+    is what enables it in a real deployment, and it is unset in this one.
+    """
 
     def test_valid_token_yields_the_subject(self):
         assert _call(_hs256()) == SUBJECT
@@ -216,6 +234,52 @@ class TestAlgorithmAllowList:
         _, public_pem = signing_key
         assert _status(_hmac_token("HS256", public_pem)) == 401
         assert _status(_hmac_token("ES256", public_pem)) == 401
+
+
+class TestLegacyHS256IsOffByDefault:
+    """The gate in front of the symmetric path.
+
+    This project's Supabase JWKS serves a single ES256 key, so HS256 verifies
+    nothing the app actually issues. Leaving it on kept a second way to mint a
+    valid token alive for no working flow — and a materially weaker one: the
+    shared secret is symmetric, so anything that can read it can *issue*
+    tokens, where the JWKS key can only check them.
+
+    Off means refused like any other unsupported algorithm, before a key is
+    touched — not "accepted but fails to verify".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _disabled(self, monkeypatch):
+        monkeypatch.setattr(auth, "SYMMETRIC_ALGORITHMS", frozenset())
+
+    def test_a_correctly_signed_hs256_token_is_refused(self):
+        """Signed with the real secret, which is still configured. The flag is
+        what refuses it, not the signature."""
+        assert _status(_hs256()) == 401
+
+    def test_the_refusal_does_not_depend_on_the_secret_being_unset(self, monkeypatch):
+        monkeypatch.setattr(auth, "SUPABASE_JWT_SECRET", "")
+        assert _status(_hs256()) == 401
+
+    def test_asymmetric_tokens_are_unaffected(self, jwks, signing_key):
+        private, _ = signing_key
+        assert _call(jwt.encode(_claims(), private, algorithm="ES256")) == SUBJECT
+
+
+def test_hs256_is_off_in_the_module_as_imported():
+    """The class above simulates the flag being off; this asserts that off is
+    what the module actually imported with.
+
+    Read from a copy taken at import time, before any fixture patched it —
+    asserting on `auth.SYMMETRIC_ALGORITHMS` here would only re-read whatever
+    the last monkeypatch set, and pass for that reason.
+    """
+    from _src import config
+
+    if config.ALLOW_LEGACY_HS256:
+        pytest.skip("ALLOW_LEGACY_HS256 is set in this environment")
+    assert SHIPPED_SYMMETRIC_ALGORITHMS == frozenset()
 
 
 class TestTheAppActuallyUsesIt:
