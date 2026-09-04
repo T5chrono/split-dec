@@ -272,6 +272,11 @@ async def test_a_report_from_a_document_we_do_not_serve_is_dropped(client, logge
         "https://split-dec.app.attacker.example/",  # host merely starts right
         "https://notsplit-dec.vercel.app/",
         "http://split-dec.app/",  # https only
+        # Vercel project names are not globally reserved, so a stranger can
+        # own a project called `split-dec-anything`. Only the *account* slug
+        # is unique, which is why the pattern pins it.
+        "https://split-dec-anything-abc123-someoneelse.vercel.app/",
+        "https://split-dec-evil.vercel.app/",
     ):
         r = await client.post("/api/csp-report", json=_report_uri_body(**{"document-uri": foreign}))
         assert r.status_code == 204, foreign
@@ -281,7 +286,11 @@ async def test_a_report_from_a_document_we_do_not_serve_is_dropped(client, logge
 async def test_preview_deployments_are_still_collected(client, logged):
     """Previewing is where a policy change gets exercised before it ships, so
     the project's own vercel.app hosts have to keep reporting."""
-    for host in ("split-dec.vercel.app", "split-dec-abc123-t5chrono.vercel.app"):
+    for host in (
+        "split-dec.vercel.app",  # the production alias
+        "split-dec-git-develop-t5chronos-projects.vercel.app",  # branch alias
+        "split-dec-abc123xyz-t5chronos-projects.vercel.app",  # per-deployment
+    ):
         await client.post(
             "/api/csp-report", json=_report_uri_body(**{"document-uri": f"https://{host}/groups"})
         )

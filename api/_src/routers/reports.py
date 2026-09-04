@@ -81,8 +81,21 @@ _DYNAMIC_SEGMENTS = ((re.compile(r"^/groups/[^/]+"), "/groups/[groupId]"),)
 # Preview deployments are in, because previewing is where a policy change gets
 # exercised before it ships. `localhost` is out: `npm run dev` never sees
 # vercel.json's headers, so no report legitimately originates there.
-_ALLOWED_HOSTS = frozenset({"split-dec.app", "www.split-dec.app"})
-_ALLOWED_HOST_PATTERN = re.compile(r"^split-dec[a-z0-9-]*\.vercel\.app$")
+#
+# The trailing team slug is the load-bearing part of the preview pattern.
+# Vercel preview hosts are `<project>-<hash>-<team>.vercel.app` (and
+# `<project>-git-<branch>-<team>...` for branch aliases), and **project names
+# are not globally reserved** — a bare `^split-dec[a-z0-9-]*\.vercel\.app$`
+# would also accept a stranger's project named `split-dec-anything`. Account
+# slugs *are* globally unique, so pinning to ours is what actually scopes this
+# to our own deployments. Cost of the tighter rule: renaming the Vercel team
+# silently stops preview reports, and this line is where to fix that.
+_ALLOWED_HOSTS = frozenset(
+    {"split-dec.app", "www.split-dec.app", "split-dec.vercel.app"}
+)
+_ALLOWED_HOST_PATTERN = re.compile(
+    r"^split-dec-[a-z0-9-]+-t5chronos-projects\.vercel\.app$"
+)
 
 # The shape of a CSP keyword: the values `blocked-uri` can carry instead of a
 # URL ('inline', 'eval', 'data', 'trusted-types-policy', …), every directive
