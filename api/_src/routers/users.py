@@ -128,5 +128,25 @@ async def delete_account(
     user.email = f"deleted-{caller}{DELETED_EMAIL_SUFFIX}"
     user.full_name = "Deleted user"
     user.avatar_url = None
-    await db.execute(text("DELETE FROM auth.users WHERE id = :uid"), {"uid": str(caller)})
+    # Revoking sign-in is the one thing this endpoint cannot do from `public`.
+    # On Postgres it goes through public.delete_auth_user (20260904100000), a
+    # SECURITY DEFINER wrapper, because the app's own role -- `splitdec_app`
+    # since that migration -- has no privileges in the `auth` schema at all,
+    # and could not be given the DELETE directly even by hand: `postgres` holds
+    # it without grant option, so it cannot pass it on.
+    #
+    # The SQLite branch is the test suite's, where conftest.py fakes the schema
+    # with `ATTACH ':memory:' AS auth` and no function exists. Dialect-aware SQL
+    # has a precedent here (ratelimit.window_cutoff), but the cost is specific
+    # and worth stating: **the production statement is not exercised by the
+    # default suite.** Only a real Postgres run covers it -- see DB-ROLE-PLAN
+    # step 6.3, and the account-deletion check in tests/test_locks_pg.py.
+    if db.get_bind().dialect.name == "sqlite":
+        await db.execute(
+            text("DELETE FROM auth.users WHERE id = :uid"), {"uid": str(caller)}
+        )
+    else:
+        await db.execute(
+            text("SELECT public.delete_auth_user(:uid)"), {"uid": str(caller)}
+        )
     await db.commit()

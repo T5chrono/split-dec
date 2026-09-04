@@ -163,6 +163,30 @@ on `ENV=development`):
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
   transaction pooler (port 6543, `postgresql+asyncpg://`) with `NullPool` and
   `statement_cache_size=0` (`api/_src/db.py`) — never per-request engines, never the session pooler.
+  **The app connects as `splitdec_app`, not as the project owner** (migration
+  `20260904100000`). `postgres` owns all eight tables and additionally carries
+  CREATEROLE, CREATEDB, BYPASSRLS, membership in anon/authenticated/service_role
+  and SELECT/UPDATE/DELETE on `auth.users`, `auth.sessions` and
+  `auth.refresh_tokens`; `splitdec_app` holds the four DML verbs on those eight
+  tables, EXECUTE on one function, and nothing else in any schema. This changes
+  no authorization — FastAPI is still the only boundary and RLS stays off — it
+  only shrinks what a leaked `DATABASE_URL` is worth. Three things follow:
+  - **The role is created out of band and lives in no migration.** The statement
+    carries a password and `supabase/migrations/` is public. The migration only
+    grants, and creates a **NOLOGIN** stand-in if the role is absent so a branch
+    or a restore still applies. `postgres` is unchanged, still runs migrations,
+    and is the rollback.
+  - **Account deletion goes through `public.delete_auth_user`**, a
+    `SECURITY DEFINER` wrapper, because `postgres` holds `DELETE` on `auth.users`
+    *without* grant option and so cannot pass it on — the wrapper is mandatory,
+    not stylistic. `routers/users.py` branches on the dialect (the SQLite suite
+    fakes the `auth` schema and has no functions), which means **the production
+    statement is not covered by the default test suite**; `tests/test_locks_pg.py`
+    calls the wrapper as the app role, and that needs `TEST_DATABASE_URL`.
+  - Anything new the app touches — a table, a sequence, a schema — needs a grant
+    added here, or it is `permission denied` in production. `tests/test_grants_pg.py`
+    checks both directions: every table reachable, and nothing held outside
+    `public`, no role attributes, no memberships.
 - **Auth**: Supabase Auth (PKCE) on the frontend — Google OAuth **plus email/password** (signup
   with confirmation required, forgot/reset flow); backend verifies JWTs statelessly
   (`auth.py`: ES256 via JWKS) and reads only the `sub` claim — provider-neutral.

@@ -249,3 +249,35 @@ async def test_prune_deletes_only_rows_it_can_lock():
             await cleanup.execute(delete(User).where(User.id == caller))
             await cleanup.commit()
         await engine.dispose()
+
+
+async def test_the_account_deletion_wrapper_is_callable_by_the_app_role():
+    """routers/users.py's Postgres branch, which the SQLite suite never runs.
+
+    Account deletion removes the caller's `auth.users` row, and since
+    20260904100000 the app connects as `splitdec_app`, which has no privileges
+    in the `auth` schema -- it goes through the SECURITY DEFINER wrapper
+    `public.delete_auth_user` instead. Everything about that arrangement lives
+    outside the models the rest of the suite builds its schema from: the
+    function is created by a migration, and the EXECUTE grant is a catalog
+    entry. So the only way to find out that the grant was forgotten, or that
+    the wrapper was never applied, is to call it.
+
+    Deliberately called with a random uuid: the DELETE matches nothing, so this
+    proves the privilege without needing an auth user to destroy. A missing
+    grant surfaces as `permission denied for function delete_auth_user`, a
+    missing function as `UndefinedFunctionError`.
+    """
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+    )
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            await db.execute(
+                text("SELECT public.delete_auth_user(:uid)"), {"uid": str(uuid.uuid4())}
+            )
+            await db.rollback()
+    finally:
+        await engine.dispose()
