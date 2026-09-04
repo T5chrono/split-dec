@@ -693,12 +693,16 @@ cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/
 
 ## Other files
 
-- **Launch checklist and security record are deliberately not in this repo.** Both are
-  kept locally and untracked (`GO-LIVE.md`, `SECURITY.md` — see `.gitignore`). The repo is
-  public, and while every individual fact in them is either public or derivable from this
-  code, together they read as an inventory of where the app is weak and unmonitored. If you
-  need either file and it is absent, it exists on the maintainer's machine — ask rather
-  than reconstructing it here.
+- **Launch checklist and security record are deliberately not in this repo.** They are
+  kept locally and untracked (`GO-LIVE.md`, `SECURITY.md`, and `DB-ROLE-PLAN.md`, the
+  record of the least-privilege database role — see `.gitignore`, which says why for
+  each). The repo is public, and while every individual fact in them is either public or
+  derivable from this code, together they read as an inventory of where the app is weak
+  and unmonitored. If you need one and it is absent, it exists on the maintainer's
+  machine — ask rather than reconstructing it here, and **do not cite one from a tracked
+  file**: a comment pointing at a path nobody outside that machine can open is worse than
+  no pointer at all. `CLAUDE.local.md` is untracked for a different reason — it is the
+  maintainer's own preferences, not repo policy, so nothing here should depend on it.
   Two rules survive that move, because they are about *this code* rather than the launch:
   adding a third-party script to the origin, or rendering user content as markup, both
   invalidate assumptions the security posture rests on and are review-scoped changes; and
