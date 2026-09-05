@@ -26,6 +26,21 @@ class UserOut(BaseModel):
     avatar_url: str | None
 
 
+class WelcomeIn(BaseModel):
+    # The client's current UI language, so the seeded group name and expense
+    # description are stored in it (welcome.py: they are plain text, fixed at
+    # creation). Unrecognised values fall back to English rather than 422 —
+    # this request exists to be invisible, and no caller shows its errors.
+    lang: str | None = Field(default=None, max_length=8)
+
+
+class WelcomeOut(BaseModel):
+    """`created` is true only for the request that actually built the group,
+    which is the client's cue to refetch its groups list."""
+
+    created: bool
+
+
 # ---------- Groups ----------
 
 class GroupCreate(BaseModel):

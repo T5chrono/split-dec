@@ -28,6 +28,10 @@ class User(Base):
     full_name: Mapped[str | None] = mapped_column(String)
     avatar_url: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Set once, by the conditional UPDATE that claims the right to build this
+    # account's welcome group (welcome.py). Outlives the group on purpose: a
+    # user who settles the coffee and deletes the group is not handed another.
+    welcomed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Group(Base):

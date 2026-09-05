@@ -15,8 +15,15 @@ vi.mock("../hooks/useAuth", () => ({
   }),
 }));
 
+// `post` resolves rather than returning undefined: rendering App mounts
+// Layout, which seeds the welcome group (useWelcomeGroup) on mount.
 vi.mock("../lib/api", () => ({
-  api: { get: vi.fn().mockResolvedValue([]), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
+  api: {
+    get: vi.fn().mockResolvedValue([]),
+    post: vi.fn().mockResolvedValue({ created: false }),
+    delete: vi.fn(),
+    patch: vi.fn(),
+  },
   ApiError: class extends Error {},
   newIdempotencyKey: () => "key",
 }));

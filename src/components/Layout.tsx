@@ -3,6 +3,7 @@ import { Link, Outlet } from "react-router-dom";
 import { Languages, Moon, Sun, UserRound } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
+import { useWelcomeGroup } from "../hooks/useWelcomeGroup";
 import { useI18n } from "../lib/i18n";
 import { safeAvatarUrl } from "../lib/avatarUrl";
 import AccountModal from "./AccountModal";
@@ -13,6 +14,11 @@ export default function Layout() {
   const { theme, toggle } = useTheme();
   const { lang, setLang, t } = useI18n();
   const [accountOpen, setAccountOpen] = useState(false);
+
+  // Here rather than in GroupsPage: this wraps every signed-in route, so an
+  // account that lands on a deep link is seeded too, and it stays mounted
+  // across navigation so the request fires once rather than per screen.
+  useWelcomeGroup();
 
   const meta = session?.user.user_metadata as
     | { avatar_url?: string; picture?: string }
