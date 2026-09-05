@@ -458,7 +458,9 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure
   empties. Every route into a group is membership-gated, so a memberless one can never again
-  be read, settled or deleted by anybody.
+  be read, settled or deleted by anybody. **`delete_account` does not count the SplitDec
+  system user as somebody left** (see The welcome group): it never signs in, so a group whose
+  only human has just left is as unreachable as an empty one.
 - Account deletion anonymizes `public.users` (email gets `DELETED_EMAIL_SUFFIX` from `deps.py`)
   and deletes the `auth.users` row; endpoints not gated by membership must call
   `get_active_user` because old JWTs stay valid until expiry. It also drops pending
@@ -587,6 +589,55 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 - `vitest.config.ts` is separate from `vite.config.ts` on purpose (the PWA plugin must not run
   in tests). `.env.test` holds dummy Supabase values so importing `useAuth` doesn't throw;
   tests mock `../lib/api` / `../lib/supabase` per-file.
+
+### The welcome group
+
+Every account is seeded once with a group holding one unsettled expense: SplitDec paid
+10 PLN for a coffee, the new account owes it (`api/_src/welcome.py`). It doubles as a
+working example — somewhere to open, settle and delete without inventing a trip — and as
+the standing form of the ask in `SUPPORT_URL`.
+
+**The counterparty is an ordinary `public.users` row, and it has to be.** A one-member
+group cannot hold a debt: net balance is `paid − owed`, so a lone member pays themselves
+and nets to zero, leaving nothing for `remove_member` and `delete_group` to refuse. The
+"you cannot leave until you settle" behaviour is therefore not new code — it is the
+zero-balance checks those two endpoints already had, finally having something to refuse.
+Nothing in `balances.py`, the settle form or the greedy simplification knows this group
+exists, and no `if is_welcome` may ever appear near the money.
+
+Consequences worth keeping:
+
+- **Nobody can sign in as SplitDec.** `public.users.id` has no FK to `auth.users`, so the
+  row exists with no auth identity — no password, no session, nothing to reset. Its
+  address (`support@split-dec.app`) is **reserved**: `handle_new_user` mirrors signups
+  into `public.users` where `email` is UNIQUE, so a real account registered there would
+  fail to be mirrored and land with no profile row. `privacy@split-dec.app` is the contact
+  address (`src/lib/legal.ts`); this one is not for handing out. It *is* visible — the
+  members tab renders each member's address under their name.
+- **Seeding is claimed, not checked.** `users.welcomed_at` is set by a conditional UPDATE
+  (`... WHERE id = ? AND welcomed_at IS NULL`), so the row is its own lock and `rowcount`
+  decides — parallel first requests, a retry and two open tabs cannot produce two groups.
+  The column outlives the group on purpose: settle the coffee, delete the group, and you
+  are not handed another. Same reasoning as the `write_events` tombstones.
+- **`POST /users/me/welcome` takes the user lock `"exclusive"`, not the `"shared"` the
+  other membership-creating endpoints take.** It also UPDATEs the caller's own `users`
+  row, and two requests that each took the shared lock first would deadlock upgrading it.
+- **Account deletion is never blocked by the coffee.** `delete_account` skips the
+  zero-balance refusal for a group whose members are exactly the caller and SplitDec, and
+  purges it. Refusing erasure over a debt owed to us would be an obstacle we invented. The
+  exemption is deliberately that narrow: invite a real person into the welcome group and
+  the ordinary rule comes back, because the debts in it are then between real people.
+- **Nothing here is charged to a quota.** The quotas brake what a *caller* creates
+  (`ratelimit.py`); this is the deployment seeding itself, exactly once per account, and
+  spending the user's first group slot on a gift would be backwards.
+- The group name and the expense description are **stored text fixed at creation**, so the
+  client sends its current language and the backend keeps a two-entry EN/PL table.
+  An unrecognised value falls back to English rather than 422 — no caller shows this
+  request's errors.
+- Migration `20260905000000` adds `welcomed_at` **without a backfill**, so accounts that
+  existed before it are seeded on their next sign-in too. That is the intent on a
+  just-launched app; backfilling `now()` is the one-line change that would limit it to new
+  signups.
 
 ### Voluntary support link (buycoffee.to)
 

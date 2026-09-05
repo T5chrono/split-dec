@@ -10,6 +10,8 @@ from ..db import get_db
 from ..deps import DELETED_EMAIL_SUFFIX, get_active_user, lock_groups_exclusive
 from ..models import Group, GroupInvitation, GroupMember, WriteEvent
 from ..ratelimit import INVITE, recipient_key
+from ..schemas import WelcomeIn, WelcomeOut
+from ..welcome import SYSTEM_USER_ID, seed_welcome_group, solo_welcome_groups
 from .groups import purge_group
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -18,6 +20,35 @@ router = APIRouter(prefix="/users", tags=["users"])
 # authenticated caller probe whether an email is registered and fetch the
 # name/avatar. The invitation flow covers the lookup use case with a smaller
 # surface (membership required, an invitation record is created).
+
+
+@router.post("/me/welcome", response_model=WelcomeOut)
+async def ensure_welcome_group(
+    body: WelcomeIn,
+    db: AsyncSession = Depends(get_db),
+    caller: uuid.UUID = Depends(verify_jwt),
+):
+    """Seed the caller's welcome group if they have never had one (welcome.py).
+
+    Called by the client once per signed-in session and idempotent by
+    construction, so a replay, a StrictMode double-effect or two tabs opening
+    at once all resolve to `created: false` rather than a second group.
+
+    Deliberately a POST the client makes, not something folded into
+    `GET /groups`: the groups list is on the hot path of every navigation, and
+    a read endpoint that writes would have to carry this whole protocol.
+
+    The lock is `"exclusive"`, not the `"shared"` that the other
+    membership-creating endpoints take. Two reasons, and they point the same
+    way: this also UPDATEs the caller's own `users` row, and two concurrent
+    requests that each took the shared lock first would deadlock on upgrading
+    it. `FOR NO KEY UPDATE` serializes them cleanly and still leaves the FK
+    inserts below (which take `FOR KEY SHARE` on `users`) unblocked.
+    """
+    user = await get_active_user(db, caller, lock="exclusive")
+    group = await seed_welcome_group(db, user, body.lang)
+    await db.commit()
+    return WelcomeOut(created=group is not None)
 
 
 @router.delete("/me", status_code=204)
@@ -50,8 +81,20 @@ async def delete_account(
     # lock) can slip in between the zero-balance checks below and the
     # membership removal.
     await lock_groups_exclusive(db, group_ids)
+    # The welcome group's 10 PLN is owed to SplitDec itself (welcome.py), and
+    # refusing an account deletion over it would put an obstacle we invented in
+    # front of the one request a person is always entitled to make. Skipped
+    # here, and purged below.
+    #
+    # Only while the group is still just them and SplitDec. Invite somebody
+    # real in and it holds debts between real people, so the ordinary rule
+    # comes back — and clearing it is the same two clicks as any other group,
+    # so nobody is stuck either way.
+    exempt = await solo_welcome_groups(db, group_ids)
     unsettled: set[str] = set()
     for group_id in group_ids:
+        if group_id in exempt:
+            continue
         buckets = await net_balances(db, group_id)
         unsettled.update(
             c for c, users in buckets.items() if users.get(caller, 0) != 0
@@ -74,12 +117,20 @@ async def delete_account(
     # for it. remove_member refuses the same situation instead of deciding it
     # (routers/groups.py); here there is nobody left to ask. The exclusive
     # locks taken above already cover each of these groups.
+    #
+    # SplitDec does not count as somebody left to account for the group: it
+    # never signs in, so a welcome group whose only human has just left is as
+    # unreachable as an empty one, and would otherwise accumulate one row per
+    # deleted account forever.
     for group_id in group_ids:
         remaining = (
             await db.execute(
                 select(func.count())
                 .select_from(GroupMember)
-                .where(GroupMember.group_id == group_id)
+                .where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.user_id != SYSTEM_USER_ID,
+                )
             )
         ).scalar_one()
         if remaining == 0:
