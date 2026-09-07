@@ -5,12 +5,33 @@ on:
     branches: [master, develop]
   pull_request:
 
+# Declared rather than inherited. The repository default is already `read`
+# (Settings → Actions → Workflow permissions), but a default is a dashboard
+# value nobody here reviews and nothing here records: it can change without a
+# PR, and this is the workflow that installs ~600 npm and ~40 PyPI packages and
+# then executes their code via `npm test`, `vite build` and `pytest`. Naming the
+# scope in the file removes that dependency. No job here writes anything back
+# to the repository.
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7
+      # SHA-pinned, same reasoning as the two Claude workflows: a tag is a
+      # mutable pointer, so whoever controls the action repo can re-point it at
+      # new code without a PR here. This job holds TEST_DATABASE_URL, so it
+      # deserves the pin at least as much as they do. The tag each SHA matched
+      # is in the trailing note; the `github-actions` Dependabot group bumps
+      # SHAs, so keeping them costs nothing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes. Without this the GITHUB_TOKEN is left in
+          # .git/config for every later step, including the ones running
+          # third-party package code.
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -19,16 +40,132 @@ jobs:
         env:
           # Enables the Postgres integration tests (balance CTE, row locks);
           # they roll back everything they write.
+          #
+          # Deliberately available on `pull_request` too. GitHub withholds
+          # secrets from fork runs, so reaching this needs push access to this
+          # repo already; the database is disposable and holds no real data.
+          # Restricting it to `push` would strip the *required* `backend` check
+          # of test_locks_pg.py and test_balances_pg.py — the only verification
+          # of the row-lock protocol, which SQLite cannot express — in exchange
+          # for nothing an attacker with write access could not already do.
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
 
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      # --ignore-scripts here for the same reason vercel.json carries it: the
+      # only package in this tree with an install script that runs on Linux is
+      # @sentry/cli, and its postinstall exits immediately when the platform
+      # binary arrived through optionalDependencies (it does — all eight
+      # @sentry/cli-* packages are in the lockfile). So the flag costs nothing
+      # today and denies a future dependency the ability to run code here just
+      # by being installed.
+      - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build
+      # The production build takes a second path nothing else exercises: with
+      # SENTRY_AUTH_TOKEN set, vite.config.ts adds the Sentry plugin, switches
+      # source maps on, stamps debug ids into the bundle and then sweeps dist/
+      # for the maps again. A dummy token reaches all of that — the upload
+      # fails, `errorHandler` downgrades it to a build-log warning by design,
+      # and the build still has to finish with no map left behind.
+      #
+      # Worth a second build because both halves fail *silently*. A map that
+      # survives the sweep is the whole bundle, readable, on the origin holding
+      # the Supabase session, and nothing would say so; the sw.js.map case in
+      # CLAUDE.md is that exact bug, found by hand. The plugin runs in
+      # `writeBundle` and vite-plugin-pwa in `closeBundle`, so any future
+      # version bump can reorder them again.
+      - name: Production build path leaves no source map behind
+        run: npm run build
+        env:
+          SENTRY_AUTH_TOKEN: dummy-token-upload-is-expected-to-fail
+      - name: Assert dist/ holds no source maps
+        run: |
+          maps="$(find dist -name '*.map' -print)"
+          if [ -n "$maps" ]; then
+            echo "Source maps survived into dist/:"; echo "$maps"; exit 1
+          fi
+          echo "No source maps in dist/."
+
+  # Not a required status check (the ruleset requires backend/frontend/
+  # claude-review), on purpose: a published advisory in a dev-only package with
+  # no fix yet would otherwise hold every unrelated merge hostage, which is the
+  # fastest way to train a solo maintainer to stop reading checks. Red here
+  # means read it, decide, and either bump or record the exception in
+  # docs/supply-chain.md.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      # Reads package-lock.json against the GitHub advisory database. `npm
+      # audit` has no per-advisory ignore flag — the only levers are
+      # --audit-level, --omit=dev, and third-party wrappers — so an exception
+      # means narrowing one of those and writing down why.
+      - name: npm audit
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # The npm side has had an advisory feed since Dependabot alerts were
+      # switched on; the Python side had nothing reading the pins at all.
+      # Both locks, not just the runtime one — a compromised test dependency
+      # runs in the same container as the code it tests.
+      #
+      # `no-deps` because both files are already fully pinned, transitive
+      # packages included — there is nothing left to resolve, so pip-audit
+      # should read the pins rather than install them to discover what they
+      # pull. Anything it reports is a package actually in the lock.
+      - name: pip-audit
+        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
+        with:
+          inputs: |
+            requirements.txt
+            requirements-dev.txt
+          no-deps: true
+
+  # requirements.txt says "edit requirements.in, never this file, then
+  # regenerate". Nothing checked that, so a package added to the .in without a
+  # recompile — or a version hand-edited into the .txt — installed and passed
+  # CI in silence.
+  #
+  # Recompiled *against the existing lock as a constraint* (-c), which is what
+  # keeps this quiet: the .in files use `>=` ranges, so a naked recompile would
+  # redden CI the day any upstream release lands, which is not the thing being
+  # checked. With the constraint, uv must reproduce the pinned versions, and the
+  # only way the diff moves is if the .in no longer resolves to what the .txt
+  # holds.
+  #
+  # Known limit: it proves the lock is still a valid solution for the .in, not
+  # that it is byte-for-byte the compiler's output. A hand-edited version that
+  # still satisfies every range is invisible to it.
+  locks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: requirements.txt is still a solution for requirements.in
+        run: |
+          uv pip compile requirements.in --universal --python-version 3.12 \
+            -c requirements.txt -o /tmp/requirements.check.txt --quiet
+          diff <(grep -v '^[[:space:]]*#' requirements.txt) <(grep -v '^[[:space:]]*#' /tmp/requirements.check.txt)
+      - name: requirements-dev.txt is still a solution for requirements-dev.in
+        run: |
+          uv pip compile requirements-dev.in --universal --python-version 3.12 \
+            -c requirements.txt -c requirements-dev.txt -o /tmp/requirements-dev.check.txt --quiet
+          diff <(grep -v '^[[:space:]]*#' requirements-dev.txt) <(grep -v '^[[:space:]]*#' /tmp/requirements-dev.check.txt)

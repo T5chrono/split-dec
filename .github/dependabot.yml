@@ -13,8 +13,12 @@
 # firing, but it reads as noise either way, and these get reviewed in one
 # sitting. Note that Dependabot *security* updates are a separate feature that
 # ignores this schedule entirely — slowing the version feed does not slow the
-# response to a published advisory, provided they are switched on in the repo
-# settings (they are not, as of 2026-08-21).
+# response to a published advisory. They are switched on in the repo settings,
+# which is where they live: this file cannot enable them and cannot report
+# their state, so the earlier note here recording that state went stale the day
+# it was flipped. What that setting is expected to be, and how to check it, is
+# in docs/supply-chain.md, and CI now carries an advisory scan of its own so a
+# silently disabled toggle is not the only line of defence.
 #
 # Majors stay ungrouped, because those are the ones worth looking at alone —
 # except where packages are version-locked to each other, see vite-toolchain.

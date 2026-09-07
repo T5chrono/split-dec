@@ -13,11 +13,28 @@ on:
 
 jobs:
   claude:
+    # Two gates, and the first one is the load-bearing half.
+    #
+    # `github.actor == github.repository_owner` — this repo is public, so
+    # `issues: [opened]` fires for anybody with a GitHub account. Without an
+    # actor check, the text a stranger types into an issue body IS the prompt
+    # handed to an agent that holds CLAUDE_CODE_OAUTH_TOKEN plus write on
+    # issues and pull requests. The mention string is not a permission check:
+    # typing `@claude` is free.
+    #
+    # Gated on `github.actor` rather than `author_association` on purpose. The
+    # association lives at a different path on each of the four triggers
+    # (`comment.` / `review.` / `issue.`), so an association gate is four
+    # expressions that have to stay in step, and one forgotten branch leaves
+    # the door open. The actor is one path valid on all four. The cost is that
+    # a second committer has to be added here explicitly — which, on a repo
+    # whose ruleset already assumes a sole maintainer, is the honest default.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.actor == github.repository_owner &&
+      ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
     runs-on: ubuntu-latest
     # Per the documented baseline (anthropics/claude-code-action
     # examples/claude.yml), with one deliberate tightening: this job exists to
@@ -35,10 +52,20 @@ jobs:
     steps:
       # SHA-pinned for the same reason as claude-code-review.yml: the job
       # carries an OAuth token, and a tag is a mutable pointer.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          # The job never pushes, so the token has no reason to stay behind in
+          # .git/config while third-party code runs in this container.
+          persist-credentials: false
       - name: Run Claude Code
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The same allow-list claude-code-review.yml carries, plus the two
+          # `gh issue` reads this workflow needs and the reviewer does not.
+          # Without it the agent runs with an unrestricted tool set — which
+          # matters most for exactly the input this job takes, since a prompt
+          # arriving from a conversation surface is not code anybody reviewed.
+          # Read and search, comment back, nothing that mutates the repo.
+          claude_args: '--allowed-tools "Read,Grep,Glob,Write,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh issue comment:*),Bash(gh issue view:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git blame:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(rg:*)"'
