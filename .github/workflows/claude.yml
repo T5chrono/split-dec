@@ -59,7 +59,7 @@ jobs:
           # .git/config while third-party code runs in this container.
           persist-credentials: false
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
+        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The same allow-list claude-code-review.yml carries, plus the two
