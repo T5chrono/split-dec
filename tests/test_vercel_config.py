@@ -336,3 +336,25 @@ def test_reports_go_to_our_own_origin():
     ]
     for destination in destinations:
         assert destination.startswith("/") or destination.startswith("https://split-dec.app/")
+
+
+def test_install_is_reproducible_and_runs_no_package_scripts():
+    """`installCommand` carries three separate rules and JSON holds no comments.
+
+    - `npm ci` rather than `npm install`: production must install the exact
+      tree CI tested. Every direct dependency is caret-ranged and `npm install`
+      silently repairs a lock/manifest mismatch instead of failing, so a green
+      CI attested nothing about what Vercel resolved.
+    - `--ignore-scripts`: the build container holds SENTRY_AUTH_TOKEN, and an
+      install script is arbitrary code running there just for being in the
+      tree. The only one that would run on Linux today is @sentry/cli's, which
+      exits immediately when its platform binary came from optionalDependencies
+      — all eight @sentry/cli-* packages are in the lockfile, so nothing is
+      skipped that does work.
+    - The override exists at all to *narrow* Vercel's inferred install, which
+      would otherwise also install the root requirements.txt into the build
+      container, where nothing uses it.
+    """
+    install = CONFIG["installCommand"]
+    assert install.startswith("npm ci"), install
+    assert "--ignore-scripts" in install, install

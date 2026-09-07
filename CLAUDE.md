@@ -68,7 +68,19 @@ that file differs from the default branch, and Dependabot PRs skip the job on it
 guard. In both cases the check is green with no review behind it, so read the comment there
 rather than the tick.
 After merging, sync: `git checkout develop && git merge master && git push`.
-CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs.
+CI runs pytest, `npm test`, and the build on pushes to both branches and all PRs —
+those are the `backend` and `frontend` jobs, and they are the two the ruleset requires.
+Two more jobs run alongside them and are deliberately **not** required: `audit`
+(`npm audit --audit-level=high` plus `pip-audit` over both Python locks) and `locks`
+(recompiles each `requirements*.in` against its own `.txt` as a constraint and diffs, so
+a package added to an `.in` without regenerating stops being silent). Neither blocks a
+merge, because an unfixable advisory in a dev dependency holding every unrelated PR
+hostage is the fastest way to train a solo maintainer to stop reading checks at all —
+red there means read it and decide, and record the decision in `docs/supply-chain.md`.
+Every workflow declares `permissions:` and passes `persist-credentials: false` to
+checkout, and every action is pinned to a commit SHA; `claude.yml` additionally runs
+only for the repository owner, because a public repo's issue body is otherwise an
+unreviewed prompt handed to an agent holding a write-scoped token.
 The develop → PR → master sequence is now enforced by the ruleset rather than by convention
 alone — but treat it as the gate regardless of what any host or tool appears to allow.
 
@@ -88,13 +100,26 @@ on `ENV=development`):
   `tests/test_vercel_config.py`. COOP is deliberately the `-allow-popups` variant:
   the strict value also severs popups *we* open, and while supabase-js signs in by
   full-page redirect today, an OAuth popup is one config change away — plus the
-  support link is a `target="_blank"`. It also sets `installCommand: "npm install"`,
-  which exists to *narrow* the inferred install step: Vercel would otherwise
-  also install the root `requirements.txt` into the build container, where
-  nothing uses it — the build command is `tsc -b && vite build`, and the
-  function gets its own install from the Python runtime afterwards. Removing
-  the override restores a wasted install and, with it, the Tailwind
-  source-detection problem described under Frontend patterns.
+  support link is a `target="_blank"`. It also sets
+  `installCommand: "npm ci --ignore-scripts"`, which exists first to *narrow* the
+  inferred install step: Vercel would otherwise also install the root
+  `requirements.txt` into the build container, where nothing uses it — the build
+  command is `tsc -b && vite build`, and the function gets its own install from
+  the Python runtime afterwards. Removing the override restores a wasted install
+  and, with it, the Tailwind source-detection problem described under Frontend
+  patterns. The command itself carries two more rules, both asserted by
+  `tests/test_vercel_config.py`. It was `npm install` until an OWASP A03 review
+  in September 2026: every direct dependency is caret-ranged and `npm install`
+  silently *repairs* a lock/manifest mismatch rather than failing, so the tree
+  Vercel deployed was a different resolution event from the one CI tested and a
+  green CI attested nothing about it. And `--ignore-scripts`, because this
+  container holds `SENTRY_AUTH_TOKEN` and an install script is arbitrary code
+  running next to it for no reason but being in the tree. Nothing is lost: the
+  only install script that would run on Linux is `@sentry/cli`'s, and its
+  `postinstall` `process.exit(0)`s the moment it resolves the platform binary,
+  which arrives as a package — all eight `@sentry/cli-*` optional dependencies
+  are in the lockfile. The download is its fallback for `--no-optional`
+  installs, not its normal path.
   **The script-level CSP is enforced** (`default-src 'self'`, hash-pinned
   `script-src`, `connect-src` limited to self + the Supabase project + the
   Sentry ingest host). It shipped staged on `Content-Security-Policy-Report-Only`
@@ -745,7 +770,7 @@ cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/
 ## Other files
 
 - **Launch checklist and security record are deliberately not in this repo.** They are
-  kept locally and untracked (`GO-LIVE.md`, `SECURITY.md`). The repo is public, and while
+  kept locally and untracked (`GO-LIVE.md`, `SECURITY-NOTES.md`). The repo is public, and while
   every individual fact in them is either public or derivable from this code, together
   they read as an inventory of where the app is weak and unmonitored. If you need one and
   it is absent, it exists on the maintainer's machine — ask rather than reconstructing it
@@ -755,7 +780,15 @@ cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/
   **Do not cite an untracked file from a tracked one** — a comment pointing at a path
   nobody outside that machine can open is worse than no pointer at all; put the fact in
   the tracked file or point at a test. And **a local working document is not a home for
-  anything durable**: what outlives it belongs here, in `SECURITY.md`, or in a test.
+  anything durable**: what outlives it belongs here, in `SECURITY-NOTES.md`, or in a test.
+  The record was called `SECURITY.md` until September 2026, which was the one name it
+  could not have: that is the filename GitHub reserves for the *public*
+  vulnerability-disclosure policy, so the repo advertised no reporting channel and a
+  single `git add -f` would have published the inventory. `SECURITY.md` is now the public
+  policy and is tracked; the `.gitignore` entry is root-anchored for the same reason
+  `/buycoffee/` is. `docs/supply-chain.md` is the tracked companion to the private
+  record — every accepted supply-chain risk with its reason and its revisit trigger, plus
+  the inventory of settings that live only in the GitHub, Vercel and Supabase dashboards.
   `CLAUDE.local.md` is untracked for a different reason — the maintainer's own reporting
   preferences, not repo policy, so nothing here should depend on it.
   Two rules survive that move, because they are about *this code* rather than the launch:

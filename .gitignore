@@ -29,8 +29,15 @@ SplitDec DesignSystem/
 # The repo is public. Individually the facts in these are public or derivable
 # from the code; aggregated they inventory where the app is weak and
 # unmonitored. Kept on the maintainer's machine instead.
+#
+# The record used to be called SECURITY.md, which is the exact filename GitHub
+# reserves for the *public* vulnerability-disclosure policy — so the repo
+# advertised no reporting channel at all, and the one name meant two opposite
+# files. Renamed, and root-anchored for the same reason as /buycoffee/ below:
+# unanchored, `SECURITY.md` would also have swallowed a public policy placed in
+# .github/ or docs/, silently reintroducing the same hole.
 GO-LIVE.md
-SECURITY.md
+/SECURITY-NOTES.md
 # Same class: the implementation plan for the least-privilege database role
 # opens by listing exactly what the current credential can reach, which is the
 # one paragraph least worth publishing next to the code it describes.
