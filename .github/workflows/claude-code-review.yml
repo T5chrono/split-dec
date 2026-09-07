@@ -60,6 +60,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+          # This job holds the OAuth token and pull-requests: write, which is
+          # the profile that earned the flag in ci.yml and claude.yml — and it
+          # additionally hands an agent a Bash allow-list, so leaving the
+          # GITHUB_TOKEN sitting in .git/config for the rest of the run is the
+          # one place here it is least worth doing.
+          #
+          # Nothing below needs it. Every `gh` call names GH_TOKEN explicitly
+          # rather than reading git's credential store, and every git command in
+          # this file (`rev-parse HEAD:...`, plus the log/show/diff/blame in the
+          # reviewer's allow-list) is local — fetch-depth: 1 means there is
+          # nothing to fetch anyway, and the diff reaches the agent through
+          # `gh pr diff`.
+          persist-credentials: false
       # Anchor for the check below. Taken before the reviewer runs so that a
       # comment left on an earlier run can't be mistaken for this one's.
       - name: Record start time
