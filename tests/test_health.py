@@ -1,3 +1,15 @@
+import pytest
+
+from _src import main
+
+
+def _handshake(result: str):
+    async def _probe(host: str, timeout: float = 5.0) -> str:
+        return result
+
+    return _probe
+
+
 async def test_health(client):
     r = await client.get("/api/health")
     assert r.status_code == 200
@@ -57,3 +69,95 @@ async def test_health_db_gated_by_probe_key(client, db_engine, monkeypatch):
         "/api/health/db", headers={"X-Health-Key": "nöpe".encode("latin-1")}
     )
     assert weird.status_code == 401
+
+
+class TestSentryProbe:
+    """`/api/health/sentry` — the only way to find out whether error reporting
+    from this function actually works.
+
+    Nothing else can tell you. The SDK's transport records a failed delivery
+    and re-raises into `capture_internal_exceptions()`, which swallows it, so
+    it writes no log line when it gives up: a project that has never received
+    anything from production reads exactly like an app that has never thrown.
+    """
+
+    KEY = {"X-Health-Key": "s3cret"}
+
+    @pytest.fixture(autouse=True)
+    def _keyed(self, monkeypatch):
+        monkeypatch.setenv("HEALTH_PROBE_KEY", "s3cret")
+
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        """A configured DSN and a stubbed SDK, so no test opens a socket."""
+        calls: dict[str, object] = {"flushed": False}
+        monkeypatch.setattr(main, "SENTRY_DSN", "https://k@o1.ingest.de.sentry.io/2")
+        monkeypatch.setattr(
+            main.sentry_sdk, "capture_message", lambda *a, **k: "deadbeef"
+        )
+        monkeypatch.setattr(
+            main.sentry_sdk,
+            "flush",
+            lambda *a, **k: calls.__setitem__("flushed", True),
+        )
+        return calls
+
+    async def test_it_is_gated_like_the_database_probe(self, client, monkeypatch):
+        assert (await client.get("/api/health/sentry")).status_code == 401
+        bad = await client.get("/api/health/sentry", headers={"X-Health-Key": "no"})
+        assert bad.status_code == 401
+
+    async def test_an_unconfigured_key_closes_it_rather_than_opening_it(
+        self, client, monkeypatch
+    ):
+        """It names the ingest host and returns raw connection errors, so the
+        missing-key case must fail closed exactly like the database probe."""
+        monkeypatch.delenv("HEALTH_PROBE_KEY", raising=False)
+        r = await client.get("/api/health/sentry")
+        assert r.status_code == 503
+        assert "HEALTH_PROBE_KEY" not in r.text
+
+    async def test_no_dsn_is_reported_rather_than_guessed(self, client, monkeypatch):
+        """Not an error: no DSN is how dev, CI and vitest stay out of the issue
+        stream, so the honest answer is that nothing is configured to test."""
+        monkeypatch.setattr(main, "SENTRY_DSN", "")
+        r = await client.get("/api/health/sentry", headers=self.KEY)
+        assert r.status_code == 200
+        assert r.json() == {
+            "dsn_configured": False,
+            "ingest_host": None,
+            "tls": None,
+            "event_id": None,
+        }
+
+    async def test_it_reports_the_handshake_and_the_event(
+        self, client, monkeypatch, sent
+    ):
+        monkeypatch.setattr(main, "ingest_handshake", _handshake("ok"))
+        r = await client.get("/api/health/sentry", headers=self.KEY)
+        body = r.json()
+        assert body["ingest_host"] == "o1.ingest.de.sentry.io"
+        assert body["tls"] == "ok"
+        assert body["event_id"] == "deadbeef"
+
+    async def test_a_broken_handshake_is_the_answer_not_an_error(
+        self, client, monkeypatch, sent
+    ):
+        """The failure this route was built to catch, verbatim rather than
+        folded into a status code — `SSLEOFError` against `/envelope/` is what
+        production logged for months while reporting silently delivered
+        nothing."""
+        monkeypatch.setattr(main, "ingest_handshake", _handshake("SSLEOFError: EOF"))
+        r = await client.get("/api/health/sentry", headers=self.KEY)
+        assert r.status_code == 200
+        assert r.json()["tls"] == "SSLEOFError: EOF"
+
+    async def test_the_event_is_flushed_before_answering(
+        self, client, monkeypatch, sent
+    ):
+        """Without this the answer is worthless: the SDK sends on a background
+        worker, and the platform can freeze the instance the moment the
+        response is written — taking the envelope with it."""
+        monkeypatch.setattr(main, "ingest_handshake", _handshake("ok"))
+        await client.get("/api/health/sentry", headers=self.KEY)
+        assert sent["flushed"] is True

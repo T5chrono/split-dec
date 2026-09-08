@@ -249,5 +249,20 @@ def init_monitoring() -> None:
         include_local_variables=False,
         # An expense or settlement body is the user's ledger, verbatim.
         max_request_body_size="never",
+        # TCP keep-alive on the connection to the ingest host. Off by default,
+        # and the default is wrong for this deployment: the platform freezes
+        # the function between invocations, so a pooled HTTPS connection sits
+        # idle across the freeze, Sentry's edge times it out, and the next
+        # thaw writes into a socket that is already gone. That surfaces as
+        # `SSLEOFError: UNEXPECTED_EOF_WHILE_READING` on `/envelope/`, which
+        # is what the production log was full of. Sentry's own guidance is to
+        # turn this on when network errors to ingest are frequent.
+        #
+        # Worth knowing why this went unnoticed: a failed send writes **no
+        # log line at all**. `_handle_request_error` records the lost event
+        # and re-raises into `capture_internal_exceptions()`, which swallows
+        # it, so a transport that never delivers looks exactly like one that
+        # works. `GET /api/health/sentry` (main.py) exists because of that.
+        keep_alive=True,
         before_send=scrub_event,
     )
