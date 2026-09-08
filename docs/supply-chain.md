@@ -45,8 +45,8 @@ quietly. Check these at each release.
 | `SENTRY_AUTH_TOKEN` | project-scoped, production only | Vercel env vars |
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
-| Refresh-token rotation + reuse detection | both enabled | Supabase → Authentication → Sessions |
-| Password minimum length | **8 or more** — must not be *lowered* to meet the client | Supabase → Authentication, password settings under the Email provider |
+| Refresh-token rotation + reuse detection | both enabled — confirmed 2026-09-08 | Supabase → Authentication → Sessions |
+| Password minimum length | **8**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Confirmed 2026-09-08 | Supabase → Authentication, password settings under the Email provider |
 | Leaked-password protection (HIBP) | **unavailable on the Free plan — checked 2026-09-08.** See below | same |
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |

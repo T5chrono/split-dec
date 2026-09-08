@@ -91,6 +91,18 @@ async def store_nothing(request: Request, call_next):
     (`vite.config.ts`: `navigateFallbackDenylist`, and no runtime caching
     rule matches `/api/`), because a header cannot reach a cache the page
     fills itself.
+
+    One response is **not** covered, and it is worth naming rather than
+    leaving for someone to find. Starlette puts `ServerErrorMiddleware`
+    *outside* every user middleware and `ExceptionMiddleware` inside, so an
+    `HTTPException` comes back through here and gets the header, while an
+    exception nobody handled propagates past `call_next` and its 500 is
+    written above us. That is acceptable on its own terms rather than by
+    luck: the body of that response is the string "Internal Server Error",
+    it carries nothing from the request, and a 5xx with no freshness header
+    is not cached by browsers anyway. The alternative is a catch-all
+    `Exception` handler, which sits in the middle of Sentry's capture path
+    for the sake of a response with nothing in it.
     """
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"

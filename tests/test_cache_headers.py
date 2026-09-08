@@ -30,8 +30,12 @@ async def test_an_authenticated_read_is_not_stored(client, two_user_group):
 
 
 async def test_a_refusal_is_not_stored_either(anonymous_client):
-    """A 401 body says little, but the header has to be on every response or
-    the rule is one route away from being wrong."""
+    """A 401 body says little, but a rule that holds only on the success path
+    is one route away from being wrong. Every deliberate refusal in this
+    codebase is an `HTTPException`, and those come back through the
+    middleware; the uncovered case is an exception nobody handled, whose 500
+    Starlette writes outside us and which carries nothing from the request
+    (see `store_nothing`)."""
     response = await anonymous_client.get("/api/groups")
     assert response.status_code == 401
     assert response.headers["cache-control"] == "no-store"
