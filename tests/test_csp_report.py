@@ -328,3 +328,60 @@ async def test_the_token_bucket_clips_a_flood_and_says_so_once(client, logged, m
     suppressed = [m for m in logged.messages if "suppressed" in m]
     assert len(violations) == 2
     assert len(suppressed) == 1, "the suppression notice must not repeat per drop"
+
+
+class TestPreflight:
+    """The CORS preflight, without which nothing ever reaches the POST above.
+
+    A `report-to` delivery is preflighted even though the endpoint is
+    same-origin — the browser's reporting service sends it from outside the
+    document, and `application/reports+json` is not CORS-safelisted. This
+    route answered `OPTIONS` with 405 for its whole life, so every preflight
+    failed and no report was ever delivered; the only trace was a periodic
+    `OPTIONS /api/csp-report 405` in the production log, which is a browser
+    retrying the same report it could not hand over.
+
+    A policy carrying `report-to` also makes Chromium ignore `report-uri`, so
+    the legacy channel that would have worked was switched off by the presence
+    of the broken modern one. That is why this is worth its own class.
+    """
+
+    async def test_the_preflight_is_answered(self, client):
+        r = await client.options("/api/csp-report")
+        assert r.status_code == 204
+
+    async def test_it_allows_the_post_that_follows(self, client):
+        r = await client.options("/api/csp-report")
+        assert r.headers["access-control-allow-origin"] == "*"
+        assert r.headers["access-control-allow-methods"] == "POST"
+        # The header the content type forces the preflight to ask about;
+        # without it here the browser refuses to send the report.
+        assert r.headers["access-control-allow-headers"] == "Content-Type"
+
+    async def test_the_preflight_is_not_repeated_for_every_report(self, client):
+        r = await client.options("/api/csp-report")
+        assert int(r.headers["access-control-max-age"]) > 0
+
+    async def test_credentials_are_never_allowed(self, client):
+        """Absent on purpose, twice over: reports are sent with credentials
+        omitted, and a wildcard origin alongside `Allow-Credentials` is
+        refused by every browser — so setting it would break the very
+        delivery this class exists to enable."""
+        r = await client.options("/api/csp-report")
+        assert "access-control-allow-credentials" not in r.headers
+
+    async def test_the_report_itself_is_answered_across_origins_too(self, client):
+        """The delivery, not just the preflight. A response with no
+        `Access-Control-Allow-Origin` is a failed fetch to the browser, so the
+        report goes back on the retry queue even though it has already been
+        logged — the endpoint would look alive and still lose everything."""
+        r = await client.post("/api/csp-report", json=_report_to_body())
+        assert r.status_code == 204
+        assert r.headers["access-control-allow-origin"] == "*"
+
+    async def test_a_refusal_carries_them_as_well(self, client):
+        r = await client.post(
+            "/api/csp-report", content=b"{}", headers={"Content-Type": "text/plain"}
+        )
+        assert r.status_code == 415
+        assert r.headers["access-control-allow-origin"] == "*"
