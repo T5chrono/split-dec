@@ -488,6 +488,22 @@ things guard that, both found by building with a deliberately invalid token:
   a build-log warning. The accepted cost is that a silently missing upload
   surfaces only as minified frames on the next crash.
 
+**A failed delivery writes no log line, so an unreachable Sentry and a
+blameless app look identical.** The transport records the lost event and
+re-raises into `capture_internal_exceptions()`, which swallows it — there is no
+"unable to send" anywhere. That is not hypothetical: for the first three months
+the only event `splitdec-api` ever held was a smoke test run from a laptop,
+while the function logged `SSLEOFError: UNEXPECTED_EOF_WHILE_READING` against
+`/envelope/` every few minutes and never once said it had given up. Two things
+came out of that. `keep_alive=True` in `init()`, because the platform freezes
+the function between invocations and a pooled HTTPS connection dies idle across
+the freeze, so the next thaw writes into a socket that is already gone — which
+is exactly the shape of that error, and turning keep-alive on is Sentry's own
+advice for it. And `GET /api/health/sentry`, because "no events" needed to stop
+being ambiguous: it measures the handshake itself rather than asking the SDK,
+which is the one party that cannot tell you it failed. **Never read an empty
+issue stream as good news without running it.**
+
 `connect-src` in `vercel.json` carries the org's ingest host pinned exactly
 (`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would
 admit every other tenant on the platform. Asserted in `tests/test_vercel_config.py`,
@@ -853,3 +869,8 @@ cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/
   invalidate assumptions the security posture rests on and are review-scoped changes; and
   any new data retention also changes `src/lib/legal.ts`.
 - `/api/health/db` — DB latency probe, gated by `HEALTH_PROBE_KEY` header outside development.
+- `/api/health/sentry` — same gate. Answers whether error reporting from *this
+  function* reaches Sentry, which nothing else can: it reports the TLS
+  handshake to the ingest host (measured directly, not via the SDK) and the
+  `event_id` of a probe event it captures and flushes, for you to look up. See
+  Error monitoring for why a route was needed at all.

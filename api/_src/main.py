@@ -1,13 +1,18 @@
+import asyncio
 import logging
 import os
 import secrets
+import ssl
 import time
+from urllib.parse import urlsplit
+
+import sentry_sdk
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import DEV_FRONTEND_ORIGIN, ENV, current_env
+from .config import DEV_FRONTEND_ORIGIN, ENV, SENTRY_DSN, current_env
 from .db import get_db
 from .monitoring import init_monitoring
 from .routers import expenses, groups, invitations, reports, settlements, users
@@ -124,6 +129,30 @@ async def health():
     return {"status": "ok"}
 
 
+def require_health_key(presented: str | None, probe: str) -> None:
+    """The gate in front of every diagnostic route below.
+
+    Outside development the key must be configured AND presented — a missing
+    key means 503, never open access. Env read at call time for testability.
+    """
+    expected = os.getenv("HEALTH_PROBE_KEY", "")
+    if not expected:
+        if current_env() != "development":
+            # Generic on the wire, specific in the log: these routes are
+            # reachable by anyone, and naming the variable that switches them
+            # on tells a stranger what to go looking for.
+            logger.warning("%s probe refused: HEALTH_PROBE_KEY is not configured", probe)
+            raise HTTPException(status_code=503, detail="Service unavailable")
+        return
+    # Constant-time: a plain `!=` leaks the shared secret one character at a
+    # time. Compared as bytes because compare_digest rejects non-ASCII str,
+    # and header values arrive latin-1 decoded.
+    if not secrets.compare_digest(
+        (presented or "").encode("utf-8"), expected.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Health-Key")
+
+
 @app.get("/api/health/db")
 async def health_db(
     db: AsyncSession = Depends(get_db),
@@ -132,25 +161,83 @@ async def health_db(
     """Round-trip through the database; used to measure connect+query latency.
 
     Every call opens a fresh pooler connection (NullPool), so this is never
-    open to the public: outside development it requires HEALTH_PROBE_KEY to
-    be configured AND presented — a missing key means 503, not open access.
-    Env read at call time for testability.
+    open to the public — see `require_health_key`.
     """
-    expected = os.getenv("HEALTH_PROBE_KEY", "")
-    if not expected:
-        if current_env() != "development":
-            # Generic on the wire, specific in the log: this route is reachable
-            # by anyone, and naming the variable that switches it on tells a
-            # stranger what to go looking for.
-            logger.warning("Database probe refused: HEALTH_PROBE_KEY is not configured")
-            raise HTTPException(status_code=503, detail="Service unavailable")
-    # Constant-time: a plain `!=` leaks the shared secret one character at a
-    # time. Compared as bytes because compare_digest rejects non-ASCII str,
-    # and header values arrive latin-1 decoded.
-    elif not secrets.compare_digest(
-        (x_health_key or "").encode("utf-8"), expected.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="Missing or invalid X-Health-Key")
+    require_health_key(x_health_key, "Database")
     started = time.perf_counter()
     await db.execute(text("SELECT 1"))
     return {"status": "ok", "db_ms": round((time.perf_counter() - started) * 1000, 1)}
+
+
+async def ingest_handshake(host: str, timeout: float = 5.0) -> str:
+    """`"ok"`, or the exception that stopped a TLS handshake with `host`.
+
+    Deliberately separate from the SDK. Sentry's transport swallows its own
+    delivery failures, so asking it whether it worked is asking the one party
+    that cannot say; this opens the connection itself and reports what
+    happened. It writes nothing and reads nothing — the handshake completing
+    is the entire answer.
+
+    The host is taken from `SENTRY_DSN`, never from the request, so there is
+    nothing here a caller could point at a third party.
+    """
+    try:
+        connection = asyncio.open_connection(host, 443, ssl=ssl.create_default_context())
+        _, writer = await asyncio.wait_for(connection, timeout)
+    except Exception as exc:  # noqa: BLE001 — the exception *is* the result
+        return f"{type(exc).__name__}: {exc}"
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        pass
+    return "ok"
+
+
+@app.get("/api/health/sentry")
+async def health_sentry(
+    x_health_key: str | None = Header(default=None, alias="X-Health-Key"),
+):
+    """Is error reporting from this function actually reaching Sentry?
+
+    It exists because nothing else can answer that. A failed send writes no
+    log line — the transport records the lost event and re-raises into
+    `capture_internal_exceptions()`, which swallows it — so a Sentry project
+    that has never received anything from production is indistinguishable
+    from an app that has never thrown. That was the real state here for the
+    first three months: the only event `splitdec-api` held was a smoke test
+    run from a laptop, while the function logged `SSLEOFError` against
+    `/envelope/` every few minutes and said nothing about giving up.
+
+    Two independent answers, because they fail for different reasons and the
+    difference is the whole diagnosis. `tls` is this function reaching the
+    ingest host at all, measured directly. `event_id` is the SDK's own path
+    end to end — look that id up in Sentry, and if it is there, reporting
+    works. The flush is what makes the second one meaningful: the worker
+    sends on a background thread, and without waiting the platform can freeze
+    the instance before the envelope leaves.
+
+    Gated like the database probe, and for a better reason than symmetry: it
+    names the ingest host and returns raw connection errors.
+    """
+    require_health_key(x_health_key, "Sentry")
+    if not SENTRY_DSN:
+        # Not an error. No DSN is how dev, CI and vitest stay out of the issue
+        # stream (monitoring.py), so the honest answer is that there is
+        # nothing configured to test.
+        return {"dsn_configured": False, "ingest_host": None, "tls": None, "event_id": None}
+    host = urlsplit(SENTRY_DSN).hostname or ""
+    tls = await ingest_handshake(host)
+    event_id = sentry_sdk.capture_message(
+        "SplitDec Sentry reachability probe", level="error"
+    )
+    # Blocking, so off the event loop: the SDK's flush waits on a background
+    # worker thread and would otherwise stall every other request this
+    # instance is serving.
+    await asyncio.to_thread(sentry_sdk.flush, 5.0)
+    return {
+        "dsn_configured": True,
+        "ingest_host": host,
+        "tls": tls,
+        "event_id": event_id,
+    }
