@@ -512,18 +512,52 @@ re-raises into `capture_internal_exceptions()`, which swallows it — there is n
 "unable to send" anywhere. That is not hypothetical: for the first three months
 the only event `splitdec-api` ever held was a smoke test run from a laptop,
 while the function logged `SSLEOFError: UNEXPECTED_EOF_WHILE_READING` against
-`/envelope/` every few minutes and never once said it had given up. Two things
-came out of that. `keep_alive=True` in `init()`, because the platform freezes
-the function between invocations and a pooled HTTPS connection dies idle across
-the freeze, so the next thaw writes into a socket that is already gone — which
-is exactly the shape of that error, and turning keep-alive on is Sentry's own
-advice for it. And `GET /api/health/sentry`, because "no events" needed to stop
-being ambiguous: it measures the handshake itself rather than asking the SDK,
-which is the one party that cannot tell you it failed. **Never read an empty
-issue stream as good news without running it.** Confirmed working from
-production on 2026-09-08 — `tls: "ok"` and the probe event delivered, the first
-event `splitdec-api` has ever received from the function rather than from a
-laptop.
+`/envelope/` every few minutes and never once said it had given up. Out of that
+came `GET /api/health/sentry`, because "no events" needed to stop being
+ambiguous: it measures the handshake itself rather than asking the SDK, which
+is the one party that cannot tell you it failed. **Never read an empty issue
+stream as good news without running it.**
+
+**The cause is the freeze, and it took two attempts to find.** `keep_alive=True`
+was the first, on the theory that a pooled connection dies idle across the
+freeze; it is still set, because it is right for a connection idling while the
+process *runs*, but it did not change the log and cannot — keep-alive probes
+come from the guest kernel, which is frozen along with everything else. The
+actual mechanism is one layer up: Sentry sends on a background thread, the
+platform freezes the instance the moment the response is written, and the send
+is caught mid-flight. It then advances only when the next request thaws the
+instance, by which point the socket is gone. Proof is in the retry timing —
+urllib3's backoff on that pool is zero, yet production showed a single chain
+stepping `Retry(total=2)` → `1` → `0` across three invocations fifteen minutes
+apart, one step per incoming request. After the third the event is dropped, in
+silence.
+
+Two changes close it, and the first is the surprising one. **Release health is
+off** (`auto_session_tracking=False`): the SDK opened a session per request and
+posted aggregates every 60s, so the Sentry uptime monitor's five-minute ping of
+`/api/health` was manufacturing nearly all the Sentry traffic — and all the
+retry warnings — for a feature nothing here reads. **And `flush_on_response`**
+(`monitoring.py`, applied in `api/index.py`) waits for a captured event to
+reach Sentry before the reply ends, which is what Sentry's own AWS Lambda and
+GCP integrations do for the same reason. It **must** wrap the app object: the
+Starlette integration patches `Starlette.__call__`, so `SentryAsgiMiddleware`
+sits outside every middleware added with `add_middleware`, and a flush
+installed the ordinary way would run before the capture and flush nothing. Only
+requests that captured something wait, and never longer than `FLUSH_TIMEOUT` —
+the transport's own timeout is 30s, which is not a number to add to a request
+that has already answered.
+
+That wrapper is also why `api/index.py` exports a plain `async def` taking
+exactly `(scope, receive, send)`: Vercel picks ASGI over WSGI by checking
+`inspect.iscoroutinefunction` and counting required positional parameters
+(`vercel_runtime/resolver.py`), so an extra argument or a default would have
+the app served as WSGI — a per-request runtime failure, not a build error.
+`tests/test_monitoring.py` pins the shape, because the suite otherwise only
+ever drives the unwrapped `_src.main.app`.
+
+Delivery confirmed from production on 2026-09-08: `tls: "ok"` and six of six
+probe events delivered, the first events `splitdec-api` has ever received from
+the function rather than from a laptop.
 
 `connect-src` in `vercel.json` carries the org's ingest host pinned exactly
 (`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would

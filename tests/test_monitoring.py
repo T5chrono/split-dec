@@ -1,10 +1,17 @@
-"""The Sentry scrubber.
+"""The Sentry scrubber, and the delivery it depends on.
 
-Everything here is testing one property: that an event leaving this function
+Most of this is testing one property: that an event leaving this function
 carries no identifier, no credential and no ledger content. The SDK's own
 defaults are the adversary — each case below corresponds to something
 `sentry-sdk` would have sent if `before_send` were absent.
+
+The last two classes test a different property, and a harder one to notice
+going wrong: that an event actually *arrives*. See `flush_on_response`.
 """
+
+import importlib.util
+import inspect
+import os
 
 import pytest
 
@@ -214,3 +221,108 @@ def test_init_is_a_no_op_without_a_dsn(monkeypatch):
     monkeypatch.setattr(monitoring.sentry_sdk, "init", explode)
     monitoring.init_monitoring()
     assert called is False
+
+
+def test_release_health_is_off_and_keep_alive_is_on(monkeypatch):
+    """Two init options that cost nothing to keep and mattered to get right.
+
+    Sessions are the traffic that used to fill the production log with retry
+    warnings: one per request, uploaded by a background thread that the
+    platform freezes mid-send, for a feature nothing here reads. `keep_alive`
+    is asserted so that removing it stays a deliberate act — it does not fix
+    what it was added for, but it is still correct for a connection idling
+    while the process runs.
+    """
+    monkeypatch.setattr(
+        monitoring, "SENTRY_DSN", "https://k@o0.ingest.de.sentry.io/1"
+    )
+    options: dict = {}
+    monkeypatch.setattr(
+        monitoring.sentry_sdk, "init", lambda **kwargs: options.update(kwargs)
+    )
+    monitoring.init_monitoring()
+    assert options["auto_session_tracking"] is False
+    assert options["keep_alive"] is True
+
+
+class TestFlushOnResponse:
+    """Does a captured event leave before the platform freezes the instance?"""
+
+    @pytest.fixture
+    def flushes(self, monkeypatch):
+        recorded: list[float] = []
+        monkeypatch.setattr(
+            monitoring.sentry_sdk, "flush", lambda timeout: recorded.append(timeout)
+        )
+        return recorded
+
+    async def test_a_request_that_captured_nothing_does_not_wait(self, flushes):
+        """Nearly every request. It must cost an integer comparison, not a round trip."""
+
+        async def inner(scope, receive, send):
+            return None
+
+        await monitoring.flush_on_response(inner)({"type": "http"}, None, None)
+        assert flushes == []
+
+    async def test_a_captured_event_is_flushed(self, flushes):
+        async def inner(scope, receive, send):
+            monitoring.scrub_event({"message": "boom"}, {})
+
+        await monitoring.flush_on_response(inner)({"type": "http"}, None, None)
+        assert flushes == [monitoring.FLUSH_TIMEOUT]
+
+    async def test_an_unhandled_exception_is_flushed_and_still_raised(self, flushes):
+        """The case the wrapper exists for.
+
+        `SentryAsgiMiddleware` captures on the way out and re-raises, so by the
+        time the exception reaches this wrapper the event is queued. Flushing
+        in `finally` is what gets it sent; re-raising is what keeps the 500.
+        """
+
+        async def inner(scope, receive, send):
+            monitoring.scrub_event({"message": "boom"}, {})
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            await monitoring.flush_on_response(inner)({"type": "http"}, None, None)
+        assert flushes == [monitoring.FLUSH_TIMEOUT]
+
+    async def test_non_http_scopes_pass_straight_through(self, flushes):
+        """Lifespan runs once per instance and has no reply to hold up."""
+        seen: list[str] = []
+
+        async def inner(scope, receive, send):
+            monitoring.scrub_event({"message": "boom"}, {})
+            seen.append(scope["type"])
+
+        await monitoring.flush_on_response(inner)({"type": "lifespan"}, None, None)
+        assert seen == ["lifespan"]
+        assert flushes == []
+
+
+def test_the_vercel_entrypoint_is_shaped_like_an_asgi_app():
+    """Vercel decides ASGI vs WSGI by shape, and gets it wrong silently.
+
+    `vercel_runtime/resolver.py` asks two questions: is the object a coroutine
+    function (or is its `__call__` one), and how many *required positional*
+    parameters does it take. Three means ASGI, two means WSGI, anything else is
+    a build error. So giving `flush_on_response`'s wrapper a default argument
+    would hand the app to the platform as WSGI, which fails per request at
+    runtime rather than once at build time — exactly the kind of break a test
+    suite that only ever drives `_src.main.app` would not see.
+    """
+    path = os.path.join(os.path.dirname(__file__), "..", "api", "index.py")
+    spec = importlib.util.spec_from_file_location("vercel_entrypoint", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert inspect.iscoroutinefunction(module.app)
+    required = [
+        parameter
+        for parameter in inspect.signature(module.app).parameters.values()
+        if parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    assert len(required) == 3
