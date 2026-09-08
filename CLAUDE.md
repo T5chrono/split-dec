@@ -520,7 +520,10 @@ is exactly the shape of that error, and turning keep-alive on is Sentry's own
 advice for it. And `GET /api/health/sentry`, because "no events" needed to stop
 being ambiguous: it measures the handshake itself rather than asking the SDK,
 which is the one party that cannot tell you it failed. **Never read an empty
-issue stream as good news without running it.**
+issue stream as good news without running it.** Confirmed working from
+production on 2026-09-08 — `tls: "ok"` and the probe event delivered, the first
+event `splitdec-api` has ever received from the function rather than from a
+laptop.
 
 `connect-src` in `vercel.json` carries the org's ingest host pinned exactly
 (`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would
