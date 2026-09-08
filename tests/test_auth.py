@@ -42,12 +42,21 @@ SECRET = "test-jwt-secret-" * 4
 WRONG_SECRET = "attacker-secret-" * 4
 SUBJECT = uuid.uuid4()
 
+# A stand-in project, and the issuer Supabase stamps on tokens from it. Pinned
+# rather than left to the environment: `config.py` calls `load_dotenv()`, so on
+# a developer's machine `auth.SUPABASE_URL` is the *real* project and the token
+# built below would be refused for naming a different issuer — a failure that
+# never reproduces on CI, where nothing sets the variable.
+PROJECT_URL = "https://project.supabase.co"
+ISSUER = f"{PROJECT_URL}/auth/v1"
+
 
 def _claims(**overrides) -> dict:
     now = datetime.now(timezone.utc)
     claims = {
         "sub": str(SUBJECT),
         "aud": "authenticated",
+        "iss": ISSUER,
         "iat": now,
         "exp": now + timedelta(hours=1),
     }
@@ -100,6 +109,7 @@ def _shared_secret(monkeypatch):
     """
     monkeypatch.setattr(auth, "SUPABASE_JWT_SECRET", SECRET)
     monkeypatch.setattr(auth, "SYMMETRIC_ALGORITHMS", frozenset({"HS256"}))
+    monkeypatch.setattr(auth, "SUPABASE_URL", PROJECT_URL)
 
 
 @pytest.fixture
@@ -314,3 +324,62 @@ class TestTheAppActuallyUsesIt:
         )
         assert r.status_code == 200
         assert r.json() == []
+
+
+class TestRequiredClaims:
+    """A claim PyJWT does not find is a claim it does not check.
+
+    `verify_exp` only means "if there is an expiry, honour it", so a correctly
+    signed token that simply omitted `exp` used to validate — and kept
+    validating, with nothing that could ever make it stop. Only `require` turns
+    an absent claim into a refusal.
+    """
+
+    def test_a_token_with_no_expiry_is_refused(self):
+        claims = _claims()
+        del claims["exp"]
+        assert _status(jwt.encode(claims, SECRET, algorithm="HS256")) == 401
+
+    def test_the_same_on_the_path_the_app_actually_uses(self, jwks, signing_key):
+        private, _ = signing_key
+        claims = _claims()
+        del claims["exp"]
+        assert _status(jwt.encode(claims, private, algorithm="ES256")) == 401
+
+
+class TestIssuer:
+    """Which project the token has to say minted it.
+
+    Near-redundant on purpose: the signing key is fetched from this project's
+    own JWKS, so a token that verifies came from this project anyway. It is
+    here because it costs a comparison, and because it is the check that stops
+    mattering last if the key handling above is ever rearranged.
+    """
+
+    def test_this_project_is_accepted(self):
+        assert _call(_hs256(iss=ISSUER)) == SUBJECT
+
+    def test_another_project_is_refused(self):
+        assert _status(_hs256(iss="https://someone-else.supabase.co/auth/v1")) == 401
+
+    def test_a_token_with_no_issuer_is_refused(self):
+        claims = _claims()
+        del claims["iss"]
+        assert _status(jwt.encode(claims, SECRET, algorithm="HS256")) == 401
+
+    def test_a_trailing_slash_is_not_a_different_project(self, monkeypatch):
+        """`https://ref.supabase.co/` and `https://ref.supabase.co` name the
+        same project; joined naively the first produces `//auth/v1` and 401s
+        every caller."""
+        monkeypatch.setattr(auth, "SUPABASE_URL", f"{PROJECT_URL}/")
+        assert _call(_hs256(iss=ISSUER)) == SUBJECT
+
+    def test_without_a_project_url_there_is_nothing_to_compare(self, monkeypatch):
+        """The legacy shared-secret deployment, which never sets SUPABASE_URL.
+        Inventing an issuer there would refuse tokens that are otherwise
+        fine — the asymmetric path cannot reach this state, because it refuses
+        outright when SUPABASE_URL is unset."""
+        monkeypatch.setattr(auth, "SUPABASE_URL", "")
+        claims = _claims()
+        del claims["iss"]
+        assert _call(jwt.encode(claims, SECRET, algorithm="HS256")) == SUBJECT

@@ -3,7 +3,7 @@ import os
 import secrets
 import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +66,36 @@ if ENV == "development":
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+@app.middleware("http")
+async def store_nothing(request: Request, call_next):
+    """`Cache-Control: no-store` on everything this API answers.
+
+    Nothing here set a caching header at all, which does not mean "do not
+    cache" — it means the browser decides. Every authenticated GET in this app
+    returns somebody's ledger: balances, what an expense was for, the email
+    address of everyone in the group. On a shared or borrowed machine that is
+    a copy left in the profile's disk cache after the session is gone, and
+    nothing in a sign-out clears it.
+
+    Shared caches were never the exposure — a proxy may not store a response
+    to a request carrying `Authorization` (RFC 9111 §3.5), and in production
+    the only thing between the browser and the function is Vercel, which is
+    not caching a rewrite it was never asked to. The local disk is.
+
+    `no-store` alone, deliberately. `private` says less and says it to
+    intermediaries that were already excluded; `Pragma: no-cache` is a request
+    header that HTTP/1.0 clients sent, and has no defined meaning on a
+    response. The service worker is handled where it is configured
+    (`vite.config.ts`: `navigateFallbackDenylist`, and no runtime caching
+    rule matches `/api/`), because a header cannot reach a cache the page
+    fills itself.
+    """
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 app.include_router(users.router, prefix="/api")
 app.include_router(groups.router, prefix="/api")
