@@ -99,14 +99,31 @@ def recipient_key(email: str) -> str:
 
     The per-recipient window asks one question — has *this* address already had
     its share today — which equality on a digest answers as well as the address
-    would. Storing the digest instead keeps every contactable address out of a
-    table that deliberately outlives the invitation, so account deletion can go
-    on promising to erase the address (routers/users.py).
+    would, so the address itself is never written.
 
-    Unpeppered on purpose rather than for show: anyone who can read this column
-    can already read `public.users.email` in plaintext, so a pepper would buy
-    nothing real while adding a secret to manage and a rotation that would
-    silently reset every recipient window.
+    **This is not anonymisation, and nothing here should be read as claiming
+    it is.** An email address is short, structured and guessable; SHA-256 over
+    one is reversed by running a candidate list through the same function, and
+    the answer either matches or it does not. Whoever can read this column can
+    recover the address of anyone whose address they can guess.
+
+    Three things make that an acceptable trade rather than a hole, and a change
+    to any of them is a reason to revisit it:
+
+    - Whoever can read this column can read `public.users.email` in plaintext,
+      in the same database. The only addresses this exposes that the users
+      table does not are those of people who were invited and never signed up.
+    - The rows do not accumulate. `record_write` prunes everything past the
+      longest window, so a digest here has a working life of about a day —
+      it is not a durable record of who was ever invited.
+    - Account deletion nulls the column on every row naming the departing
+      account's own address (routers/users.py), so the promise made there does
+      not rest on the digest being hard to reverse.
+
+    Unpeppered, therefore, on the same reasoning: an HMAC would protect only
+    that third population for about a day, and it would cost a secret that has
+    to exist in every environment, fail closed when it does not, and reset
+    every recipient window whenever it is rotated.
     """
     return hashlib.sha256(email.lower().encode()).hexdigest()
 

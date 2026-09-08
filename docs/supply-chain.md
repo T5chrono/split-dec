@@ -3,7 +3,9 @@
 What protects the code this app installs and deploys, what is deliberately
 *not* protected, and where the controls live that no file in this repo can
 show you. Written after an OWASP A03 (Software Supply Chain Failures) review in
-September 2026.
+September 2026, and extended after an A04 (Cryptographic Failures) review the
+same month — which is where the secrets register and the data classification
+below came from.
 
 The point of the second half is that an accepted risk and an oversight look
 identical from outside. Everything below the line was considered and declined,
@@ -25,6 +27,8 @@ with a reason and a trigger for revisiting it.
 | Branch protection | ruleset `SplitDecMaster`: PR required, `backend` / `frontend` / `claude-review` must pass, force-push and deletion blocked, **no bypass actors** |
 | Runtime pinning | Node 24 (`package.json` engines), Python 3.12 (`.python-version`, matched in CI and on Vercel) |
 | Least-privilege database role | `splitdec_app`, not the project owner — see CLAUDE.md and `tests/test_grants_pg.py` |
+| Verified TLS to the database | `api/_src/db.py` + `supabase_ca.py`; asyncpg's default accepts any certificate and falls back to plaintext. `tests/test_db_tls.py` |
+| No client-side storage of API responses | `Cache-Control: no-store` middleware in `api/_src/main.py`, plus Workbox kept out of `/api/`. `tests/test_cache_headers.py` |
 
 ## Controls that live in a dashboard
 
@@ -41,6 +45,11 @@ quietly. Check these at each release.
 | `SENTRY_AUTH_TOKEN` | project-scoped, production only | Vercel env vars |
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
+| Refresh-token rotation + reuse detection | both enabled — confirmed 2026-09-08 | Supabase → Authentication → Sessions |
+| Password minimum length | **8**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Confirmed 2026-09-08 | Supabase → Authentication, password settings under the Email provider |
+| Leaked-password protection (HIBP) | **unavailable on the Free plan — checked 2026-09-08.** See below | same |
+| `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
+| Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
 Verifying the GitHub half without clicking through the UI:
 
@@ -49,6 +58,72 @@ gh api repos/T5chrono/split-dec --jq .security_and_analysis
 gh api repos/T5chrono/split-dec/actions/permissions/workflow
 gh api repos/T5chrono/split-dec/dependabot/alerts --jq '[.[] | select(.state=="open")] | length'
 ```
+
+## Secrets register
+
+Names, blast radius and what should make you rotate one. No values: those live
+in Vercel's environment, in Supabase, and nowhere else. Owner is the
+maintainer for all of them, which is the point of writing it down — there is
+nobody to escalate to, so the runbook has to exist before the day it is needed.
+
+| Secret | Where it lives | What it is worth | Rotate when |
+| --- | --- | --- | --- |
+| `DATABASE_URL` (the `splitdec_app` password) | Vercel env, local `.env` | Read/write on the eight application tables. Not the owner role — no `auth` schema, no role administration, nothing outside `public` | Suspected exposure, a laptop lost, or a contractor's access ending. Not on a schedule |
+| `RESEND_API_KEY` | Vercel env | Sending as the verified domain. The blast radius is the domain's reputation, which money cannot buy back | Suspected exposure; also the natural rehearsal target, see below |
+| `HEALTH_PROBE_KEY` | Vercel env, local `.env` | Opening one pooler connection per call and reading its latency. Lowest value here | Suspected exposure |
+| `SENTRY_AUTH_TOKEN` | Vercel env, production build only | Uploading source maps to the `split-dec` Sentry org | Suspected exposure |
+| `SENTRY_DSN` | Vercel env | Writing events into the `splitdec-api` Sentry project. Not public, unlike its browser twin | Suspected exposure |
+| `SUPABASE_JWT_SECRET` | **should not be set** | A symmetric minting credential: anything holding it can *issue* valid tokens. `ALLOW_LEGACY_HS256` is off, so nothing reads it | If it is set anywhere, the action is to remove it, not to rotate it |
+| `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN` | committed | Public by construction — they ship inside the bundle | Never; they are not secrets |
+
+The other Vercel variables — `SUPABASE_URL`, `APP_URL`, `RESEND_FROM` — hold no
+secret and are listed here only so the register can be read against the
+dashboard and every name accounted for. Anything in Vercel that is not on one
+of these two lists is something nobody has thought about.
+
+
+**Rotating `DATABASE_URL` is a short outage, and pretending otherwise is worse
+than scheduling one.** The role has exactly one password: the moment
+`ALTER ROLE splitdec_app PASSWORD …` runs, every new connection fails until the
+Vercel variable is updated and a deploy picks it up, and with `NullPool` on a
+serverless function *every* request opens a new connection. Budget a couple of
+minutes and do it deliberately. The genuinely seamless version is a second role
+— create `splitdec_app_next`, apply the same grants (`20260904100000` is the
+list), cut the variable over, drop the old one — which is worth the trouble
+only if the rotation is planned rather than urgent.
+
+**Rehearse on `RESEND_API_KEY`, never on the database.** A rehearsal whose
+failure mode is a production outage is not a control, it is a second incident.
+Resend's key can be rotated in the dashboard, updated in Vercel, and verified
+by sending one invitation; if it goes wrong the app falls back to a mailto
+draft, which is the behaviour it already has without a key at all.
+
+## Data classification
+
+There is no encryption of individual columns, and there should not be. What the
+database holds, and what protects it:
+
+| Data | Where | Protection |
+| --- | --- | --- |
+| Email address, display name, avatar URL | `public.users` | Supabase's disk encryption; the `splitdec_app` role reaches nothing else; FastAPI is the only reader |
+| Group and expense names, categories, dates | `public.groups`, `public.expenses` | same |
+| Amounts and per-person splits | `NUMERIC(14,4)` columns | same |
+| Invitation recipient addresses | `public.group_invitations` (plaintext, deleted with the account), `public.write_events.recipient_hash` (SHA-256, pruned after ~24h — see `ratelimit.recipient_key`) | same |
+
+**Application-level column encryption is rejected, not deferred.**
+`users.email` is UNIQUE and drives lowercased invitation matching, and the
+amounts are summed inside the balances CTE — encrypting either breaks the
+feature it belongs to. And a key held by the same function that holds
+`DATABASE_URL` protects nothing against the compromise that matters, which is
+the function itself.
+
+So the at-rest control is the provider's, and the in-transit half is now real
+on both legs: browser → function over HTTPS with HSTS, function → database with
+a verified certificate (`api/_src/db.py`, which until September 2026 accepted
+any certificate at all). `src/lib/legal.ts` still claims only the in-transit
+half, which is incomplete rather than false; adding an at-rest sentence waits
+on dated evidence from Supabase about disk and backup encryption, because an
+unverified promise in a privacy policy is worse than a silence.
 
 ---
 
@@ -176,6 +251,24 @@ was missing was a way to notice drift, not a way to declare intent.
 **Compensating controls.** The dashboard table above is the inventory, checked
 per release; `tests/test_grants_pg.py` reads the live catalogs and is the only
 thing that checks what the database actually says.
+
+### No breach-list check on passwords
+
+**Risk.** Supabase can refuse a password that appears in the HaveIBeenPwned
+corpus. It is a Pro-plan feature and this project is on Free, so a password
+known to be in a past breach can be used here — checked 2026-09-08, and it is
+the only item the project's own security advisor reports.
+
+**Why accepted.** The alternative is a paid plan bought for one control, and
+the account it protects holds a shared expense ledger rather than money or
+identity documents. Sign-in is also Google OAuth for anyone who wants it,
+which sidesteps app passwords entirely.
+
+**Compensating controls.** The server-side minimum length (above) rather than
+the client's opinion of it; Supabase Auth's own rate limiting on sign-in; and
+refresh-token reuse detection, which shortens the life of a session that does
+get taken. **Trigger to revisit:** any upgrade to Pro for any other reason —
+turn it on the same day, since by then it costs nothing.
 
 ### `npm audit` has no per-advisory ignore
 

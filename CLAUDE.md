@@ -34,8 +34,11 @@ outbound HTTPS, e.g. the JWKS fetch). Details in that module's docstring.
 There is no linter configured; `tsc` via `npm run build` is the frontend gate.
 Backend Postgres-only integration tests (`tests/test_balances_pg.py`, `tests/test_locks_pg.py`)
 skip unless `TEST_DATABASE_URL` is set — never point that at production.
-`tests/test_grants_pg.py` is the exception: it reads catalogs only, takes `AUDIT_DATABASE_URL`,
-and is *meant* for production (see Database migrations). All three connect through the
+`tests/test_grants_pg.py` and `tests/test_db_tls_pg.py` are the exceptions: they read
+catalogs (or nothing at all), take `AUDIT_DATABASE_URL`, and are *meant* for production —
+the second one opens a full-strength TLS handshake against the real pooler, and is the
+gate in front of any change to `db.py` or `supabase_ca.py`, because a certificate the
+context refuses is an outage rather than a failing test. All three connect through the
 transaction pooler, so any engine they build needs `statement_cache_size=0` /
 `prepared_statement_cache_size=0` exactly as `db.py` does — and on this machine they exit 1
 with **no output at all** unless `SSLKEYLOGFILE` is popped and `truststore` injected first,
@@ -188,6 +191,36 @@ on `ENV=development`):
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
   transaction pooler (port 6543, `postgresql+asyncpg://`) with `NullPool` and
   `statement_cache_size=0` (`api/_src/db.py`) — never per-request engines, never the session pooler.
+  **The server's certificate is verified, and that takes an explicit `SSLContext`.**
+  asyncpg's default is `sslmode=prefer`: it drops to plaintext if something
+  answers that the server does not do TLS, and when TLS *is* negotiated it uses
+  `check_hostname=False` / `CERT_NONE`, so any certificate passes. Either way
+  the pooler password and the whole ledger are readable from the path between
+  Vercel and AWS. `sslmode=require` closes only the first half. Two traps make
+  this less obvious than it sounds: `ssl="verify-full"` does **not** use the
+  system trust store — asyncpg reads it as libpq does and looks for
+  `~/.postgresql/root.crt` — and the pooler serves a certificate from
+  *Supabase's own* 2021 CA, which no public bundle (certifi included) carries.
+  So `db.tls_context()` builds `ssl.create_default_context()` and loads the
+  Supabase root **on top of** the system roots: the root is what makes it work
+  today, the system store is what stops a move to a publicly trusted
+  certificate becoming an outage. The PEM is embedded in `supabase_ca.py` as a
+  string, not shipped as a `.crt`, because a file the Python builder declines
+  to bundle is a hard outage and a module cannot go missing.
+  **`VERIFY_X509_STRICT` is cleared, deliberately**: Supabase's *intermediate*
+  declares `CA:TRUE` with no `keyUsage` extension, which strict RFC 5280
+  checking refuses, and Python 3.13 turned that flag on inside
+  `create_default_context()` — so leaving it alone makes the app connect or not
+  depending on the interpreter (fine on the 3.12 Vercel runs today, an outage
+  the day `.python-version` moves). Signature, chain, expiry and hostname are
+  all still checked. Verified against the live pooler: the context completes a
+  TLS 1.3 handshake, public roots alone are refused, and a wrong hostname is
+  refused. It is attached by
+  a `do_connect` listener rather than `connect_args` because `connect_args` is
+  evaluated at import, and building an `SSLContext` at import kills the test
+  suite on the maintainer's machine (Norton's `SSLKEYLOGFILE`, same root cause
+  as `dev_loop.py`). `tests/test_db_tls.py` pins all of it, the CA fingerprint
+  included.
   **The app connects as `splitdec_app`, not as the project owner** (migration
   `20260904100000`). `postgres` owns all eight tables and additionally carries
   CREATEROLE, CREATEDB, BYPASSRLS, membership in anon/authenticated/service_role
@@ -231,6 +264,14 @@ on `ENV=development`):
   and no ref reads as "nothing to compare". A Supabase host whose ref cannot be read is
   now a refusal rather than a skip, because that is the shape this check takes when it
   quietly stops working.
+  **`exp`, `aud` and `sub` are required claims, not merely checked ones**, and
+  `iss` is pinned to `{SUPABASE_URL}/auth/v1` wherever that URL is known (always,
+  on the asymmetric path). PyJWT honours a claim it finds and ignores one it does
+  not, so a correctly signed token that simply omitted `exp` used to validate for
+  ever. `issuer=` and `require` are independent — `issuer=` alone still accepts a
+  token with no `iss` — which is why `auth.py` sets both. The issuer string was
+  read off the project's own `/auth/v1/.well-known/openid-configuration`, not
+  guessed; a wrong value there is a 401 for every user at once.
   Unauthenticated failures answer generically ("Authentication is unavailable") and put
   the specifics in the log — an anonymous 500 naming an environment variable hands a
   stranger the deployment's shape for nothing.
@@ -309,11 +350,16 @@ rows, create → fill → delete → repeat reset all of them. Nothing cascades 
 `write_events`.
 
 The per-recipient invitation window is keyed by `recipient_key(email)`, a bare
-SHA-256 — the window only ever needs equality, so the durable table never holds
-a contactable address and account deletion can go on promising to erase it.
-Unpeppered on purpose: whoever can read that column can already read
-`public.users.email` in plaintext, so a pepper buys nothing real and adds a
-secret whose rotation would silently reset every recipient window.
+SHA-256 — the window only ever needs equality, so the address itself is never
+written. That is **not** anonymisation and the docstring says so: an email is
+guessable, so the digest is reversible by anyone who can read the column. It is
+acceptable because that same reader can read `public.users.email` in plaintext
+anyway, because `record_write` prunes the rows after about a day, and because
+account deletion nulls the column on rows naming the departing address, so the
+erasure promise does not rest on the digest. Unpeppered for the same reason: an
+HMAC would cover only never-registered invitees, only for a day, at the price
+of a secret that must exist everywhere, fail closed when it does not, and reset
+every recipient window on rotation.
 
 Four rules any new quota must follow:
 
@@ -455,6 +501,17 @@ anonymity. Turning on *Prevent Storing of IP Addresses* in the project's
 Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 
 ### API contracts worth knowing
+
+- **Every API response carries `Cache-Control: no-store`** (`main.py`, one
+  middleware). No header at all does not mean "do not cache" — it means the
+  browser decides, and what it stores is a copy of somebody's ledger left in a
+  disk cache that outlives the session. Shared caches were never the exposure
+  (RFC 9111 §3.5 already bars them from storing a response to an
+  `Authorization` request); the local disk is. `no-store` alone: `private`
+  addresses only those already-excluded intermediaries, and `Pragma` is a
+  request header with no meaning on a response. The service worker is a
+  separate store that no header reaches, and is kept out of `/api/` in
+  `vite.config.ts` — `tests/test_cache_headers.py` asserts both halves.
 
 - `POST .../expenses` and `.../settlements` require an `Idempotency-Key` UUID header; replays
   return 200 with the existing row, **scoped to the path group** (cross-group key reuse → 409).

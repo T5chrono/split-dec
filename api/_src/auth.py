@@ -65,6 +65,34 @@ def _get_jwks_client() -> jwt.PyJWKClient:
     return _jwks_client
 
 
+def _expected_issuer() -> str | None:
+    """Who the token has to say minted it, or `None` if we cannot say.
+
+    Supabase publishes this at the project's own
+    `/auth/v1/.well-known/openid-configuration`, and for a hosted project it is
+    the project URL with `/auth/v1` on the end — checked against this project's
+    discovery document rather than assumed, because a wrong value here is a 401
+    for every user at once.
+
+    `None` on the symmetric path in a deployment that never set SUPABASE_URL:
+    that is the legacy shared-secret configuration, which is off here, and
+    inventing an issuer for it would refuse tokens that are otherwise fine. The
+    asymmetric path cannot reach `None` — `_get_jwks_client` has already
+    refused if SUPABASE_URL is unset or does not match the database's project.
+    """
+    return f"{SUPABASE_URL.rstrip('/')}/auth/v1" if SUPABASE_URL else None
+
+
+def _require_issuer() -> tuple[str, ...]:
+    """`("iss",)` when there is an issuer to compare against, else nothing.
+
+    Separate from the pin itself because PyJWT treats the two independently:
+    `issuer=` checks the claim only *if the token carries one*, and `require`
+    is the only thing that makes its absence fatal. Neither alone is a check.
+    """
+    return ("iss",) if _expected_issuer() else ()
+
+
 def verify_jwt(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> uuid.UUID:
@@ -73,6 +101,15 @@ def verify_jwt(
     Tokens are verified against the project's JWKS (asymmetric signing keys).
     The legacy HS256 path is gated behind `ALLOW_LEGACY_HS256` and refused like
     any other unsupported algorithm while that flag is off.
+
+    `exp`, `aud` and `sub` are *required*, not merely checked. PyJWT verifies a
+    claim it finds and shrugs at one it does not, so before this a correctly
+    signed token that simply left `exp` out was accepted, and accepted for
+    ever — the one token shape that never becomes invalid. Whoever can sign
+    such a token can already sign anything, so this is a second lock on a door
+    that only opens after the first one is gone; it costs a line, and the
+    difference between a breach that ends with the key rotation and one that
+    does not is worth a line.
     """
     if credentials is None:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
@@ -93,7 +130,14 @@ def verify_jwt(
             # off — refused before any key is fetched, so an unknown `alg` can
             # never reach a decode call.
             raise HTTPException(status_code=401, detail="Unsupported token algorithm")
-        payload = jwt.decode(token, key, algorithms=[alg], audience="authenticated")
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=[alg],
+            audience="authenticated",
+            issuer=_expected_issuer(),
+            options={"require": ["exp", "aud", "sub", *_require_issuer()]},
+        )
     except HTTPException:
         raise
     except jwt.PyJWTError:
