@@ -151,7 +151,25 @@ on `ENV=development`):
   rather than silently reverting the app to a light-mode flash.
   Violations are collected by `POST /api/csp-report`
   (`routers/reports.py`) — without a destination a policy reports to each
-  visitor's own console, where nobody collects it. It is the one route on
+  visitor's own console, where nobody collects it.
+  **That route must answer a CORS preflight, and for its first year it did
+  not.** Two things conspire, neither obvious. A policy carrying `report-to`
+  makes Chromium ignore `report-uri` outright, so the same-origin legacy
+  channel is switched off by the presence of the modern one. And a `report-to`
+  delivery is preflighted *even though the endpoint is same-origin*, because
+  the browser's reporting service sends it from outside the document and
+  `application/reports+json` is not CORS-safelisted. With only a `POST`
+  handler registered the route answered `OPTIONS` with 405, every preflight
+  failed, no report was ever delivered, and the sole trace was a periodic
+  `OPTIONS /api/csp-report 405` in the runtime log — a browser retrying the
+  same report on a lengthening backoff. The headers are a wildcard on purpose:
+  CORS governs what a browser lets a page *read back*, and this route answers
+  204 with an empty body to everyone, while the control on whose reports are
+  recorded is `fold_origin` on the body, which binds curl too. The actual POST
+  carries them as well as the preflight — a delivery whose response has no
+  `Access-Control-Allow-Origin` is a failed fetch, so the report returns to
+  the retry queue having already been logged, and the endpoint looks alive
+  while losing everything. It is the one route on
   the API reachable without a token, so it touches no database, stores
   nothing, and logs only the violation's shape: the directive, the blocked
   *origin*, the reporting host, and the route pattern folded exactly as

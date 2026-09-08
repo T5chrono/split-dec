@@ -289,6 +289,59 @@ def _record(report: dict[str, str | None]) -> None:
     )
 
 
+# The answer to a CORS preflight, and the reason it is a wildcard.
+#
+# A `report-to` delivery is preflighted even though the endpoint is
+# same-origin, because the browser's reporting service sends it from outside
+# the document rather than from the page, and
+# `Content-Type: application/reports+json` is not CORS-safelisted. Until this
+# existed the route answered `OPTIONS` with 405 and no
+# `Access-Control-Allow-*` at all, so every preflight failed, the POST that
+# would have followed was never sent, and the endpoint had received nothing
+# since the day it was written. Chrome then retried the same undelivered
+# report on a lengthening backoff, which is what the periodic `OPTIONS ... 405`
+# in the production log was.
+#
+# That is the whole reason both channels are configured and only one is used:
+# a policy carrying `report-to` makes Chromium ignore `report-uri` entirely,
+# so the working legacy path was switched off by the presence of the broken
+# modern one.
+#
+# `*` rather than an echo of `Origin`, deliberately, and it gives nothing
+# away. CORS governs what a *browser* will let a page read back, and this
+# route answers 204 with an empty body to everyone; it is unauthenticated by
+# necessity, so there is no session for a wildcard to expose. It never sees
+# credentials — reports are sent with `credentials: "omit"`, and
+# `Allow-Credentials` is deliberately absent, which is also what makes `*`
+# legal here. And CORS was never the control on *whose* reports get recorded:
+# `fold_origin` drops anything whose `document-uri` is not a host we serve,
+# on the body, where a caller holding curl is bound by it too and CORS would
+# not reach. Narrowing this to an allow-list would restrict only the browsers
+# already covered by that check, while adding a second place for report
+# delivery to break silently — which is exactly what happened here.
+#
+# `Max-Age` so a reporter that is delivering steadily is not preflighting
+# every time. The `no-store` middleware (main.py) also stamps these responses;
+# it does not reach the preflight cache, which is specified separately.
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+}
+
+
+def _answer(status: int) -> Response:
+    """Every response this route gives, CORS headers included.
+
+    On the actual POST as much as on the preflight: a report delivery whose
+    response carries no `Access-Control-Allow-Origin` is a failed fetch as far
+    as the browser is concerned, so the report goes back on the retry queue
+    even though the function has already logged it.
+    """
+    return Response(status_code=status, headers=_CORS_HEADERS)
+
+
 def content_type_allowed(header: str | None) -> bool:
     """`application/csp-report; charset=utf-8` and friends, parameters aside."""
     if not header:
@@ -310,16 +363,28 @@ async def csp_report(request: Request) -> Response:
     if not content_type_allowed(request.headers.get("content-type")):
         # Refused before the body is read, which is the point: this is the
         # cheapest possible answer to a request that was never a report.
-        return Response(status_code=415)
+        return _answer(415)
     body = await request.body()
     if len(body) > MAX_REPORT_BYTES:
-        return Response(status_code=413)
+        return _answer(413)
     try:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError):
-        return Response(status_code=400)
+        return _answer(400)
     for report in normalize(payload)[:MAX_REPORTS_PER_REQUEST]:
         if report["origin"] is None:
             continue
         _record(report)
-    return Response(status_code=204)
+    return _answer(204)
+
+
+@router.options("/csp-report", status_code=204)
+async def csp_report_preflight() -> Response:
+    """Let the browser's reporting service through to the POST above.
+
+    Takes no arguments and inspects nothing: the preflight carries no body and
+    the answer does not vary by caller (see `_CORS_HEADERS`). It is a fixed
+    204 with four headers, which is also the cheapest thing this function can
+    do on a route a stranger can reach.
+    """
+    return _answer(204)
