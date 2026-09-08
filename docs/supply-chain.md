@@ -11,6 +11,12 @@ The point of the second half is that an accepted risk and an oversight look
 identical from outside. Everything below the line was considered and declined,
 with a reason and a trigger for revisiting it.
 
+The register is not exhaustive, and the omission is deliberate. Where writing
+the gap down would itself be the thing an attacker needs — a control that is
+off, next to the reason it stays off — the entry is kept in the maintainer's
+private security record instead of here. Everything a reader of this repo can
+already derive from the code stays in this file.
+
 ## Controls in this repository
 
 | Control | Where |
@@ -47,7 +53,6 @@ quietly. Check these at each release.
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
 | Refresh-token rotation + reuse detection | both enabled — confirmed 2026-09-08 | Supabase → Authentication → Sessions |
 | Password minimum length | **8**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Confirmed 2026-09-08 | Supabase → Authentication, password settings under the Email provider |
-| Leaked-password protection (HIBP) | **unavailable on the Free plan — checked 2026-09-08.** See below | same |
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
@@ -251,24 +256,6 @@ was missing was a way to notice drift, not a way to declare intent.
 **Compensating controls.** The dashboard table above is the inventory, checked
 per release; `tests/test_grants_pg.py` reads the live catalogs and is the only
 thing that checks what the database actually says.
-
-### No breach-list check on passwords
-
-**Risk.** Supabase can refuse a password that appears in the HaveIBeenPwned
-corpus. It is a Pro-plan feature and this project is on Free, so a password
-known to be in a past breach can be used here — checked 2026-09-08, and it is
-the only item the project's own security advisor reports.
-
-**Why accepted.** The alternative is a paid plan bought for one control, and
-the account it protects holds a shared expense ledger rather than money or
-identity documents. Sign-in is also Google OAuth for anyone who wants it,
-which sidesteps app passwords entirely.
-
-**Compensating controls.** The server-side minimum length (above) rather than
-the client's opinion of it; Supabase Auth's own rate limiting on sign-in; and
-refresh-token reuse detection, which shortens the life of a session that does
-get taken. **Trigger to revisit:** any upgrade to Pro for any other reason —
-turn it on the same day, since by then it costs nothing.
 
 ### `npm audit` has no per-advisory ignore
 
