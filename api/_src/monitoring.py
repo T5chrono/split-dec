@@ -41,7 +41,10 @@ line up bucket-for-bucket with `insightsRoute` in the frontend. Nothing here has
 to line up with anything, so it can afford the stricter rule.
 """
 
+import asyncio
 import re
+import threading
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -65,6 +68,38 @@ _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # Allow-list rather than deny-list: the next header this API reads should not
 # reach a third party because nobody remembered to come back and exclude it.
 _ALLOWED_HEADERS = frozenset({"user-agent", "content-type", "content-length", "accept"})
+
+# How long a request will wait for its own event to reach Sentry before giving
+# up and answering anyway. The number that makes this necessary is the
+# transport's own `HttpTransport.TIMEOUT = 30`: an unbounded flush would let a
+# slow or unreachable ingest host add half a minute to a request that has
+# already produced its response.
+FLUSH_TIMEOUT = 2.0
+
+# Counts events that survived `scrub_event`. `flush_on_response` reads it
+# before and after a request to decide whether there is anything to wait for --
+# the overwhelming majority of requests capture nothing and must not pay for a
+# flush.
+#
+# Behind a lock rather than a bare `+= 1`, which is three bytecodes and can
+# therefore lose an increment: `before_send` runs on whichever thread called
+# `capture_event`, and that is not always the request's own. The lock is
+# uncontended on every request that does not report something.
+_capture_lock = threading.Lock()
+_capture_count = 0
+
+
+def _note_capture() -> None:
+    global _capture_count
+    with _capture_lock:
+        _capture_count += 1
+
+
+def captures_seen() -> int:
+    """How many events have been handed to the transport since this cold start."""
+    with _capture_lock:
+        return _capture_count
+
 
 
 def redact_ids(text: str) -> str:
@@ -216,6 +251,10 @@ def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any]:
     elif isinstance(breadcrumbs, list):
         event["breadcrumbs"] = _scrub_breadcrumbs(breadcrumbs)
 
+    # Last thing before the event is queued, so `flush_on_response` knows this
+    # request produced something worth waiting for. Counted here rather than at
+    # the top: an event this function decided to drop is not one to flush for.
+    _note_capture()
     return event
 
 
@@ -249,20 +288,91 @@ def init_monitoring() -> None:
         include_local_variables=False,
         # An expense or settlement body is the user's ledger, verbatim.
         max_request_body_size="never",
-        # TCP keep-alive on the connection to the ingest host. Off by default,
-        # and the default is wrong for this deployment: the platform freezes
-        # the function between invocations, so a pooled HTTPS connection sits
-        # idle across the freeze, Sentry's edge times it out, and the next
-        # thaw writes into a socket that is already gone. That surfaces as
-        # `SSLEOFError: UNEXPECTED_EOF_WHILE_READING` on `/envelope/`, which
-        # is what the production log was full of. Sentry's own guidance is to
-        # turn this on when network errors to ingest are frequent.
+        # Release health, off. The SDK opens a session for every request
+        # (`track_session` in the ASGI integration) and a background thread
+        # posts the aggregates every 60 seconds. Nothing reads them — this
+        # deployment is errors-only — and each one is a send that begins as the
+        # invocation ends, which is the window `flush_on_response` exists to
+        # close. Until this was turned off, the uptime monitor's five-minute
+        # ping of `/api/health` was the app's main source of Sentry traffic,
+        # and that traffic was the app's main source of log warnings: a session
+        # nobody would read, failing to upload, once every few minutes.
         #
-        # Worth knowing why this went unnoticed: a failed send writes **no
-        # log line at all**. `_handle_request_error` records the lost event
-        # and re-raises into `capture_internal_exceptions()`, which swallows
-        # it, so a transport that never delivers looks exactly like one that
-        # works. `GET /api/health/sentry` (main.py) exists because of that.
+        # `track_session` is documented as "a no-op context manager if session
+        # tracking is not enabled", so this removes the session and nothing
+        # else. Errors are unaffected.
+        auto_session_tracking=False,
+        # TCP keep-alive on the connection to the ingest host: SO_KEEPALIVE
+        # plus TCP_KEEPIDLE=45 and friends, the SDK's own values. It stops a
+        # connection being dropped as idle *while the process is running*,
+        # which is worth having and costs nothing.
+        #
+        # It does **not** fix the `SSLEOFError: UNEXPECTED_EOF_WHILE_READING`
+        # on `/envelope/` it was added for, and the comment that used to stand
+        # here saying it did was wrong. Keep-alive probes are sent by the guest
+        # kernel, and the platform freezes the entire instance between
+        # invocations — kernel included — so nothing is sent during precisely
+        # the interval that matters. The cause is one layer up: the send itself
+        # is frozen mid-flight. `flush_on_response` is the fix; this stays
+        # because it is still correct for the case it does cover.
         keep_alive=True,
         before_send=scrub_event,
     )
+
+
+def flush_on_response(
+    app: Callable[..., Awaitable[None]],
+) -> Callable[..., Awaitable[None]]:
+    """Wrap an ASGI app so a captured event is delivered before the reply ends.
+
+    The problem is the platform, not the network. Sentry sends on a background
+    thread, and Vercel freezes the instance the moment the response is written,
+    so an event captured during a request is usually still in flight when the
+    freeze lands. It then advances only when the *next* request thaws the
+    instance — by which point the socket has long since been dropped at the
+    other end. Production showed this exactly: a single retry chain stepping
+    2 → 1 → 0 across three invocations fifteen minutes apart, while urllib3's
+    backoff between those retries is zero. After the third the event is
+    discarded, and `_handle_request_error` re-raises into
+    `capture_internal_exceptions()`, so nothing is logged. An app whose crash
+    reporter silently drops crashes is worse than one with no reporter.
+
+    Flushing inside the invocation is Sentry's own answer to this environment —
+    their AWS Lambda and GCP integrations end every invocation with
+    `client.flush()`, commented "flush out the event queue before AWS kills the
+    process". There is no Vercel integration, so it is wired up here.
+
+    **This has to wrap the app object itself, and that is not a style choice.**
+    The Starlette integration patches `Starlette.__call__` (`patch_asgi_app`),
+    which puts `SentryAsgiMiddleware` outside every middleware added with
+    `add_middleware` — including where an unhandled exception is finally
+    captured. A flush installed the ordinary way would therefore run *before*
+    the capture and flush an empty queue. Hence `api/index.py`.
+
+    Only requests that captured something wait: `scrub_event` counts events on
+    their way to the transport, and an unchanged counter means there is nothing
+    queued. A request that reports nothing — which is nearly all of them — pays
+    one integer comparison.
+
+    What this does not cover: an event captured outside a request, at import or
+    during startup, still rides the background worker and can still be lost.
+    """
+
+    async def flushing_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+        before = captures_seen()
+        try:
+            await app(scope, receive, send)
+        finally:
+            # `finally`, because the interesting case is the one that raises:
+            # the exception has already passed through `SentryAsgiMiddleware`
+            # by the time it reaches here, so the event is queued and waiting.
+            # Off the event loop for the same reason `/api/health/sentry` does
+            # it — `flush` blocks on the worker thread, and blocking here would
+            # stall every other request this instance is serving.
+            if captures_seen() != before:
+                await asyncio.to_thread(sentry_sdk.flush, FLUSH_TIMEOUT)
+
+    return flushing_app
