@@ -75,7 +75,7 @@ nobody to escalate to, so the runbook has to exist before the day it is needed.
 | --- | --- | --- | --- |
 | `DATABASE_URL` (the `splitdec_app` password) | Vercel env, local `.env` | Read/write on the eight application tables. Not the owner role — no `auth` schema, no role administration, nothing outside `public` | Suspected exposure, a laptop lost, or a contractor's access ending. Not on a schedule |
 | `RESEND_API_KEY` | Vercel env | Sending as the verified domain. The blast radius is the domain's reputation, which money cannot buy back | Suspected exposure; also the natural rehearsal target, see below |
-| `HEALTH_PROBE_KEY` | Vercel env, local `.env` | Opening one pooler connection per call and reading its latency. Lowest value here | Suspected exposure |
+| `HEALTH_PROBE_KEY` | Vercel env, local `.env` | Opening one pooler connection per call and reading its latency, plus the Sentry probe. Lowest value here | Suspected exposure. **Rotated 2026-09-08** — the previous value was unrecoverable, see below |
 | `SENTRY_AUTH_TOKEN` | Vercel env, production build only | Uploading source maps to the `split-dec` Sentry org | Suspected exposure |
 | `SENTRY_DSN` | Vercel env | Writing events into the `splitdec-api` Sentry project. Not public, unlike its browser twin | Suspected exposure |
 | `SUPABASE_JWT_SECRET` | **should not be set** | A symmetric minting credential: anything holding it can *issue* valid tokens. `ALLOW_LEGACY_HS256` is off, so nothing reads it | If it is set anywhere, the action is to remove it, not to rotate it |
@@ -86,6 +86,24 @@ secret and are listed here only so the register can be read against the
 dashboard and every name accounted for. Anything in Vercel that is not on one
 of these two lists is something nobody has thought about.
 
+
+**Every secret in the Vercel project is stored Sensitive, which means nobody
+can read it back — including you.** The project has the sensitive-variables
+setting on, so a value added there is write-only from that moment: the
+dashboard shows `Hidden`, and `vercel env pull` writes the literal string
+`[SENSITIVE]` rather than failing, which is a trap worth knowing because the
+pulled file *looks* like it worked. There is no recovery path and no support
+ticket that retrieves it. **The local `.env` is therefore the only copy of
+`HEALTH_PROBE_KEY`**, and losing it means rotating again rather than looking it
+up. That is exactly what happened on 2026-09-08: the key could not be read from
+anywhere, so it was replaced (32 chars from `secrets.token_urlsafe`, set in
+Vercel, production redeployed, `.env` updated) rather than recovered.
+
+Two consequences for the others. `DATABASE_URL` is also unreadable, so the
+`.env` copy is the only one — which raises the stakes on the rotation procedure
+below rather than lowering them. And a secret that is *not* in `.env` and not in
+a password manager is, in practice, already lost; the register above is the list
+of things to check that against.
 
 **Rotating `DATABASE_URL` is a short outage, and pretending otherwise is worse
 than scheduling one.** The role has exactly one password: the moment
