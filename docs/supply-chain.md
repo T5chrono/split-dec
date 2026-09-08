@@ -46,8 +46,9 @@ quietly. Check these at each release.
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
 | Refresh-token rotation + reuse detection | both enabled | Supabase → Authentication → Sessions |
-| Password minimum length | **8 or more** — must not be *lowered* to meet the client | Supabase → Authentication → Policies |
-| Leaked-password protection (HIBP) | enabled where the plan carries it; otherwise the upgrade is the trigger | Supabase → Authentication → Policies |
+| Password minimum length | **8 or more** — must not be *lowered* to meet the client | Supabase → Authentication, password settings under the Email provider |
+| Leaked-password protection (HIBP) | **unavailable on the Free plan — checked 2026-09-08.** See below | same |
+| `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
 Verifying the GitHub half without clicking through the UI:
@@ -71,8 +72,15 @@ nobody to escalate to, so the runbook has to exist before the day it is needed.
 | `RESEND_API_KEY` | Vercel env | Sending as the verified domain. The blast radius is the domain's reputation, which money cannot buy back | Suspected exposure; also the natural rehearsal target, see below |
 | `HEALTH_PROBE_KEY` | Vercel env, local `.env` | Opening one pooler connection per call and reading its latency. Lowest value here | Suspected exposure |
 | `SENTRY_AUTH_TOKEN` | Vercel env, production build only | Uploading source maps to the `split-dec` Sentry org | Suspected exposure |
+| `SENTRY_DSN` | Vercel env | Writing events into the `splitdec-api` Sentry project. Not public, unlike its browser twin | Suspected exposure |
 | `SUPABASE_JWT_SECRET` | **should not be set** | A symmetric minting credential: anything holding it can *issue* valid tokens. `ALLOW_LEGACY_HS256` is off, so nothing reads it | If it is set anywhere, the action is to remove it, not to rotate it |
 | `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN` | committed | Public by construction — they ship inside the bundle | Never; they are not secrets |
+
+The other Vercel variables — `SUPABASE_URL`, `APP_URL`, `RESEND_FROM` — hold no
+secret and are listed here only so the register can be read against the
+dashboard and every name accounted for. Anything in Vercel that is not on one
+of these two lists is something nobody has thought about.
+
 
 **Rotating `DATABASE_URL` is a short outage, and pretending otherwise is worse
 than scheduling one.** The role has exactly one password: the moment
@@ -243,6 +251,24 @@ was missing was a way to notice drift, not a way to declare intent.
 **Compensating controls.** The dashboard table above is the inventory, checked
 per release; `tests/test_grants_pg.py` reads the live catalogs and is the only
 thing that checks what the database actually says.
+
+### No breach-list check on passwords
+
+**Risk.** Supabase can refuse a password that appears in the HaveIBeenPwned
+corpus. It is a Pro-plan feature and this project is on Free, so a password
+known to be in a past breach can be used here — checked 2026-09-08, and it is
+the only item the project's own security advisor reports.
+
+**Why accepted.** The alternative is a paid plan bought for one control, and
+the account it protects holds a shared expense ledger rather than money or
+identity documents. Sign-in is also Google OAuth for anyone who wants it,
+which sidesteps app passwords entirely.
+
+**Compensating controls.** The server-side minimum length (above) rather than
+the client's opinion of it; Supabase Auth's own rate limiting on sign-in; and
+refresh-token reuse detection, which shortens the life of a session that does
+get taken. **Trigger to revisit:** any upgrade to Pro for any other reason —
+turn it on the same day, since by then it costs nothing.
 
 ### `npm audit` has no per-advisory ignore
 
