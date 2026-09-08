@@ -321,8 +321,8 @@ def init_monitoring() -> None:
 
 
 def flush_on_response(
-    app: "Callable[..., Awaitable[None]]",
-) -> "Callable[..., Awaitable[None]]":
+    app: Callable[..., Awaitable[None]],
+) -> Callable[..., Awaitable[None]]:
     """Wrap an ASGI app so a captured event is delivered before the reply ends.
 
     The problem is the platform, not the network. Sentry sends on a background
