@@ -2,6 +2,13 @@
 **Target Audience for this document:** AI Code Generators (Claude Code, Cursor, etc.).
 **Goal:** Implement a fully functional, production-ready Splitwise clone based on the exact parameters below. Do not deviate from these architectural decisions.
 
+> **Authority — read this first.** This document is the original brief, not the
+> current contract. Where the shipped code disagrees with it, the code wins:
+> `CLAUDE.md` is the source of truth and lists the deliberate deviations, among
+> them the inverted settlement signs in the balance query and the removal of the
+> direct add-member and user-search endpoints. Treat the sentence above about
+> not deviating as historical.
+
 > **Revision note (v5 → v6):** fixed a missing `idempotency_key` column on `settlements`, made soft-delete filtering in the balance CTE explicit for both `expenses` and `settlements`, restored a dropped index on `group_members`, corrected the CORS instruction (no CORS is needed in production under Vercel Services; it's a local-dev-only concern), hardened the connection-pooling guidance (`NullPool` + verified `statement_cache_size` key), added `SECURITY DEFINER` and explicit field-extraction to the auth-sync trigger, clarified the multi-currency balance check on member removal, and pinned down decimal serialization in API responses.
 
 ---

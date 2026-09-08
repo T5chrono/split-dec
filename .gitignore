@@ -36,12 +36,15 @@ SplitDec DesignSystem/
 # files. Renamed, and root-anchored for the same reason as /buycoffee/ below:
 # unanchored, `SECURITY.md` would also have swallowed a public policy placed in
 # .github/ or docs/, silently reintroducing the same hole.
-GO-LIVE.md
+# Every name in this block is anchored for that reason: unanchored, a pattern
+# also matches a same-named file in any subdirectory, so the rule reaches
+# further than the one file it was written for.
+/GO-LIVE.md
 /SECURITY-NOTES.md
 # Same class: the implementation plan for the least-privilege database role
 # opens by listing exactly what the current credential can reach, which is the
 # one paragraph least worth publishing next to the code it describes.
-DB-ROLE-PLAN.md
+/DB-ROLE-PLAN.md
 
 # Pre-launch working material for the buycoffee.to creator profile. Same reason
 # as the two files above: the notes alongside the copy record what the app does
@@ -51,4 +54,4 @@ DB-ROLE-PLAN.md
 /buycoffee/
 
 # Local reporting-style instructions for Claude Code. Personal, not repo policy.
-CLAUDE.local.md
+/CLAUDE.local.md
