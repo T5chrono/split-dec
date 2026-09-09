@@ -15,6 +15,25 @@ export const MIN_PASSWORD_LENGTH = 8;
 // form is honest about what a display name is for.
 export const MAX_FULL_NAME_LENGTH = 100;
 
+/** `name`, trimmed and cut to MAX_FULL_NAME_LENGTH characters.
+
+`Array.from` rather than `slice`, which counts UTF-16 code units: an emoji or a
+rarer CJK character is two units, so a plain `slice` landing between them stores
+half a character in the signup metadata. Splitting by code point costs one
+allocation on a value typed once per account.
+
+It is still not grapheme-accurate — a flag or a family emoji is several code
+points joined together and can be cut between them. Fixing that means
+`Intl.Segmenter`, which is more machinery than a cosmetic cap on a form field is
+worth. */
+export function capFullName(name: string): string {
+  const trimmed = name.trim();
+  const points = Array.from(trimmed);
+  return points.length <= MAX_FULL_NAME_LENGTH
+    ? trimmed
+    : points.slice(0, MAX_FULL_NAME_LENGTH).join("");
+}
+
 export function mapAuthError(err: unknown): TKey {
   const code = err instanceof AuthError ? err.code : undefined;
   switch (code) {
