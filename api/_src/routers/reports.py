@@ -23,6 +23,15 @@ adds no category of data beyond what `src/lib/legal.ts` already discloses about
 server logs. Sending reports to a third-party collector instead would: that is
 a new processor, and a legal.ts change with a `LEGAL_UPDATED` bump.
 
+**Every field is percent-encoded on the way into the log line** (`log_value`).
+The line is five `name=value` pairs separated by spaces and all five values come
+out of a body anyone can post, so stripping CR/LF was never enough: a route of
+`/a route=x origin=evil` forges two more fields on the same physical line, and a
+`blocked-uri` authority can do the same. Encoding at the output boundary is the
+same move as binding a SQL parameter — the value can no longer be read as part
+of the format around it. A consumer therefore splits on the field boundaries
+first and decodes values afterwards.
+
 **Three things bound what an unauthenticated stranger can make this do**, in
 increasing order of how much they are worth: a body cap, a per-request report
 cap, and a per-process token bucket. None of them is a global rate limit and
@@ -46,8 +55,9 @@ throttled reporter loses telemetry and nothing else.
 import json
 import logging
 import re
+import string
 import time
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter, Request, Response
 
@@ -107,10 +117,51 @@ _ALLOWED_HOST_PATTERN = re.compile(
 # The shape of a CSP keyword: the values `blocked-uri` can carry instead of a
 # URL ('inline', 'eval', 'data', 'trusted-types-policy', …), every directive
 # name, and the two dispositions. Every one of those fields comes out of an
-# attacker-controlled body, and one containing a newline would forge a second
-# line in the log — so anything that is not this shape is dropped rather than
-# logged.
+# attacker-controlled body, so anything that is not this shape is dropped rather
+# than logged — narrower than `log_value` would leave it, and the narrower
+# answer is the more useful one for a field whose whole vocabulary is known.
 _KEYWORD = re.compile(r"[a-z-]{1,32}")
+
+# The alphabet a logged field may use verbatim. Everything else — spaces, `=`,
+# `%`, control characters, and every non-ASCII byte — is percent-encoded on the
+# way out (`log_value`).
+#
+# It is an allow-list rather than a list of characters to strip because the
+# fields below are folded, not validated: `fold_route` returns whatever path the
+# reporter put in the document URL, and a host can be anything `urlsplit` was
+# willing to call one. Stripping CR/LF was never enough — the log line is five
+# `name=value` pairs separated by spaces, so `route=/a route=x origin=evil`
+# forges two fields without a newline anywhere in it.
+#
+# `/ : . _ ~ - [ ]` are in because they are what a route and an authority are
+# made of, brackets included (an IPv6 host is logged bracketed). The cost of
+# encoding `%` is that a path which was already percent-encoded reads
+# double-encoded in the log; that is the price of the log being unambiguous, and
+# a consumer splits on the field boundaries before decoding a value.
+_LOG_SAFE = frozenset(string.ascii_letters + string.digits + "/:._~-[]")
+
+# An encoded field longer than this is dropped rather than truncated. Nothing
+# honest comes close — the longest real field is a route — and a truncated value
+# is a value somebody may still try to read as a whole one.
+MAX_LOG_FIELD = 512
+
+
+def log_value(value: str | None) -> str:
+    """One field of a log line, as a single unambiguous token.
+
+    Percent-encoding at the output boundary is what separates a value from the
+    delimiters of the format it is going into, the same way quoting separates a
+    string from the SQL around it. Doing it here rather than inside each folding
+    helper means a new field cannot be added to the log line without it.
+    """
+    if not value:
+        return "-"
+    encoded = "".join(
+        chr(byte) if chr(byte) in _LOG_SAFE else f"%{byte:02X}"
+        for byte in value.encode("utf-8", "surrogatepass")
+    )
+    return encoded if len(encoded) <= MAX_LOG_FIELD else "-"
+
 
 # Token bucket state. Module-level and mutated without a lock because the
 # helper below has no `await` in it: within one event loop it runs to
@@ -177,6 +228,31 @@ def fold_origin(url: str) -> str | None:
     return None
 
 
+def authority(parts: SplitResult) -> str | None:
+    """`host` or `host:port`, rebuilt rather than copied out of `netloc`.
+
+    `netloc` is the raw authority text, which carries two things that must not
+    reach a log: `user:password@` credentials, and whatever else `urlsplit` was
+    willing to leave in it — it validates nothing, so
+    `https://blocked.example disposition=enforce` parses with all of that as the
+    host. Going through `.hostname` and `.port` drops the userinfo and makes the
+    port a number or an error.
+
+    `.hostname` strips the brackets from an IPv6 literal, so they are put back:
+    without them `[::1]:443` and a host called `::1:443` are the same string.
+    """
+    try:
+        host = parts.hostname
+        port = parts.port  # raises on a malformed port, e.g. `host:notaport`
+    except ValueError:
+        return None
+    if not host:
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{host}:{port}" if port is not None else host
+
+
 def fold_blocked(value: str) -> str:
     """Where the blocked thing came from, without the path it came from.
 
@@ -184,6 +260,12 @@ def fold_blocked(value: str) -> str:
     'data') or a URL. The origin is what says whether the policy is wrong; the
     rest is a path on somebody else's host — or on ours, where a blocked
     `connect-src` fetch would spell out a group id.
+
+    The scheme is kept as `urlsplit` parsed it rather than checked against a
+    list: `ws:`, `blob:` and `chrome-extension:` all show up in real reports,
+    and a scheme the spec grows later is telemetry we would otherwise throw
+    away. `urlsplit` only recognizes one at all if it matches CSP's own
+    letters-digits-`+.-` shape.
     """
     if not value:
         return "-"
@@ -191,8 +273,14 @@ def fold_blocked(value: str) -> str:
         # Matched by shape rather than against a list, so a keyword the spec
         # grows later still comes through.
         return keyword(value)
-    parts = urlsplit(value)
-    return f"{parts.scheme}://{parts.netloc}" if parts.netloc else "-"
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "-"
+    host = authority(parts)
+    if not parts.scheme or host is None:
+        return "-"
+    return f"{parts.scheme}://{host}"
 
 
 def normalize(payload: object) -> list[dict[str, str | None]]:
@@ -279,13 +367,17 @@ def _record(report: dict[str, str | None]) -> None:
     # WARNING, not INFO: the root logger's default level is WARNING and
     # nothing here configures it, so anything quieter would be dropped
     # before it reached the function log this endpoint exists to fill.
+    # Every value goes through `log_value`, including the two that are already
+    # constrained to a keyword and the one that comes from a fixed set of hosts.
+    # Uniformly, so that the encoding is a property of the log line rather than
+    # something each field is individually trusted to have done.
     logger.warning(
         "csp violation: directive=%s blocked=%s route=%s origin=%s disposition=%s",
-        report["directive"],
-        report["blocked"],
-        report["route"],
-        report["origin"],
-        report["disposition"],
+        log_value(report["directive"]),
+        log_value(report["blocked"]),
+        log_value(report["route"]),
+        log_value(report["origin"]),
+        log_value(report["disposition"]),
     )
 
 

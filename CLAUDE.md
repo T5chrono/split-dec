@@ -175,7 +175,15 @@ on `ENV=development`):
   *origin*, the reporting host, and the route pattern folded exactly as
   `insightsRoute` folds it — a group id, an OAuth `?code=` or a recovery
   `#access_token=` must never reach a log line, and neither may a field
-  forge one with a newline. Reports are dropped unless the document URL is
+  forge one. **Every field is percent-encoded on the way out**
+  (`log_value`) — the line is five `name=value` pairs separated by spaces,
+  so a route of `/a route=x origin=evil` forges two more fields without a
+  newline anywhere in it, and an authority does the same; stripping CR/LF
+  was never the whole answer. The blocked origin is *rebuilt* from
+  `.hostname`/`.port` rather than copied out of `netloc`, which would keep
+  `user:password@`. A field over 512 encoded characters is dropped rather
+  than truncated, and a log consumer splits on the field boundaries before
+  decoding a value. Reports are dropped unless the document URL is
   a host we actually serve (apex, www, or the project's `*.vercel.app`),
   since a page we never served was never handed our policy.
   **The in-process limits are a floor, not a ceiling**: a content-type
@@ -878,7 +886,13 @@ that host is `noindex` besides.
 
 Invitation emails go through Resend (`api/_src/emailer.py`), best-effort: without
 `RESEND_API_KEY` (or on failure) the UI falls back to a mailto draft. User-controlled names are
-HTML-escaped via `invitation_email_content`. Load any data the email needs **before**
+HTML-escaped via `invitation_email_content`; the *subject* additionally drops control
+and format characters (bidi overrides included) and line/paragraph separators, collapses
+whitespace, and is bounded to 200 UTF-8 bytes. That bound is **ours**, not a verified
+Resend or RFC requirement — the provider builds the MIME header and how it encodes what we
+hand it is not visible from here, so this is defence in depth rather than a fix for a
+demonstrated injection. The stored name and the escaped HTML body are untouched.
+Load any data the email needs **before**
 `db.commit()` — the provider call must never hold a checked-out pooler connection. Note: the
 free Resend sender only delivers to the account owner until a domain is verified.
 

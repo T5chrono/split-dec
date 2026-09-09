@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import os
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -20,6 +21,60 @@ RESEND_FROM = os.getenv("RESEND_FROM", "SplitDec <onboarding@resend.dev>")
 # point, an installed PWA pins the origin it was installed from, so a link that
 # opens the alias strands the reader outside their own installation.
 APP_URL = os.getenv("APP_URL", "https://split-dec.app")
+
+# What the subject line is allowed to be, in bytes of UTF-8. Not an RFC limit
+# and not a Resend one — neither is verified here. It is our own bound, so that
+# a display name someone typed cannot decide how long an outbound header is.
+# 200 leaves the whole sentence intact for any name a person actually has.
+MAX_SUBJECT_BYTES = 200
+
+SUBJECT_SUFFIX = " invited you to split expenses on SplitDec"
+
+# Stand-in for a name that normalizes away to nothing — an inviter called
+# a zero-width space (U+200B) would otherwise open the subject with one.
+ANONYMOUS_INVITER = "Someone"
+
+
+def _subject_safe(name: str) -> str:
+    """A display name reduced to one line of printable text.
+
+    The subject reaches Resend as a JSON string, so this is not a fix for a
+    proven header injection — the provider builds the MIME header and how it
+    encodes what we hand it is not something this codebase can see. It is a
+    bound we can state: whatever the provider does, the value it is given holds
+    no control characters, no line or paragraph separators, and no bidi
+    overrides that would let a name reorder the sentence around it. Defence in
+    depth, and cheap.
+
+    Categories, not a character list: Cc (control), Cf (format — where the
+    RTL/LTR overrides live), Zl and Zp (line and paragraph separators) become
+    spaces, then runs of whitespace collapse to one. `str.split()` is
+    Unicode-aware, so U+2028 and U+00A0 collapse with the ASCII ones.
+
+    The stored name and the HTML body are untouched: the body is escaped, and
+    the ledger's copy of what someone called themselves is not this function's
+    business.
+    """
+    cleaned = "".join(
+        " " if unicodedata.category(ch) in {"Cc", "Cf", "Zl", "Zp"} else ch
+        for ch in name or ""
+    )
+    return " ".join(cleaned.split()) or ANONYMOUS_INVITER
+
+
+def _bounded(text: str, limit: int) -> str:
+    """`text` cut to at most `limit` UTF-8 bytes, never mid-character.
+
+    Decoding the truncated bytes with `errors="ignore"` drops a partial
+    character rather than emitting a replacement one. A cut can still land
+    inside a grapheme cluster — between a base character and its combining
+    accent, or inside an emoji sequence — which is a cosmetic loss on a name
+    long enough to have needed cutting at all.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode("utf-8", "ignore").rstrip()
 
 
 def _post_resend(payload: dict) -> None:
@@ -44,10 +99,17 @@ def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, st
     input."""
     safe_inviter = html.escape(inviter_name)
     safe_group = html.escape(group_name)
+    # The name is bounded so the fixed half of the sentence survives: cutting
+    # the whole subject at the limit would leave a long name followed by a
+    # truncated explanation of why the reader got the mail.
+    subject_name = _bounded(
+        _subject_safe(inviter_name),
+        MAX_SUBJECT_BYTES - len(SUBJECT_SUFFIX.encode("utf-8")),
+    )
     return {
-        # Subject is plain text (no HTML rendering), so no entity escaping —
-        # the JSON transport already prevents header injection.
-        "subject": f"{inviter_name} invited you to split expenses on SplitDec",
+        # Plain text, so no entity escaping — but normalized and bounded, see
+        # `_subject_safe`. The HTML body keeps the name as given (escaped).
+        "subject": f"{subject_name}{SUBJECT_SUFFIX}",
         "html": (
             f"<p><strong>{safe_inviter}</strong> invited you to join the group "
             f"<strong>{safe_group}</strong> on SplitDec — an app for splitting "
