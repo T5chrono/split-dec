@@ -5,7 +5,12 @@ import { useI18n, type TKey } from "../lib/i18n";
 import { TileMark, Wordmark } from "../components/Logo";
 import GoogleIcon from "../components/GoogleIcon";
 import LegalLinks from "../components/LegalLinks";
-import { MAX_FULL_NAME_LENGTH, MIN_PASSWORD_LENGTH, mapAuthError } from "../lib/authErrors";
+import {
+  MAX_FULL_NAME_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  capFullName,
+  mapAuthError,
+} from "../lib/authErrors";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
@@ -70,13 +75,10 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      // Sliced as well as capped on the input: `maxLength` does not bind a
-      // paste on every browser, and nothing server-side caps this field.
-      await signUpWithPassword(
-        trimmedEmail,
-        password,
-        fullName.trim().slice(0, MAX_FULL_NAME_LENGTH),
-      );
+      // Cut here as well as on the input: `maxLength` does not bind a
+      // programmatic value change or a paste on every browser, and nothing
+      // server-side caps this field.
+      await signUpWithPassword(trimmedEmail, password, capFullName(fullName));
       setMode("checkEmailSignup");
     } catch (err) {
       setError(mapAuthError(err));
