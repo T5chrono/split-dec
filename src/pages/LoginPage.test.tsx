@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AuthError } from "@supabase/supabase-js";
 import LoginPage from "./LoginPage";
+import { MAX_FULL_NAME_LENGTH } from "../lib/authErrors";
 import { SUPPORT_URL } from "../lib/support";
 import { renderWithProviders } from "../test/utils";
 
@@ -129,6 +130,30 @@ describe("LoginPage", () => {
     expect(signUpWithPassword).toHaveBeenCalledWith("ala@example.com", "password123", "Ala Kot");
     expect(await screen.findByText("Check your email")).toBeInTheDocument();
     expect(screen.getByText(/ala@example\.com/)).toBeInTheDocument();
+  });
+
+  it("caps the name it sends, even when the input is filled around maxLength", async () => {
+    // A courtesy cap, not a security boundary — `full_name` reaches the
+    // database through Supabase Auth's signup metadata, not through our API,
+    // so a direct Auth call bypasses this. The slice is here because
+    // `maxLength` does not bind a programmatic value change.
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Sign up" }));
+    const name = screen.getByLabelText("Full name") as HTMLInputElement;
+    expect(name.maxLength).toBe(MAX_FULL_NAME_LENGTH);
+
+    fireEvent.change(name, { target: { value: "A".repeat(MAX_FULL_NAME_LENGTH + 50) } });
+    await user.type(screen.getByLabelText("Email"), "ala@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(signUpWithPassword).toHaveBeenCalledWith(
+      "ala@example.com",
+      "password123",
+      "A".repeat(MAX_FULL_NAME_LENGTH),
+    );
   });
 
   it("shows a neutral confirmation after requesting a reset link", async () => {
