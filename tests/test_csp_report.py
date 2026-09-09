@@ -199,6 +199,146 @@ async def test_no_field_can_forge_a_second_log_line(client, logged):
     assert len(logged.records) == 1
 
 
+class TestLogFieldEncoding:
+    """A log line is five `name=value` pairs on one physical line, and all five
+    values come out of a body anyone can post.
+
+    Stripping CR/LF was never enough. `route=/a route=x origin=evil` forges two
+    more fields without a newline in it, and so does an authority: `urlsplit`
+    validates nothing, so `https://blocked.example disposition=enforce` parses
+    with all of that as the host. Every field is percent-encoded on the way out
+    instead.
+    """
+
+    @staticmethod
+    def _fields(message: str) -> dict[str, str]:
+        """The log line parsed the way a consumer would: split on the
+        boundaries first, decode values afterwards."""
+        _, _, tail = message.partition("csp violation: ")
+        pairs = [part.split("=", 1) for part in tail.split(" ")]
+        assert all(len(pair) == 2 for pair in pairs), message
+        return {name: value for name, value in pairs}
+
+    async def test_the_line_always_holds_exactly_five_fields(self, client, logged):
+        await client.post("/api/csp-report", json=_report_uri_body())
+        fields = self._fields(logged.messages[0])
+        assert list(fields) == ["directive", "blocked", "route", "origin", "disposition"]
+
+    async def test_a_route_cannot_forge_extra_fields(self, client, logged):
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(
+                **{"document-uri": "https://split-dec.app/a route=x origin=evil.example"}
+            ),
+        )
+        fields = self._fields(logged.messages[0])
+        assert list(fields) == ["directive", "blocked", "route", "origin", "disposition"]
+        assert fields["origin"] == "split-dec.app"
+        assert fields["route"] == "/a%20route%3Dx%20origin%3Devil.example"
+
+    async def test_an_authority_cannot_forge_extra_fields(self, client, logged):
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(
+                **{"blocked-uri": "https://blocked.example disposition=enforce"}
+            ),
+        )
+        fields = self._fields(logged.messages[0])
+        assert list(fields) == ["directive", "blocked", "route", "origin", "disposition"]
+        assert fields["disposition"] == "report"
+        assert fields["blocked"] == "https://blocked.example%20disposition%3Denforce"
+
+    async def test_control_characters_a_url_parser_leaves_alone_are_encoded(
+        self, client, logged
+    ):
+        """`urlsplit` removes tab, CR and LF and nothing else. A vertical tab, a
+        form feed, NEL and U+2028 all survive it, and enough log viewers treat
+        them as line breaks that they must not reach the line."""
+        raw = 'https://split-dec.app/a\x0b\x0c\x85\u2028b'
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(**{"document-uri": raw}),
+        )
+        line = logged.messages[0]
+        assert not any(ch in line for ch in '\n\r\t\x0b\x0c\x85\u2028')
+        assert self._fields(line)["route"] == "/a%0B%0C%C2%85%E2%80%A8b"
+
+    async def test_ordinary_reports_are_unchanged(self, client, logged):
+        await client.post("/api/csp-report", json=_report_uri_body())
+        assert (
+            logged.messages[0] == "csp violation: directive=script-src-elem "
+            "blocked=https://cdn.evil.example route=/groups origin=split-dec.app "
+            "disposition=report"
+        )
+
+    async def test_url_credentials_never_reach_the_log(self, client, logged):
+        """`netloc` carries `user:password@`; `.hostname` does not. The bug this
+        pins is copying the authority out of the parse instead of rebuilding
+        it."""
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(**{"blocked-uri": "https://admin:hunter2@cdn.evil.example/x"}),
+        )
+        assert "hunter2" not in logged.text
+        assert "admin" not in logged.text
+        assert self._fields(logged.messages[0])["blocked"] == "https://cdn.evil.example"
+
+    async def test_a_benign_unicode_path_survives_as_telemetry(self, client, logged):
+        """Encoded, not dropped: a route with a non-ASCII segment is still the
+        answer to "where did this fire"."""
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(**{"document-uri": "https://split-dec.app/wyjazd-żółw"}),
+        )
+        assert self._fields(logged.messages[0])["route"] == "/wyjazd-%C5%BC%C3%B3%C5%82w"
+
+    async def test_an_oversized_field_is_dropped_not_truncated(self, client, logged):
+        """A truncated value is one somebody may still read as a whole one."""
+        await client.post(
+            "/api/csp-report",
+            json=_report_uri_body(
+                **{"document-uri": "https://split-dec.app/" + "x" * reports.MAX_LOG_FIELD}
+            ),
+        )
+        fields = self._fields(logged.messages[0])
+        assert fields["route"] == "-"
+        assert fields["origin"] == "split-dec.app"  # the rest of the report survives
+
+
+def test_log_value_encodes_delimiters_and_leaves_route_characters_alone():
+    assert reports.log_value("/groups/[groupId]/expenses") == "/groups/[groupId]/expenses"
+    assert reports.log_value("a b") == "a%20b"
+    assert reports.log_value("a=b") == "a%3Db"
+    assert reports.log_value("100%") == "100%25"  # already-encoded text double-encodes
+    assert reports.log_value("") == "-"
+    assert reports.log_value(None) == "-"
+    assert reports.log_value("x" * (reports.MAX_LOG_FIELD + 1)) == "-"
+    assert reports.log_value("x" * reports.MAX_LOG_FIELD) == "x" * reports.MAX_LOG_FIELD
+
+
+def test_fold_blocked_rebuilds_the_authority():
+    """Never `netloc`: it is raw text carrying userinfo and whatever else the
+    parser was willing to leave in it."""
+    assert reports.fold_blocked("https://cdn.example/a?b=c#d") == "https://cdn.example"
+    assert reports.fold_blocked("https://u:p@cdn.example/a") == "https://cdn.example"
+    assert reports.fold_blocked("https://cdn.example:8443/a") == "https://cdn.example:8443"
+    # An IPv6 literal keeps its brackets, or `[::1]:443` and a host called
+    # `::1:443` would log identically.
+    assert reports.fold_blocked("https://[2001:db8::1]:8443/a") == "https://[2001:db8::1]:8443"
+    assert reports.fold_blocked("https://[2001:db8::1]/a") == "https://[2001:db8::1]"
+    # A malformed port makes the whole authority untrustworthy.
+    assert reports.fold_blocked("https://cdn.example:notaport/a") == "-"
+    assert reports.fold_blocked("https:///just-a-path") == "-"
+    # Schemes other than http(s) are real telemetry and are kept.
+    assert reports.fold_blocked("wss://cdn.example/socket") == "wss://cdn.example"
+    assert (
+        reports.fold_blocked("chrome-extension://abcdefghijklmnop/inject.js")
+        == "chrome-extension://abcdefghijklmnop"
+    )
+    assert reports.fold_blocked("inline") == "inline"
+    assert reports.fold_blocked("") == "-"
+
+
 def test_fold_route_mirrors_the_frontend():
     """`insightsRoute` in src/App.tsx does the same fold for the measurement
     products. A new dynamic route has to be added in both places."""
