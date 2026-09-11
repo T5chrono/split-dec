@@ -699,6 +699,14 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   covers only `PENDING` rows so re-inviting still works. Cancelling, accepting and declining
   are all conditional on the row still being `PENDING` and answer 404 when it is not (see the
   concurrency section).
+- **The settlements list is paged** (`{items, limit, offset}`, 20 a page, same
+  envelope as expenses). It used to return every settlement a group had ever
+  recorded, on every load, and nothing caps how many accumulate — the ledger
+  quota bounds the rate, not the total. It was the only list here that grows
+  without a ceiling: pending invitations are held to one per address by the
+  partial unique index, and a member list does not grow on its own, so both of
+  those stay unpaged on purpose. The change from a bare array was breaking, and
+  acceptable only because the sole client ships in the same deploy.
 - **A group is never left without members.** `remove_member` refuses to remove the last one
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure
@@ -824,7 +832,14 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   expense that already has one. Keep the table's category values in sync with
   `CATEGORY_GROUPS` — a test asserts that.
 - All user-visible strings go through `src/lib/i18n.tsx` (EN + PL, including category names);
-  money formatting is locale-aware via `setMoneyLocale`. Dark mode = Tailwind `dark:` variants
+  money formatting is locale-aware via `setMoneyLocale`. **Values go in through
+  `t("key", { name })`, never `t("key").replace("{name}", value)`** — that was
+  the convention in six places and it is a footgun: `String.replace` gives
+  `$&`, `` $` ``, `$'`, `$$` and `$<name>` special meaning in a *replacement
+  string*, so any display name containing one came out garbled. Nothing unsafe
+  (this is text, never markup), just silently wrong. `t` fills placeholders
+  through a replacer function, where nothing is special, and leaves a
+  placeholder it has no value for visible rather than blanking it. Dark mode = Tailwind `dark:` variants
   on everything plus `color-scheme` on `.dark`.
 - Custom pickers (`DatePicker`, `CategorySelect`) are keyboard-accessible by prior review
   mandate; category list order is user-specified (General first, list opens at top).

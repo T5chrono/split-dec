@@ -579,7 +579,7 @@ const CATEGORY_GROUP_PL: Record<string, string> = {
 interface I18n {
   lang: Lang;
   setLang: (l: Lang) => void;
-  t: (key: TKey) => string;
+  t: (key: TKey, vars?: Record<string, string | number>) => string;
   /** Backend category value -> localized label. */
   tCategory: (value: string) => string;
   tCategoryGroup: (group: string) => string;
@@ -612,7 +612,30 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLangState(l);
   }, []);
 
-  const t = useCallback((key: TKey) => dict[lang][key], [lang]);
+  /** A string, with any `{placeholder}` filled from `vars`.
+   *
+   *  The values go in through a replacer *function*, not a replacement string.
+   *  `String.replace` gives `$&`, `` $` ``, `$'`, `$$` and `$<name>` special
+   *  meaning in a replacement string, so the old convention —
+   *  `t("editedBy").replace("{name}", someName)` — garbled any display name
+   *  containing one of them. Nothing unsafe (this is text, never markup), but
+   *  it was a footgun sitting in six call sites, and a helper people had to
+   *  remember to reach for would have left the habit intact. Taking the values
+   *  here means there is nothing left to remember.
+   *
+   *  A placeholder with no matching key is left as written rather than blanked,
+   *  so a missing value shows up as `{name}` on screen instead of a sentence
+   *  with a hole in it. */
+  const t = useCallback(
+    (key: TKey, vars?: Record<string, string | number>) => {
+      const text = dict[lang][key];
+      if (!vars) return text;
+      return text.replace(/\{(\w+)\}/g, (whole, name: string) =>
+        name in vars ? String(vars[name]) : whole,
+      );
+    },
+    [lang],
+  );
   const tCategory = useCallback(
     (value: string) => (lang === "pl" ? (CATEGORY_PL[value] ?? value) : value),
     [lang],
