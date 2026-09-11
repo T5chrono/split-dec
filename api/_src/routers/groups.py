@@ -207,20 +207,32 @@ async def remove_member(
                 "leaving it empty."
             ),
         )
-    # Pending invitations to this group addressed to the departing member are
-    # revoked with the membership. An invitation is an unexpiring capability
-    # that recreates membership on accept (invitations.accept_invitation), and
-    # nothing else expires it, so one left behind lets the removed member walk
-    # back in without any current member acting. delete_account already treats
-    # them this way for the same reason (routers/users.py).
+    # Pending invitations to this group are revoked with the membership, in
+    # both directions: those addressed to the departing member, and those they
+    # issued. An invitation is an unexpiring capability that creates membership
+    # on accept (invitations.accept_invitation), and nothing else expires it.
     #
-    # Reachable because a person can hold more than one live invitation to a
-    # group: uq_group_invitations_pending is keyed on (group_id, email), so a
-    # changed address (handle_user_updated, migration 20260827000100) leaves the
-    # invitation sent to the old one PENDING while they join through the new.
+    # Addressed to them: one left behind lets the removed member walk back in
+    # without any current member acting. delete_account already treats them
+    # this way for the same reason (routers/users.py).
+    #
     # Matched on both columns, exactly as delete_account does — an invitation
     # created before the invitee had an account carries a NULL invited_user_id
-    # and is only findable by address.
+    # and is only findable by address. Reachable because a person can hold more
+    # than one live invitation to a group: uq_group_invitations_pending is keyed
+    # on (group_id, email), so a changed address (handle_user_updated, migration
+    # 20260827000100) leaves the invitation sent to the old one PENDING while
+    # they join through the new. Wider than the predicate `accept_invitation`
+    # authorizes on (invitations.invitee_predicate), on purpose: revoking a
+    # capability too widely is safe, granting one too widely is not.
+    #
+    # Issued by them: acceptance checks the invitee, never the inviter, so an
+    # invitation outlives whatever authority created it. A member who is about
+    # to be removed can invite an address they control first and have it
+    # accepted afterwards — the group readmits a stranger with nobody left in
+    # it having agreed to that. The authority to invite is membership, so it
+    # ends when the membership does; an invitation still wanted is one a
+    # current member can send again.
     #
     # Safe under the group-lock protocol (deps.py): the FOR UPDATE taken above
     # conflicts with the FOR KEY SHARE that accept_invitation's membership
@@ -239,7 +251,8 @@ async def remove_member(
         .where(
             GroupInvitation.group_id == group_id,
             GroupInvitation.status == "PENDING",
-            (GroupInvitation.invited_user_id == user_id)
+            (GroupInvitation.invited_by == user_id)
+            | (GroupInvitation.invited_user_id == user_id)
             | (func.lower(GroupInvitation.email) == removed.email.lower()),
         )
         .values(status="CANCELLED", responded_at=datetime.now(timezone.utc))

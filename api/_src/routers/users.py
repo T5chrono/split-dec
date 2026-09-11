@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, text, update
@@ -144,6 +145,25 @@ async def delete_account(
             (GroupInvitation.invited_user_id == caller)
             | (func.lower(GroupInvitation.email) == old_email),
         )
+    )
+    # Invitations this account *issued* are revoked too, for the reason
+    # remove_member revokes them: accepting checks the invitee and never the
+    # inviter, so an invitation outlives the membership that authorized it, and
+    # a deleted account's leftovers would readmit strangers to groups where
+    # nobody agreed to that. Cancelled rather than deleted, unlike the block
+    # above — the recipient is a third party, so the row is still the group's
+    # record that the invitation happened, and the partial unique index covers
+    # only PENDING rows, so a current member can re-invite the same address.
+    #
+    # Groups this deletion emptied were purged above, taking their invitations
+    # with them; this UPDATE finds what is left in the groups that survive.
+    await db.execute(
+        update(GroupInvitation)
+        .where(
+            GroupInvitation.status == "PENDING",
+            GroupInvitation.invited_by == caller,
+        )
+        .values(status="CANCELLED", responded_at=datetime.now(timezone.utc))
     )
     # Answered invitations stay as group history, but must not keep the
     # address on file — the users row is being anonymized for the same reason.
