@@ -1,9 +1,11 @@
 """Recipient-controlled opt-out from invitation email.
 
 Covers the three halves that have to agree: the token (unforgeable, and tied to
-one address), the endpoint (POST-only, idempotent, no oracle), and what
-`invite_to_group` does with a suppressed address — which is to send no email
-and change nothing else.
+one address), the endpoint (POST-only, idempotent, and refusing what it did not
+sign), and what `invite_to_group` does with a suppressed address — which is to
+send no email and change nothing else *in the response*. The timing difference
+that follows from skipping the send is a known oracle, argued in
+routers/invitations.py and deliberately not asserted away here.
 """
 
 import uuid
@@ -205,9 +207,15 @@ class TestWhatSuppressionChangesAboutInviting:
     async def test_suppression_does_not_leak_into_the_response(
         self, client, db_session, two_user_group, _captured
     ):
-        """The caller must not be able to tell the two apart — same shape, same
-        status, same stored row, exactly as for a registered vs unregistered
-        address."""
+        """Same shape, same status, same stored row, exactly as for a
+        registered vs unregistered address.
+
+        Scoped to the response on purpose, and the scope is the finding: the
+        *timing* does differ, because a suppressed address skips the provider
+        call. That is a known, documented oracle (routers/invitations.py), not
+        something this test quietly covers — asserting uniformity here and
+        leaving the clock out would be how it got forgotten.
+        """
         await client.post(f"/api/unsubscribe?token={unsubscribe.mint_token(RECIPIENT)}")
         muted = await self._invite(client, two_user_group["group"].id, RECIPIENT)
         heard = await self._invite(client, two_user_group["group"].id, "someone@test.dev")

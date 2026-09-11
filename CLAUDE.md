@@ -932,6 +932,15 @@ Four things there are load-bearing:
   to the sender's quota**. Refunding the slot would let a caller read their own
   remaining allowance to discover whether an address has unsubscribed — the
   registration oracle `GET /users/search` was removed for, rebuilt out of a rate limit.
+  **The clock is the exception, and it is a known one**: the skipped provider call
+  makes a suppressed address answer faster, so a caller who times the request learns
+  that one bit. Not closable here — work that must happen has to happen before the
+  response is written, because the platform freezes the instance at that moment (see
+  Error monitoring), so on this route latency *is* the send. Tolerated because a probe
+  costs an invitation slot and the answer "not suppressed" is delivered by emailing
+  that person; `routers/invitations.py` carries the argument and the conditions that
+  would reopen it. Do not let a comment anywhere claim the two cases are
+  indistinguishable.
 - **`email_suppressions` is keyed by the unpeppered digest (`ratelimit.recipient_key`)
   while the token is signed with `UNSUBSCRIBE_SECRET`.** Keying the table by an HMAC
   instead would make rotating that secret silently orphan every row and resume mailing

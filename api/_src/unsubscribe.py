@@ -20,6 +20,12 @@ charging the quota would turn the sender's own allowance into an oracle for
 whether a given address has unsubscribed — the registration oracle that
 `GET /users/search` was removed for, rebuilt out of a rate limit.
 
+That uniformity covers everything except the clock. The skipped provider call
+makes a suppressed address answer faster, which is a timing oracle the send
+path cannot close on this platform; `routers/invitations.py` carries the full
+argument for why it is tolerated and what would make it worth revisiting.
+Nothing here should be read as claiming the two cases are indistinguishable.
+
 Three decisions here are load-bearing.
 
 **The table is keyed by the unpeppered digest (`ratelimit.recipient_key`),

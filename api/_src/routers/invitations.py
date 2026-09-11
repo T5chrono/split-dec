@@ -257,7 +257,36 @@ async def invite_to_group(
     # session's transaction is closed here, so no connection is held.
     #
     # Unless the address has opted out, which is the one thing that stops the
-    # send. The caller is told nothing either way, and the invitation stands.
+    # send. The invitation stands either way.
+    #
+    # **This branch is a timing oracle, and the honest thing is to say so.**
+    # Everything above is uniform between a suppressed address and a live one
+    # — same response shape, same stored row, same quota charge — but the send
+    # is a real HTTPS POST to the provider, awaited before the response is
+    # written, and skipping it is worth a few hundred milliseconds. A caller
+    # timing this request learns whether the address has unsubscribed.
+    #
+    # Kept, with the reasoning written down rather than papered over:
+    #
+    # - The clean fix does not exist on this platform. Not awaiting the send
+    #   (a task, a thread) loses it: Vercel freezes the instance the moment
+    #   the response is written, which is the documented mechanism that ate
+    #   three months of Sentry events (see monitoring.py, and why
+    #   `flush_on_response` has to wrap the app). Work that must happen has to
+    #   happen before the reply ends, so on this route latency *is* the send.
+    # - Padding both branches to a fixed floor hides a single timed request
+    #   and not a statistical one, while charging every honest invitation the
+    #   floor.
+    # - The probe is self-limiting in a way the registration oracle was not.
+    #   It costs an INVITE slot, so one account can ask about at most
+    #   MAX_PER_INVITER addresses a day — and the answer "not suppressed" is
+    #   delivered by sending that person the invitation. You spam somebody to
+    #   find out that they did not ask you to stop.
+    # - What it discloses is one bit about an address that already objected,
+    #   not whether an account exists (users.py).
+    #
+    # If any of those stops holding — a queue arrives, the quotas widen, the
+    # send moves off the request path — revisit this.
     if not muted:
         await send_invitation_email(
             email,
