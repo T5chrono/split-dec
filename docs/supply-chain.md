@@ -48,6 +48,7 @@ quietly. Check these at each release.
 | Workflow permissions | *Read repository contents*, and "allow Actions to create and approve pull requests" **off** | GitHub → Settings → Actions → General |
 | Private vulnerability reporting | enabled — `SECURITY.md` points at it | GitHub → Settings → Code security |
 | Firewall rule "CSP report flood limit" | `path equals /api/csp-report`, 100 req/60s per IP, deny 5m | Vercel project — inspect with `vercel firewall rules list` |
+| Inbound mail aliases | `privacy@` and `support@` both forwarding, each as an **explicit alias** — a catch-all alone was observed not to deliver | ImprovMX (the domain's MX records point there) |
 | `SENTRY_AUTH_TOKEN` | project-scoped, production only | Vercel env vars |
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
@@ -55,6 +56,21 @@ quietly. Check these at each release.
 | Password minimum length | **8**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Confirmed 2026-09-08 | Supabase → Authentication, password settings under the Email provider |
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
+
+Inbound mail is the one row above with no account to log into from CI at all,
+and it fails silently in the direction that matters: a dead alias bounces or
+swallows mail without anything here noticing. What the MX records say is at
+least checkable from anywhere:
+
+```bash
+nslookup -type=MX split-dec.app   # expect mx1/mx2.improvmx.com
+```
+
+That confirms mail reaches the forwarder, not that a given alias exists behind
+it. The only real test is sending to the address and seeing it arrive — worth
+doing for `privacy@` in particular, which the Privacy Policy publishes as the
+contact for GDPR requests, where silence is a compliance problem rather than an
+inconvenience.
 
 Verifying the GitHub half without clicking through the UI:
 
