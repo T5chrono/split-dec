@@ -55,6 +55,7 @@ from .models import WriteEvent
 LEDGER = "LEDGER"
 GROUP = "GROUP"
 INVITE = "INVITE"
+MUTATION = "MUTATION"
 
 WRITE_WINDOW = timedelta(hours=24)
 
@@ -66,6 +67,23 @@ MAX_LEDGER_WRITES_PER_CALLER = 100
 # Groups one account can create in a window. Nobody legitimately creates 25
 # groups a day.
 MAX_GROUPS_PER_CALLER = 25
+
+# Edits and withdrawals of ledger rows, per caller. Separate from the creation
+# cap and deliberately looser: three changes for every entry the same window
+# lets you create, which no honest user approaches. It exists because an edit
+# is not free — it revalidates participants, recomputes every split and
+# re-reads the group's balances — and without it, a caller who had spent their
+# 100 creates could still rewrite one expense in a loop for ever.
+#
+# **It charges for the work, not for the outcome**, and that is the one thing
+# to keep straight here. A PATCH that changes nothing does not record an edit
+# (deps.record_edit, and the comparisons in the update endpoints) because
+# pressing Save without editing should not accuse anybody. It does spend a slot
+# anyway, because the server did all of that work regardless. The two rules
+# point opposite ways on purpose: attribution asks "did anything change?", the
+# quota asks "did this cost us anything?". Charging only on a real change would
+# leave the abuse loop open — no-op PATCHes would be free and unlimited.
+MAX_LEDGER_MUTATIONS_PER_CALLER = 300
 
 # Every invitation to a non-member triggers an outbound email, and cancelling
 # one frees its (group, email) slot immediately — so without quotas a single
@@ -135,7 +153,7 @@ def recipient_key(email: str) -> str:
 
 # Advisory-lock namespaces, one per window, so a burst of ledger writes never
 # waits behind group creation or an invitation.
-_LOCK_SPACE = {LEDGER: 1, GROUP: 2, INVITE: 3}
+_LOCK_SPACE = {LEDGER: 1, GROUP: 2, INVITE: 3, MUTATION: 4}
 
 
 async def _hold_window(db: AsyncSession, kind: str, caller: uuid.UUID | None) -> None:
@@ -251,6 +269,26 @@ async def enforce_ledger_write_quota(db: AsyncSession, caller: uuid.UUID) -> Non
     if await _slots_used(db, caller, LEDGER) >= MAX_LEDGER_WRITES_PER_CALLER:
         raise _too_many(
             "You have recorded too many entries recently. Please try again later."
+        )
+
+
+async def enforce_ledger_mutation_quota(db: AsyncSession, caller: uuid.UUID) -> None:
+    """429 once one account has edited or withdrawn too many ledger rows.
+
+    Charged by every update and soft-delete on an expense or settlement,
+    whether or not the request turned out to change anything — see
+    MAX_LEDGER_MUTATIONS_PER_CALLER for why that differs from what gets
+    *recorded* as an edit.
+
+    Unlike the create endpoints there is no `Idempotency-Key` here, so the
+    "answer a replay before the quota" rule does not apply; the other three
+    do — it counts tombstones, charges inside the caller's transaction, and
+    holds the window while it counts.
+    """
+    await _hold_window(db, MUTATION, caller)
+    if await _slots_used(db, caller, MUTATION) >= MAX_LEDGER_MUTATIONS_PER_CALLER:
+        raise _too_many(
+            "You have changed too many entries recently. Please try again later."
         )
 
 

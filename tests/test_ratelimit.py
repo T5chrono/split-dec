@@ -271,6 +271,114 @@ class TestLedgerWriteQuota:
         assert edit.status_code == 200
 
 
+class TestLedgerMutationQuota:
+    """Creating a ledger row was capped; changing one was not. An edit
+    revalidates the participants, recomputes every split and re-reads the
+    group's balances, so a caller who had spent their creation allowance could
+    still rewrite one expense in a loop for as long as they liked."""
+
+    @pytest.fixture(autouse=True)
+    def _small_quota(self, monkeypatch):
+        monkeypatch.setattr(ratelimit, "MAX_LEDGER_MUTATIONS_PER_CALLER", 3)
+
+    async def _expense(self, client, g):
+        return (
+            await client.post(
+                f"/api/groups/{g['group'].id}/expenses",
+                json=expense_payload(g["alice"], [g["alice"], g["bob"]]),
+                headers=idem(),
+            )
+        ).json()
+
+    async def test_editing_stops_at_the_limit(self, client, two_user_group):
+        g = two_user_group
+        e = await self._expense(client, g)
+        for i in range(3):
+            r = await client.patch(f"/api/expenses/{e['id']}", json={"description": f"v{i}"})
+            assert r.status_code == 200
+
+        blocked = await client.patch(f"/api/expenses/{e['id']}", json={"description": "v4"})
+        assert blocked.status_code == 429
+        assert blocked.headers["Retry-After"]
+
+    async def test_a_no_op_edit_still_costs_a_slot(self, client, two_user_group):
+        """The one place this window and the attribution record disagree, on
+        purpose. A PATCH that changes nothing is not recorded as an edit —
+        pressing Save without editing must not accuse anybody — but the server
+        still did the validation, the splits computation and the balances read,
+        so it pays. Free no-op PATCHes would leave the loop this cap exists to
+        close wide open."""
+        g = two_user_group
+        e = await self._expense(client, g)
+        for _ in range(3):
+            r = await client.patch(f"/api/expenses/{e['id']}", json={})
+            assert r.status_code == 200
+            assert r.json()["updated_by"] is None  # not recorded as an edit
+
+        assert (await client.patch(f"/api/expenses/{e['id']}", json={})).status_code == 429
+
+    async def test_withdrawals_share_the_window(self, client, two_user_group):
+        g = two_user_group
+        first, second = await self._expense(client, g), await self._expense(client, g)
+        assert (await client.delete(f"/api/expenses/{first['id']}")).status_code == 204
+        assert (
+            await client.patch(f"/api/expenses/{second['id']}", json={"description": "x"})
+        ).status_code == 200
+        assert (await client.delete(f"/api/expenses/{second['id']}")).status_code == 204
+
+        third = await self._expense(client, g)
+        assert (await client.delete(f"/api/expenses/{third['id']}")).status_code == 429
+
+    async def test_settlements_share_the_window_with_expenses(self, client, two_user_group):
+        g = two_user_group
+        e = await self._expense(client, g)
+        s = (
+            await client.post(
+                f"/api/groups/{g['group'].id}/settlements",
+                json={
+                    "paid_by_user_id": str(g["bob"].id),
+                    "paid_to_user_id": str(g["alice"].id),
+                    "amount": "1.00",
+                    "currency": "PLN",
+                },
+                headers=idem(),
+            )
+        ).json()
+
+        for _ in range(2):
+            assert (
+                await client.patch(f"/api/expenses/{e['id']}", json={"description": "x"})
+            ).status_code == 200
+        assert (
+            await client.put(f"/api/settlements/{s['id']}", json={"amount": "2.00"})
+        ).status_code == 200
+        blocked = await client.put(f"/api/settlements/{s['id']}", json={"amount": "3.00"})
+        assert blocked.status_code == 429
+
+    async def test_creating_is_not_charged_to_this_window(self, client, two_user_group):
+        """Separate kinds, separate caps: a person entering a busy trip's
+        expenses must not be braked by an allowance meant for rewrites."""
+        g = two_user_group
+        for _ in range(5):
+            assert (await self._expense(client, g))["id"]
+
+    async def test_a_refused_mutation_charges_nothing(self, client, db_session, two_user_group):
+        """`record_write` only adds to the session, so the 422 below rolls the
+        charge back with everything else — the same rule the create endpoints
+        follow."""
+        g = two_user_group
+        e = await self._expense(client, g)
+        r = await client.patch(f"/api/expenses/{e['id']}", json={"total_amount": "5.00"})
+        assert r.status_code == 422  # split fields are all-or-nothing
+
+        async with db_session() as s:
+            kinds = [
+                w.kind
+                for w in (await s.execute(select(WriteEvent))).scalars().all()
+            ]
+        assert ratelimit.MUTATION not in kinds
+
+
 class TestGroupCreationQuota:
     """Without this, the ledger limit is sidestepped by making more groups."""
 

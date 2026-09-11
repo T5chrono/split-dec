@@ -168,7 +168,8 @@ class WriteEvent(Base):
     __tablename__ = "write_events"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('LEDGER', 'GROUP', 'INVITE')", name="write_events_kind_check"
+            "kind IN ('LEDGER', 'GROUP', 'INVITE', 'MUTATION')",
+            name="write_events_kind_check",
         ),
     )
 

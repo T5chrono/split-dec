@@ -17,7 +17,13 @@ from ..deps import (
     require_membership,
 )
 from ..models import GroupMember, Settlement
-from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
+from ..ratelimit import (
+    LEDGER,
+    MUTATION,
+    enforce_ledger_mutation_quota,
+    enforce_ledger_write_quota,
+    record_write,
+)
 from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
 
 router = APIRouter(tags=["settlements"])
@@ -136,6 +142,13 @@ async def update_settlement(
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
+    # Charged before the work, not after: the point of this window is the
+    # revalidation, the splits recompute and the balances read below, and a
+    # caller who spends those must pay for them whether or not the request
+    # turns out to alter anything. `record_edit` decides the separate question
+    # of what gets *recorded* as an edit.
+    await enforce_ledger_mutation_quota(db, caller)
+    await record_write(db, caller, MUTATION)
     paid_by = body.paid_by_user_id or settlement.paid_by_user_id
     paid_to = body.paid_to_user_id or settlement.paid_to_user_id
     amount = body.amount if body.amount is not None else settlement.amount
@@ -173,6 +186,8 @@ async def delete_settlement(
     # Soft-deleting changes balances, so it must take the shared lock like
     # every other ledger mutation (serializes against member/group removal).
     settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
+    await enforce_ledger_mutation_quota(db, caller)
+    await record_write(db, caller, MUTATION)
     settlement.deleted_at = datetime.now(timezone.utc)
     record_edit(settlement, caller)
     await db.flush()
