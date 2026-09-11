@@ -155,6 +155,16 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
                 <div className="truncate font-medium">{e.description}</div>
                 <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {nameOf(e.paid_by_user_id)} {t("paidVerb")}
+                  {/* Only when somebody other than the author touched it. An
+                      author editing their own entry is the ordinary case and
+                      says nothing; "Bob changed Alice's expense" is the whole
+                      reason the columns exist. A row predating the columns has
+                      no `created_by`, so a later edit still shows — which is
+                      right: the edit is known even though the authorship is
+                      not. */}
+                  {e.updated_by && e.updated_by !== e.created_by && (
+                    <> · {t("editedBy").replace("{name}", nameOf(e.updated_by))}</>
+                  )}
                 </div>
               </div>
               <span className="shrink-0 font-semibold">

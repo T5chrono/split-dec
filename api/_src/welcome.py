@@ -159,6 +159,10 @@ async def seed_welcome_group(
         paid_by_user_id=SYSTEM_USER_ID,
         expense_date=date.today(),
         idempotency_key=uuid.uuid4(),
+        # The deployment entered this one, on SplitDec's behalf. Naming the
+        # system user rather than leaving it blank keeps "no author on record"
+        # meaning exactly one thing: a row older than 20260911010000.
+        created_by=SYSTEM_USER_ID,
     )
     db.add(expense)
     await db.flush()

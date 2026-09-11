@@ -56,6 +56,7 @@ const dict = {
     resetLinkInvalid:
       "This link is invalid or has expired. Request a new one from the sign-in screen.",
     signOutRecovery: "Not you? Sign out",
+    editedBy: "edited by {name}",
     unsubscribeTitle: "Stop invitation emails",
     unsubscribeBody:
       "SplitDec will stop emailing you when someone invites you to a group. If you ever sign up, invitations will still be waiting for you in the app.",
@@ -300,6 +301,7 @@ const dict = {
     resetLinkInvalid:
       "Ten link jest nieprawidłowy lub wygasł. Poproś o nowy na ekranie logowania.",
     signOutRecovery: "To nie Ty? Wyloguj się",
+    editedBy: "zmienione przez {name}",
     unsubscribeTitle: "Zatrzymaj e-maile z zaproszeniami",
     unsubscribeBody:
       "SplitDec przestanie wysyłać Ci e-maile, gdy ktoś zaprosi Cię do grupy. Jeśli kiedyś założysz konto, zaproszenia i tak będą czekać w aplikacji.",

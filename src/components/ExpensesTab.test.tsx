@@ -33,6 +33,9 @@ function expense(id: string, description: string, payer = alice.id): Expense {
     paid_by_user_id: payer,
     expense_date: "2026-06-01",
     created_at: "2026-06-01T00:00:00Z",
+    created_by: null,
+    updated_by: null,
+    updated_at: null,
     splits: [{ user_id: alice.id, owed_amount: "10.0000" }],
   };
 }
@@ -58,6 +61,45 @@ async function deleteViaEditView(description: string) {
   await user.click(screen.getByRole("button", { name: "Delete" })); // confirm dialog
   return user;
 }
+
+describe("ExpensesTab — edit attribution", () => {
+  const shared = { ...group, members: [alice, bob] };
+
+  function render(overrides: Partial<Expense>) {
+    const item = { ...expense("e1", "Groceries"), ...overrides };
+    vi.mocked(api.get).mockImplementation(
+      async () => ({ items: [item], limit: 20, offset: 0 }) satisfies ExpenseList,
+    );
+    renderWithProviders(<ExpensesTab group={shared} />);
+  }
+
+  it("names whoever last changed somebody else's expense", async () => {
+    render({ created_by: alice.id, updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(await screen.findByText(/edited by Bob/)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the author edited their own expense", async () => {
+    // Stored either way — the column records the truth and the UI decides what
+    // is worth saying. An author fixing their own typo is not.
+    render({ created_by: alice.id, updated_by: alice.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(await screen.findByText("Groceries")).toBeInTheDocument();
+    expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
+  });
+
+  it("stays quiet on an expense nobody has touched", async () => {
+    render({ created_by: alice.id, updated_by: null, updated_at: null });
+    expect(await screen.findByText("Groceries")).toBeInTheDocument();
+    expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
+  });
+
+  it("still reports an edit on a row that predates the columns", async () => {
+    // ~90 production rows have no author and are deliberately not backfilled.
+    // The edit is known even though the authorship is not, and that is worth
+    // showing rather than suppressing.
+    render({ created_by: null, updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(await screen.findByText(/edited by Bob/)).toBeInTheDocument();
+  });
+});
 
 describe("ExpensesTab — optimistic delete", () => {
   let serverItems: Expense[];

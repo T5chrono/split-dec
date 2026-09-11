@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import ensure_no_outsider_debt, get_expense_for_member, require_membership
+from ..deps import (
+    ensure_no_outsider_debt,
+    get_expense_for_member,
+    record_edit,
+    require_membership,
+)
 from ..models import Expense, ExpenseSplit, GroupMember
 from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
@@ -119,6 +124,7 @@ async def create_expense(
         paid_by_user_id=body.paid_by_user_id,
         expense_date=body.expense_date or date.today(),
         idempotency_key=idempotency_key,
+        created_by=caller,
         splits=[
             ExpenseSplit(user_id=user_id, owed_amount=amount)
             for user_id, amount in shares.items()
@@ -195,6 +201,7 @@ async def update_expense(
     if body.expense_date is not None:
         expense.expense_date = body.expense_date
 
+    record_edit(expense, caller)
     # Rewriting splits can only name current members, which is exactly how a
     # former participant's balance moves off zero: their share disappears from
     # an expense they had already settled for.
@@ -215,6 +222,11 @@ async def delete_expense(
     # every other ledger mutation (serializes against member/group removal).
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
     expense.deleted_at = datetime.now(timezone.utc)
+    # Withdrawing somebody else's expense is the most disputable thing a member
+    # can do to the ledger, so it is attributed like any other edit — even
+    # though no screen shows a deleted row, which makes this the one stamp that
+    # only ever answers a question asked afterwards.
+    record_edit(expense, caller)
     await db.flush()
     # Withdrawing an expense un-settles everyone it touched, including anyone
     # who has since left and can no longer be a party to a settlement.
