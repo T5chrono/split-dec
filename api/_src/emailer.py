@@ -30,6 +30,15 @@ MAX_SUBJECT_BYTES = 200
 
 SUBJECT_SUFFIX = " invited you to split expenses on SplitDec"
 
+# The address src/lib/legal.ts names as the contact point. Duplicated across
+# the language boundary rather than shared, which is unavoidable; if one moves,
+# move the other.
+CONTACT_EMAIL = "privacy@split-dec.app"
+# Valid with no secret, no endpoint and no stored row (RFC 2369), so it is what
+# an unconfigured deployment still offers. It reaches a person rather than a
+# mechanism, which is exactly why it is the fallback and not the plan.
+UNSUBSCRIBE_MAILTO = f"mailto:{CONTACT_EMAIL}?subject=Unsubscribe"
+
 # Stand-in for a name that normalizes away to nothing — an inviter called
 # a zero-width space (U+200B) would otherwise open the subject with one.
 ANONYMOUS_INVITER = "Someone"
@@ -92,7 +101,33 @@ def _post_resend(payload: dict) -> None:
             raise RuntimeError(f"Resend returned {resp.status}")
 
 
-def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, str]:
+def unsubscribe_footer(token: str | None) -> str:
+    """The line that tells a stranger how to make this stop.
+
+    Every invitation goes to an address that may never have heard of SplitDec,
+    so there is always a way out: the signed link when the deployment has a
+    secret to sign with, and the contact address when it does not. The token is
+    base64url and needs no escaping, but goes through the same escape as
+    APP_URL so the rule at this boundary stays "everything interpolated into an
+    href is escaped" rather than a judgement per value.
+    """
+    if token:
+        url = html.escape(f"{APP_URL}/unsubscribe?token={token}", quote=True)
+        label = "Don't want invitations from SplitDec?"
+        return (
+            f'<p style="font-size:12px"><a href="{url}">{label}</a> '
+            f"You will still see the invitation if you sign up.</p>"
+        )
+    return (
+        f'<p style="font-size:12px">To stop receiving invitations from SplitDec, '
+        f'write to <a href="{html.escape(UNSUBSCRIBE_MAILTO, quote=True)}">'
+        f"{CONTACT_EMAIL}</a>.</p>"
+    )
+
+
+def invitation_email_content(
+    inviter_name: str, group_name: str, unsubscribe_token: str | None = None
+) -> dict[str, str]:
     """Subject + HTML body. Inviter and group names are user-controlled and
     MUST be escaped — otherwise a group named `<a href=...>` injects markup
     into an official SplitDec email. APP_URL is deployment config, not user
@@ -116,12 +151,40 @@ def invitation_email_content(inviter_name: str, group_name: str) -> dict[str, st
             f"expenses with friends.</p>"
             f'<p><a href="{html.escape(APP_URL, quote=True)}">Sign in</a> '
             f"using this email address and the invitation will be waiting for you.</p>"
+            + unsubscribe_footer(unsubscribe_token)
         ),
     }
 
 
+def unsubscribe_headers(token: str | None) -> dict[str, str]:
+    """`List-Unsubscribe` and, where we can honour it, one-click.
+
+    This is the half that matters most and is easiest to forget: a mail client
+    only shows its own unsubscribe button when the message carries these, and
+    bulk-sender rules at the large providers have expected them since 2024. So
+    they protect the sending domain as much as the reader.
+
+    `List-Unsubscribe-Post` (RFC 8058) means the provider POSTs the https URL
+    itself, with no human and no page. That is why the API route is POST-only
+    and why the token alone authorizes it — see routers/unsubscribe.py. The
+    mailto is listed alongside for clients that only understand that form, and
+    is all a deployment without a secret can offer.
+    """
+    if not token:
+        return {"List-Unsubscribe": f"<{UNSUBSCRIBE_MAILTO}>"}
+    return {
+        "List-Unsubscribe": f"<{APP_URL}/api/unsubscribe?token={token}>, <{UNSUBSCRIBE_MAILTO}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
+
+
 async def send_invitation_email(
-    to: str, inviter_name: str, group_name: str, *, correlator: object
+    to: str,
+    inviter_name: str,
+    group_name: str,
+    *,
+    correlator: object,
+    unsubscribe_token: str | None = None,
 ) -> bool:
     """Returns True only if an email was actually handed to the provider.
 
@@ -135,7 +198,12 @@ async def send_invitation_email(
     if not RESEND_API_KEY:
         logger.info("RESEND_API_KEY unset; skipping invitation email %s", correlator)
         return False
-    payload = {"from": RESEND_FROM, "to": [to], **invitation_email_content(inviter_name, group_name)}
+    payload = {
+        "from": RESEND_FROM,
+        "to": [to],
+        "headers": unsubscribe_headers(unsubscribe_token),
+        **invitation_email_content(inviter_name, group_name, unsubscribe_token),
+    }
     try:
         await asyncio.to_thread(_post_resend, payload)
         return True

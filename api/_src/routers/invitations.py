@@ -18,6 +18,7 @@ from ..schemas import (
     InvitationOut,
     MyInvitationOut,
 )
+from ..unsubscribe import is_suppressed, mint_token
 
 router = APIRouter(tags=["invitations"])
 
@@ -210,6 +211,18 @@ async def invite_to_group(
     group = await db.get(Group, group_id)
     inviter_name = inviter.full_name or inviter.email
     group_name = group.name
+    # Read here for the same reason as the two names above: the provider call
+    # happens after the commit, and a read taken then would have checked a
+    # pooler connection back out to hold across it.
+    #
+    # Note where this sits — *after* the quota was charged, not before. An
+    # opt-out suppresses the email and nothing else: the row below is still
+    # created, still visible in the app if this address ever signs up, and
+    # still costs the sender a slot. Skipping the charge would let a caller
+    # read their own remaining allowance to discover whether an address has
+    # unsubscribed, which is the registration oracle this endpoint is built to
+    # deny, rebuilt out of a rate limit.
+    muted = await is_suppressed(db, email)
 
     invitation = GroupInvitation(
         group_id=group_id,
@@ -242,9 +255,46 @@ async def invite_to_group(
     # get a nudge, and unregistered ones cannot be distinguished by the
     # caller through latency or a missing side effect. Best-effort — the
     # session's transaction is closed here, so no connection is held.
-    await send_invitation_email(
-        email, inviter_name, group_name, correlator=invitation.id
-    )
+    #
+    # Unless the address has opted out, which is the one thing that stops the
+    # send. The invitation stands either way.
+    #
+    # **This branch is a timing oracle, and the honest thing is to say so.**
+    # Everything above is uniform between a suppressed address and a live one
+    # — same response shape, same stored row, same quota charge — but the send
+    # is a real HTTPS POST to the provider, awaited before the response is
+    # written, and skipping it is worth a few hundred milliseconds. A caller
+    # timing this request learns whether the address has unsubscribed.
+    #
+    # Kept, with the reasoning written down rather than papered over:
+    #
+    # - The clean fix does not exist on this platform. Not awaiting the send
+    #   (a task, a thread) loses it: Vercel freezes the instance the moment
+    #   the response is written, which is the documented mechanism that ate
+    #   three months of Sentry events (see monitoring.py, and why
+    #   `flush_on_response` has to wrap the app). Work that must happen has to
+    #   happen before the reply ends, so on this route latency *is* the send.
+    # - Padding both branches to a fixed floor hides a single timed request
+    #   and not a statistical one, while charging every honest invitation the
+    #   floor.
+    # - The probe is self-limiting in a way the registration oracle was not.
+    #   It costs an INVITE slot, so one account can ask about at most
+    #   MAX_PER_INVITER addresses a day — and the answer "not suppressed" is
+    #   delivered by sending that person the invitation. You spam somebody to
+    #   find out that they did not ask you to stop.
+    # - What it discloses is one bit about an address that already objected,
+    #   not whether an account exists (users.py).
+    #
+    # If any of those stops holding — a queue arrives, the quotas widen, the
+    # send moves off the request path — revisit this.
+    if not muted:
+        await send_invitation_email(
+            email,
+            inviter_name,
+            group_name,
+            correlator=invitation.id,
+            unsubscribe_token=mint_token(email),
+        )
 
     return InvitationCreatedOut.model_validate(invitation)
 

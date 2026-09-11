@@ -113,9 +113,14 @@ def recipient_key(email: str) -> str:
     - Whoever can read this column can read `public.users.email` in plaintext,
       in the same database. The only addresses this exposes that the users
       table does not are those of people who were invited and never signed up.
-    - The rows do not accumulate. `record_write` prunes everything past the
-      longest window, so a digest here has a working life of about a day —
-      it is not a durable record of who was ever invited.
+    - The rows in *this* table do not accumulate. `record_write` prunes
+      everything past the longest window, so a digest here has a working life
+      of about a day — it is not a durable record of who was ever invited.
+      `email_suppressions` reuses this function and is the exception: those
+      rows are kept for as long as the objection stands. That trade is argued
+      separately in unsubscribe.py, and it turns on the alternative — keying
+      that table by an HMAC — making a rotated secret silently resume mail to
+      people who opted out.
     - Account deletion nulls the column on every row naming the departing
       account's own address (routers/users.py), so the promise made there does
       not rest on the digest being hard to reverse.
