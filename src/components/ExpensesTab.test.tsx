@@ -73,8 +73,19 @@ describe("ExpensesTab — edit attribution", () => {
     renderWithProviders(<ExpensesTab group={shared} />);
   }
 
-  it("names whoever last changed somebody else's expense", async () => {
+  it("keeps the list free of it, even on an edited expense", async () => {
+    // The list is scanned, not read, and most edits are somebody fixing a
+    // typo. "Who changed this?" gets asked of one expense after a balance
+    // looks wrong, so the answer lives in that expense's own view instead.
     render({ created_by: alice.id, updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(await screen.findByText("Groceries")).toBeInTheDocument();
+    expect(screen.getByText(/Alice paid/)).toBeInTheDocument();
+    expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
+  });
+
+  it("shows it once the expense is opened", async () => {
+    render({ created_by: alice.id, updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    await userEvent.click(await screen.findByText("Groceries"));
     expect(await screen.findByText(/edited by Bob/)).toBeInTheDocument();
   });
 
@@ -82,13 +93,15 @@ describe("ExpensesTab — edit attribution", () => {
     // Stored either way — the column records the truth and the UI decides what
     // is worth saying. An author fixing their own typo is not.
     render({ created_by: alice.id, updated_by: alice.id, updated_at: "2026-06-02T00:00:00Z" });
-    expect(await screen.findByText("Groceries")).toBeInTheDocument();
+    await userEvent.click(await screen.findByText("Groceries"));
+    expect(await screen.findByRole("button", { name: /delete expense/i })).toBeInTheDocument();
     expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
   });
 
   it("stays quiet on an expense nobody has touched", async () => {
     render({ created_by: alice.id, updated_by: null, updated_at: null });
-    expect(await screen.findByText("Groceries")).toBeInTheDocument();
+    await userEvent.click(await screen.findByText("Groceries"));
+    expect(await screen.findByRole("button", { name: /delete expense/i })).toBeInTheDocument();
     expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
   });
 
@@ -97,6 +110,7 @@ describe("ExpensesTab — edit attribution", () => {
     // The edit is known even though the authorship is not, and that is worth
     // showing rather than suppressing.
     render({ created_by: null, updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    await userEvent.click(await screen.findByText("Groceries"));
     expect(await screen.findByText(/edited by Bob/)).toBeInTheDocument();
   });
 });

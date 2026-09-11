@@ -617,9 +617,18 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
     no screen ever shows — deleted rows are not rendered — so it only ever answers
     a question asked afterwards.
   - **`updated_by` is stored even when the author edits their own row.** The
-    column records what happened; `ExpensesTab` decides what is worth saying, and
-    shows the line only when `updated_by` differs from `created_by`. Do not
-    collapse those two decisions into one by leaving the column blank.
+    column records what happened; the UI decides what is worth saying, and shows
+    it only when `updated_by` differs from `created_by`. Do not collapse those
+    two decisions into one by leaving the column blank.
+  - **It is shown in the expense's own view (`ExpenseFormModal`), not in the
+    list.** The list is scanned rather than read, and most edits are somebody
+    fixing their own typo, so a permanent badge on every one of them gives
+    ordinary collaborative behaviour an auditing tone. The discovery path is a
+    *balance* looking wrong, not a line in a list — and it ends with one expense
+    open, which is where the answer is. The list placement was tried first and
+    measured out: that row's secondary line has 117px at 375px wide, so even
+    "Alice paid · edited by Bob" truncated and a Polish name pushed the notice
+    off the row entirely.
   - **No backfill, deliberately.** Rows older than the migration have no author,
     and inferring one from the payer would invent a fact. A row with
     `created_by IS NULL` and a non-null `updated_by` still shows its edit — the
