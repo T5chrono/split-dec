@@ -3,11 +3,11 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import Select, select
+from sqlalchemy import Integer, Select, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .balances import net_balances
-from .models import Expense, Group, GroupMember, Settlement, User
+from .models import Expense, Group, GroupInvitation, GroupMember, Settlement, User
 
 # Anonymized users keep their public.users row for ledger history but must
 # never act again (their auth.users row is gone, yet a JWT issued before
@@ -87,6 +87,104 @@ async def lock_groups_exclusive(db: AsyncSession, group_ids: list[uuid.UUID]) ->
         .order_by(Group.id)
         .with_for_update()
     )
+
+
+# How many people one group holds. A **seat** is a member or a PENDING
+# invitation, so a group can never issue more invitations than it has room for
+# and the refusal lands on the inviter rather than on the invitee at the moment
+# they accept.
+#
+# The number is a product decision rather than a technical threshold: 100 is far
+# above any real use of a bill splitter, and the screens are what it protects —
+# the members tab and the split editor render one unvirtualised row per member,
+# and because splits may only name current members (routers/expenses.py) a cap
+# on the group is automatically a cap on the rows one expense writes.
+#
+# Easier to raise than to lower: lowering it strands groups already over the
+# line, which nothing here refuses retroactively.
+MAX_GROUP_MEMBERS = 100
+
+# Advisory-lock namespace for the seat count. Must not collide with
+# ratelimit._LOCK_SPACE, which owns 1-4 for the write windows.
+_SEAT_LOCK_SPACE = 5
+
+
+async def hold_group_seats(db: AsyncSession, group_id: uuid.UUID) -> None:
+    """Serialize one group's count-the-seats-then-take-one until this
+    transaction ends.
+
+    Counting and inserting are two statements, so without this N concurrent
+    joins all count the same N-1 seats and all succeed. Same rule the write
+    quotas follow (ratelimit._hold_window), and the mechanics are the same:
+
+    `pg_advisory_xact_lock`, never the session-scoped variant — the connection
+    goes back to the transaction pooler at commit (db.py) and a session lock
+    would ride into the next borrower's transaction with nobody left to release
+    it. Both operands are cast explicitly because Postgres has a (bigint) form
+    and an (int4, int4) form and no (bigint, bigint) one, so leaving the types
+    to inference is a resolution failure waiting for a driver change. The low 4
+    bytes of the uuid are as good as any hash: a collision costs two unrelated
+    groups a brief wait.
+
+    Deliberately an advisory lock rather than FOR UPDATE on the group row. The
+    row lock is the ledger's (see the GroupLock protocol above) — taking the
+    exclusive one here would make joining a group queue behind every expense
+    write on it, and make every expense write wait out a join, for a count that
+    has nothing to do with money. This one conflicts with exactly the other
+    thing that takes a seat.
+
+    A no-op outside Postgres: SQLite (tests) runs one connection at a time and
+    has nothing to serialize.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    key = int.from_bytes(group_id.bytes[:4], "big", signed=True)
+    await db.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                cast(_SEAT_LOCK_SPACE, Integer), cast(key, Integer)
+            )
+        )
+    )
+
+
+async def ensure_group_has_room(
+    db: AsyncSession, group_id: uuid.UUID, *, counting_invitations: bool
+) -> None:
+    """Refuse to fill a seat in a group that has none left.
+
+    `counting_invitations` is the difference between the two callers.
+    Inviting counts members *and* pending invitations, because the invitation it
+    is about to create reserves a seat. Accepting counts members only: the
+    invitation being answered is already holding one, and accepting converts it
+    rather than adding another.
+
+    Callers must hold `hold_group_seats` for the same group, or this counts a
+    number that another request is already invalidating.
+    """
+    members = (
+        select(func.count())
+        .select_from(GroupMember)
+        .where(GroupMember.group_id == group_id)
+        .scalar_subquery()
+    )
+    pending = (
+        select(func.count())
+        .select_from(GroupInvitation)
+        .where(
+            GroupInvitation.group_id == group_id,
+            GroupInvitation.status == "PENDING",
+        )
+        .scalar_subquery()
+    )
+    taken = (
+        await db.execute(select(members + pending if counting_invitations else members))
+    ).scalar_one()
+    if taken >= MAX_GROUP_MEMBERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This group is full ({MAX_GROUP_MEMBERS} people is the limit).",
+        )
 
 
 def raise_unless_member(*, group_exists: bool, is_member: bool) -> None:

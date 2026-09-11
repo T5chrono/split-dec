@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { APP_ORIGIN } from "../lib/canonicalHost";
 import type { GroupDetail, Invitation, InvitationCreated, User } from "../lib/types";
 import { useI18n } from "../lib/i18n";
+import { MAX_GROUP_MEMBERS } from "../lib/limits";
 import Avatar from "./Avatar";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -22,6 +23,20 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     queryKey: ["invitations", group.id],
     queryFn: () => api.get<Invitation[]>(`/groups/${group.id}/invitations`),
   });
+
+  // Members only, though the server counts a pending invitation as a seat too
+  // (deps.ensure_group_has_room). This number arrives with the group; the
+  // pending count arrives from a query, and mixing the two means rendering a
+  // form as available and then withdrawing it a moment later on the one screen
+  // where the number matters. Waiting for the query instead is worse — it takes
+  // the invite button away from every group, full or not, for the length of a
+  // fetch.
+  //
+  // So the UI answers the half of the question it knows synchronously, and the
+  // server owns the exact rule: a group at 99 members with an invitation
+  // outstanding is offered the form and refused with a 400, which lands in the
+  // error slot below.
+  const full = group.members.length >= MAX_GROUP_MEMBERS;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["group", group.id] });
@@ -80,16 +95,22 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="friend@example.com"
-            className={inputCls}
+            disabled={full}
+            className={`${inputCls} disabled:opacity-50`}
           />
           <button
             type="submit"
-            disabled={invite.isPending}
+            disabled={invite.isPending || full}
             className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
           >
             <MailPlus className="h-4 w-4" /> {t("invite")}
           </button>
         </div>
+        {full && (
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {t("groupFull", { max: MAX_GROUP_MEMBERS })}
+          </p>
+        )}
         {invite.error && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
             {(invite.error as Error).message}

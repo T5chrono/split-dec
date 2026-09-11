@@ -22,9 +22,11 @@ from sqlalchemy.pool import NullPool
 
 from _src import ratelimit
 from _src.deps import (
+    ensure_group_has_room,
     get_active_user,
     get_expense_for_member,
     get_settlement_for_member,
+    hold_group_seats,
     lock_groups_exclusive,
     require_membership,
 )
@@ -186,6 +188,51 @@ async def test_quota_window_lock_is_exclusive_between_transactions():
                 await third.execute(text("SET LOCAL lock_timeout = '1s'"))
                 await ratelimit._hold_window(third, ratelimit.LEDGER, uuid.uuid4())
                 await ratelimit._hold_window(third, ratelimit.INVITE, None)
+                await third.rollback()
+
+            await first.rollback()  # releases it
+    finally:
+        await engine.dispose()
+
+
+async def test_group_seat_lock_is_exclusive_between_transactions():
+    """The seat cap counts and then inserts, the same two-statement shape the
+    quotas have, and is only a ceiling because hold_group_seats serializes
+    them (deps.py). SQLite never executes the advisory lock; here it runs, a
+    second joiner of the same group must wait for it, and a different group
+    must not.
+
+    It also runs `ensure_group_has_room` for real, so a wrong subquery shape
+    fails here rather than in production.
+    """
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
+    )
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    group_id = uuid.uuid4()
+    try:
+        async with Session() as first, Session() as second:
+            await hold_group_seats(first, group_id)
+            # An empty group has room; both counting modes execute.
+            await ensure_group_has_room(first, group_id, counting_invitations=True)
+            await ensure_group_has_room(first, group_id, counting_invitations=False)
+
+            # Same group: blocked until the first transaction ends.
+            await second.execute(text("SET LOCAL lock_timeout = '1s'"))
+            with pytest.raises(DBAPIError):
+                await hold_group_seats(second, group_id)
+            await second.rollback()
+
+            # A different group is a different lock.
+            async with Session() as third:
+                await third.execute(text("SET LOCAL lock_timeout = '1s'"))
+                await hold_group_seats(third, uuid.uuid4())
+                # ... and so is the quota namespace, which owns 1-4 while the
+                # seat lock owns 5. A collision there would make joining a
+                # group wait on an unrelated ledger write.
+                await ratelimit._hold_window(third, ratelimit.LEDGER, group_id)
                 await third.rollback()
 
             await first.rollback()  # releases it
