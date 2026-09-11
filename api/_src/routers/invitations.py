@@ -146,7 +146,22 @@ async def invite_to_group(
     would be an account-registration oracle open to anyone — the same reason
     GET /users/search was removed (see users.py).
     """
-    await require_membership(db, group_id, caller)
+    # Shared lock, like every other write that depends on the caller still
+    # being a member when it commits. Without it this endpoint read its
+    # membership under no lock at all, so the caller's own account deletion --
+    # which holds FOR UPDATE on each of their groups while it cancels the
+    # invitations they issued (routers/users.py) -- could commit in between,
+    # and this request would then land a PENDING invitation issued by an
+    # account that no longer exists. That is the bug the cancellation sweep
+    # exists to prevent, reintroduced through the back door. The lock makes the
+    # two orderings the only two: commit first and be swept, or block and then
+    # fail the membership check with 403.
+    #
+    # Group first, then the quota's advisory lock (enforce_invitation_quota) --
+    # the same order create_expense takes, so the two cannot invert. Released
+    # by the commit below, which is deliberately before the provider call, so
+    # it never spans the email.
+    await require_membership(db, group_id, caller, lock="shared")
     email = body.email.lower()
 
     # Whether the address is registered, and whether it is already in this
