@@ -455,7 +455,7 @@ export default function ExpenseFormModal({
             sentence somebody is still reading. */}
         {expense?.updated_by && expense.updated_by !== expense.created_by && (
           <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-            {t("editedBy").replace("{name}", nameOf(expense.updated_by))}
+            {t("editedBy", { name: nameOf(expense.updated_by) })}
           </p>
         )}
 

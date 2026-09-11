@@ -60,7 +60,7 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
   // clients show the raw URI to the user.
   const mailtoHref = (address: string) =>
     `mailto:${encodeURIComponent(address).replace(/%40/g, "@")}?subject=${encodeURIComponent(t("inviteEmailSubject"))}&body=${encodeURIComponent(
-      t("inviteEmailBody").replace("{group}", group.name) + `\n\n${APP_ORIGIN}`,
+      t("inviteEmailBody", { group: group.name }) + `\n\n${APP_ORIGIN}`,
     )}`;
 
   return (

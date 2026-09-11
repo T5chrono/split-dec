@@ -145,7 +145,8 @@ export default function LoginPage() {
             <p className="text-sm text-slate-600 dark:text-slate-300">
               {t(
                 mode === "checkEmailSignup" ? "checkEmailSignupBody" : "checkEmailResetBody",
-              ).replace("{email}", email.trim())}
+                { email: email.trim() },
+              )}
             </p>
             <button onClick={() => switchMode("signin")} className={linkBtnCls}>
               {t("backToSignIn")}

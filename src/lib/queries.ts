@@ -10,7 +10,7 @@ import type {
   GroupDetail,
   Invitation,
   MyInvitation,
-  Settlement,
+  SettlementList,
 } from "./types";
 
 export const PAGE_SIZE = 20;
@@ -60,10 +60,15 @@ export const totalsQuery = (groupId: string) =>
     staleTime: 15_000,
   });
 
-export const settlementsQuery = (groupId: string) =>
+export const settlementsQuery = (groupId: string, offset = 0) =>
   queryOptions({
-    queryKey: ["settlements", groupId],
-    queryFn: () => api.get<Settlement[]>(`/groups/${groupId}/settlements`),
+    // The offset belongs in the key, like the expenses one: two pages are two
+    // cached entries, and a prefetcher that omits it warms page zero only.
+    queryKey: ["settlements", groupId, offset],
+    queryFn: () =>
+      api.get<SettlementList>(
+        `/groups/${groupId}/settlements?limit=${PAGE_SIZE}&offset=${offset}`,
+      ),
   });
 
 export const groupInvitationsQuery = (groupId: string) =>

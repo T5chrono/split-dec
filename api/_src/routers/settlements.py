@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,12 @@ from ..ratelimit import (
     enforce_ledger_write_quota,
     record_write,
 )
-from ..schemas import SettlementCreate, SettlementOut, SettlementUpdate
+from ..schemas import (
+    SettlementCreate,
+    SettlementListOut,
+    SettlementOut,
+    SettlementUpdate,
+)
 
 router = APIRouter(tags=["settlements"])
 
@@ -70,21 +75,39 @@ async def _validate_parties(
         )
 
 
-@router.get("/groups/{group_id}/settlements", response_model=list[SettlementOut])
+@router.get("/groups/{group_id}/settlements", response_model=SettlementListOut)
 async def list_settlements(
     group_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
+    """Paged, like the expenses list and for the same reason.
+
+    This one returned every settlement a group had ever recorded, in one
+    response, on every load. Nothing caps how many accumulate: the per-caller
+    ledger quota bounds the rate but not the total, and a group that runs for a
+    couple of years with several members keeps all of them. It was the only
+    list here that grows without a ceiling — pending invitations are held to
+    one per address by the partial unique index, and a member list does not
+    grow on its own.
+    """
     await require_membership(db, group_id, caller)
     settlements = (
         await db.execute(
             select(Settlement)
             .where(Settlement.group_id == group_id, Settlement.deleted_at.is_(None))
             .order_by(Settlement.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
-    return settlements
+    return SettlementListOut(
+        items=[SettlementOut.model_validate(s) for s in settlements],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(

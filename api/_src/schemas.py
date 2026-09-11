@@ -213,6 +213,16 @@ class SettlementOut(BaseModel):
         return money(v)
 
 
+class SettlementListOut(BaseModel):
+    """Same envelope as `ExpenseListOut`, and a breaking change to what this
+    endpoint used to return (a bare array). Acceptable only because the sole
+    client ships in the same deploy."""
+
+    items: list[SettlementOut]
+    limit: int
+    offset: int
+
+
 # ---------- Balances ----------
 
 class CurrencyTotalOut(BaseModel):

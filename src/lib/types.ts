@@ -67,6 +67,12 @@ export interface Settlement {
   updated_at: string | null;
 }
 
+export interface SettlementList {
+  items: Settlement[];
+  limit: number;
+  offset: number;
+}
+
 export interface BalanceTransfer {
   from_user_id: string;
   to_user_id: string;

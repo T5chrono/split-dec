@@ -501,7 +501,7 @@ class TestDebtCannotOutliveMembership:
         g = two_user_group
         gid = g["group"].id
         await self._settled_and_departed(client, g)
-        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()
+        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()["items"]
 
         r = await client.delete(f"/api/settlements/{settlements[0]['id']}")
         assert r.status_code == 400
@@ -526,7 +526,7 @@ class TestDebtCannotOutliveMembership:
         assert (await client.post(f"/api/invitations/{invitation['id']}/accept")).status_code == 204
 
         current_user.id = g["alice"].id
-        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()
+        settlements = (await client.get(f"/api/groups/{gid}/settlements")).json()["items"]
         assert (await client.delete(f"/api/expenses/{expense_id}")).status_code == 204
         assert (await client.delete(f"/api/settlements/{settlements[0]['id']}")).status_code == 204
         assert (await client.get(f"/api/groups/{gid}/balances")).json() == {}

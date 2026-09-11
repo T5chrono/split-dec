@@ -10,7 +10,5 @@ export function useAmountError(raw: string, currency: string): string | null {
   const { t } = useI18n();
   const key = validateAmount(raw, currency);
   if (!key) return null;
-  return t(key)
-    .replace("{currency}", currency)
-    .replace("{n}", String(precisionFor(currency)));
+  return t(key, { currency, n: precisionFor(currency) });
 }

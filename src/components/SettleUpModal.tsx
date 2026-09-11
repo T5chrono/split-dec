@@ -182,7 +182,7 @@ export default function SettleUpModal({
             rewritten by another member with nothing in the UI ever saying so. */}
         {editing?.updated_by && editing.updated_by !== editing.created_by && (
           <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-            {t("editedBy").replace("{name}", nameOf(editing.updated_by))}
+            {t("editedBy", { name: nameOf(editing.updated_by) })}
           </p>
         )}
       </form>

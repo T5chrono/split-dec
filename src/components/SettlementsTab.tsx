@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, HandCoins, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  HandCoins,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { api } from "../lib/api";
-import type { GroupDetail, Settlement } from "../lib/types";
-import { settlementsQuery } from "../lib/queries";
+import type { GroupDetail, Settlement, SettlementList } from "../lib/types";
+import { PAGE_SIZE, settlementsQuery } from "../lib/queries";
 import { formatMoney } from "../lib/currency";
 import { useI18n } from "../lib/i18n";
 import SettleUpModal from "./SettleUpModal";
@@ -22,23 +30,31 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
   const nameOf = (id: string) =>
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
 
-  const { data, isLoading, error } = useQuery(settlementsQuery(group.id));
+  const [offset, setOffset] = useState(0);
+  const { data, isLoading, error } = useQuery({
+    ...settlementsQuery(group.id, offset),
+    // Keep the current page on screen while the next one loads, like the
+    // expenses tab — otherwise paging flashes an empty list.
+    placeholderData: (previous) => previous,
+  });
 
   const deleteSettlement = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/settlements/${id}`),
     // Optimistic: the row disappears immediately; restored if the server says no.
     onMutate: async (id: string) => {
       setDeleting(null);
-      await queryClient.cancelQueries({ queryKey: ["settlements", group.id] });
-      const previous = queryClient.getQueryData<Settlement[]>(["settlements", group.id]);
-      queryClient.setQueryData<Settlement[]>(
-        ["settlements", group.id],
-        (old) => old?.filter((s) => s.id !== id),
+      // Scoped to the page on screen. The invalidation in onSettled is the
+      // unscoped one, so later pages refetch rather than being rewritten here.
+      const key = ["settlements", group.id, offset];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<SettlementList>(key);
+      queryClient.setQueryData<SettlementList>(key, (old) =>
+        old ? { ...old, items: old.items.filter((s) => s.id !== id) } : old,
       );
       return { previous };
     },
     onError: (_err, _id, ctx) => {
-      queryClient.setQueryData(["settlements", group.id], ctx?.previous);
+      queryClient.setQueryData(["settlements", group.id, offset], ctx?.previous);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["settlements", group.id] });
@@ -65,12 +81,12 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
         </p>
       )}
 
-      {data && data.length === 0 && (
+      {data && data.items.length === 0 && offset === 0 && (
         <EmptyState icon={HandCoins} message={t("noPayments")} />
       )}
 
       <ul className="space-y-2">
-        {data?.map((s) => (
+        {data?.items.map((s) => (
           <li
             key={s.id}
             className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
@@ -105,6 +121,33 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
           </li>
         ))}
       </ul>
+
+      {/* Same control and the same cues as the expenses tab: shown only once
+          there is a second page to reach, and "older" disabled on a short one.
+          The count is derived rather than served — the endpoint returns a page,
+          not a total, and counting every settlement to render a number would
+          undo the point of paging it. */}
+      {data && (data.items.length === PAGE_SIZE || offset > 0) && (
+        <div className="mt-4 flex items-center justify-between text-sm">
+          <button
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900"
+          >
+            <ChevronLeft className="h-4 w-4" /> {t("newer")}
+          </button>
+          <span className="text-slate-500 dark:text-slate-400">
+            {offset + 1}–{offset + data.items.length}
+          </span>
+          <button
+            disabled={data.items.length < PAGE_SIZE}
+            onClick={() => setOffset(offset + PAGE_SIZE)}
+            className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900"
+          >
+            {t("older")} <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {adding && <SettleUpModal group={group} onClose={() => setAdding(false)} />}
       {editing && (
