@@ -32,6 +32,12 @@ Built to `SplitDec - specification.md` (v6).
   SQL CTE, then greedy-matches debtors to creditors per currency bucket.
 - Members can only be removed when their net balance is zero in **every**
   currency of that group.
+- A group holds at most 100 people (`deps.MAX_GROUP_MEMBERS`), counting members
+  and pending invitations alike — an outstanding invitation reserves its seat, so
+  a group can never issue more than it has room for. Inviting refuses with `400`
+  as a courtesy; accepting is the real gate, since two invitations racing for the
+  last seat both pass the first check. Both serialize on a per-group advisory
+  lock, because counting and inserting are two statements.
 - Row-creating endpoints are volume-limited (`api/_src/ratelimit.py`): expenses
   and settlements share a 24h window, group creation has its own, both **per
   caller**, and invitations keep their own three. Every window counts rows in
