@@ -201,6 +201,9 @@ describe("ExpenseFormModal — delete from edit view", () => {
       paid_by_user_id: alice.id,
       expense_date: "2026-06-01",
       created_at: "2026-06-01T00:00:00Z",
+      created_by: null,
+      updated_by: null,
+      updated_at: null,
       splits: [{ user_id: alice.id, owed_amount: "100.0000" }],
     };
     renderWithProviders(
@@ -278,6 +281,9 @@ describe("ExpenseFormModal — category guessed from the description", () => {
       paid_by_user_id: alice.id,
       expense_date: "2026-06-01",
       created_at: "2026-06-01T00:00:00Z",
+      created_by: null,
+      updated_by: null,
+      updated_at: null,
       splits: [{ user_id: alice.id, owed_amount: "100.0000" }],
     };
     renderWithProviders(
@@ -320,6 +326,9 @@ describe("ExpenseFormModal — metadata-only edits never resubmit financials", (
     paid_by_user_id: alice.id,
     expense_date: "2026-06-01",
     created_at: "2026-06-01T00:00:00Z",
+    created_by: null,
+    updated_by: null,
+    updated_at: null,
     splits: [
       // 333.33/666.67 does not reconstruct to exact percentages — the case
       // where resubmitting financials would silently shift money.
@@ -389,6 +398,9 @@ describe("ExpenseFormModal — editing a percentage expense", () => {
       paid_by_user_id: alice.id,
       expense_date: "2026-06-01",
       created_at: "2026-06-01T00:00:00Z",
+      created_by: null,
+      updated_by: null,
+      updated_at: null,
       splits: [
         { user_id: alice.id, owed_amount: "70.0000" },
         { user_id: bob.id, owed_amount: "30.0000" },

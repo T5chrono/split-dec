@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import HTTPException
@@ -165,6 +166,31 @@ async def ensure_no_outsider_debt(db: AsyncSession, group_id: uuid.UUID) -> None
                 "with an unsettled balance in: " + ", ".join(stranded)
             ),
         )
+
+
+def record_edit(row, caller: uuid.UUID) -> None:
+    """Stamp who last changed a ledger row, and when.
+
+    Every mutation that actually changes something goes through here — the
+    metadata-only PATCH, the full splits rewrite, and the soft-delete, which is
+    the most disputable of the three and the one it would be easiest to leave
+    out. **Whether a request changed anything is the caller's judgement, not
+    this function's**: both update endpoints compare against the stored row
+    first, because a PATCH that resubmits what is already there is not an edit,
+    and "edited by Bob" because Bob opened the form and pressed Save is a false
+    positive on the one signal the record exists to give. A delete always
+    qualifies. `updated_by` is stored
+    whoever the caller is, including the row's own author; whether that is
+    *shown* is decided in the UI (ExpensesTab surfaces it only when it differs
+    from `created_by`), because what belongs on the record and what belongs on
+    screen are not the same question.
+
+    The clock is ours rather than the database's: a server default would need
+    an ON UPDATE trigger to fire on edits, and this codebase keeps its triggers
+    to the two on `auth.users` that it cannot avoid.
+    """
+    row.updated_by = caller
+    row.updated_at = datetime.now(timezone.utc)
 
 
 async def get_expense_for_member(

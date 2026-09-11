@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import ensure_no_outsider_debt, get_expense_for_member, require_membership
+from ..deps import (
+    ensure_no_outsider_debt,
+    get_expense_for_member,
+    record_edit,
+    require_membership,
+)
 from ..models import Expense, ExpenseSplit, GroupMember
 from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
@@ -119,6 +124,7 @@ async def create_expense(
         paid_by_user_id=body.paid_by_user_id,
         expense_date=body.expense_date or date.today(),
         idempotency_key=idempotency_key,
+        created_by=caller,
         splits=[
             ExpenseSplit(user_id=user_id, owed_amount=amount)
             for user_id, amount in shares.items()
@@ -152,6 +158,12 @@ async def update_expense(
     independently; the split-affecting fields travel as an all-or-nothing
     group and trigger a full rewrite of expense_splits (spec §4)."""
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
+    # Whether this request actually alters the row. A PATCH that resubmits what
+    # is already stored — an empty body, or the form saved without a change —
+    # must not stamp an edit: "edited by Bob" appearing because Bob opened
+    # Alice's expense and pressed Save is a false positive on the one signal
+    # this record exists to give.
+    changed = False
 
     split_fields = (
         body.split_type,
@@ -173,6 +185,16 @@ async def update_expense(
         shares = compute_splits(
             body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
         )
+        # Compared before anything is assigned, and including the computed
+        # shares: a caller may resubmit an expense unchanged, and that is not
+        # an edit. Decimal compares by value, so 10.00 and 10.0000 are equal.
+        changed = changed or (
+            expense.split_type != body.split_type
+            or expense.total_amount != body.total_amount
+            or expense.currency != body.currency
+            or expense.paid_by_user_id != body.paid_by_user_id
+            or {s.user_id: s.owed_amount for s in expense.splits} != shares
+        )
         expense.split_type = body.split_type
         expense.total_amount = body.total_amount
         expense.currency = body.currency
@@ -189,12 +211,17 @@ async def update_expense(
         ]
 
     if body.description is not None:
+        changed = changed or body.description != expense.description
         expense.description = body.description
     if body.category is not None:
+        changed = changed or body.category.value != expense.category
         expense.category = body.category.value
     if body.expense_date is not None:
+        changed = changed or body.expense_date != expense.expense_date
         expense.expense_date = body.expense_date
 
+    if changed:
+        record_edit(expense, caller)
     # Rewriting splits can only name current members, which is exactly how a
     # former participant's balance moves off zero: their share disappears from
     # an expense they had already settled for.
@@ -215,6 +242,11 @@ async def delete_expense(
     # every other ledger mutation (serializes against member/group removal).
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
     expense.deleted_at = datetime.now(timezone.utc)
+    # Withdrawing somebody else's expense is the most disputable thing a member
+    # can do to the ledger, so it is attributed like any other edit — even
+    # though no screen shows a deleted row, which makes this the one stamp that
+    # only ever answers a question asked afterwards.
+    record_edit(expense, caller)
     await db.flush()
     # Withdrawing an expense un-settles everyone it touched, including anyone
     # who has since left and can no longer be a party to a settlement.

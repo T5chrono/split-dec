@@ -13,6 +13,7 @@ from ..db import get_db
 from ..deps import (
     ensure_no_outsider_debt,
     get_settlement_for_member,
+    record_edit,
     require_membership,
 )
 from ..models import GroupMember, Settlement
@@ -108,6 +109,7 @@ async def create_settlement(
         amount=body.amount,
         currency=body.currency,
         idempotency_key=idempotency_key,
+        created_by=caller,
     )
     db.add(settlement)
     try:
@@ -140,10 +142,20 @@ async def update_settlement(
     currency = body.currency or settlement.currency
     await _validate_parties(db, settlement.group_id, paid_by, paid_to)
     _validate_amount_precision(amount, currency)
+    # Compared before assigning: a PUT that resubmits the stored values is not
+    # an edit, and must not stamp one. See the matching note in expenses.py.
+    changed = (
+        settlement.paid_by_user_id != paid_by
+        or settlement.paid_to_user_id != paid_to
+        or settlement.amount != amount
+        or settlement.currency != currency
+    )
     settlement.paid_by_user_id = paid_by
     settlement.paid_to_user_id = paid_to
     settlement.amount = amount
     settlement.currency = currency
+    if changed:
+        record_edit(settlement, caller)
     # Both parties must be current members, so an edit that moves a settlement
     # off a former member leaves whatever they had settled unsettled again.
     await db.flush()
@@ -162,6 +174,7 @@ async def delete_settlement(
     # every other ledger mutation (serializes against member/group removal).
     settlement = await get_settlement_for_member(db, settlement_id, caller, lock="shared")
     settlement.deleted_at = datetime.now(timezone.utc)
+    record_edit(settlement, caller)
     await db.flush()
     # Withdrawing a settlement restores the debt it cleared — including one a
     # member cleared on their way out of the group.

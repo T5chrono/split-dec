@@ -16,7 +16,7 @@ import type { Lang } from "./i18n";
 import { SUPPORT_URL } from "./support";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-09-11";
+export const LEGAL_UPDATED = "2026-09-12";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -102,6 +102,7 @@ const PRIVACY_EN: LegalDoc = {
         "SplitDec is a shared ledger, so some of your data is visible to the people you share it with:",
         [
           "Everyone in a group you belong to sees your display name, your profile picture, and every expense, settlement and balance in that group — including the ones you created.",
+          "Anyone in a group can edit or remove anything recorded in it, so we keep a record of who entered each expense or settlement and who last changed it. Where somebody has changed an entry that another member made, that is shown alongside it.",
           "When you invite someone by email, they are told who invited them and to which group.",
           "When you are invited, the person who invited you sees whether the invitation is still pending, accepted or declined — but never whether the address already had a SplitDec account.",
           "Every invitation email carries a link that stops us emailing that address again. Using it does not tell the sender anything — they cannot tell a delivered invitation from a suppressed one.",
@@ -229,6 +230,7 @@ const PRIVACY_PL: LegalDoc = {
         "SplitDec to wspólny rejestr, więc część Twoich danych widzą osoby, z którymi go dzielisz:",
         [
           "Każdy członek Twojej grupy widzi Twoją nazwę wyświetlaną, zdjęcie profilowe oraz wszystkie wydatki, rozliczenia i salda w tej grupie — w tym te utworzone przez Ciebie.",
+          "Każdy w grupie może edytować lub usunąć to, co w niej zapisano, więc zapisujemy, kto wprowadził dany wydatek lub rozliczenie i kto zmienił je jako ostatni. Jeśli ktoś zmienił wpis utworzony przez inną osobę, jest to widoczne obok niego.",
           "Gdy zapraszasz kogoś e-mailem, ta osoba dowiaduje się, kto ją zaprosił i do jakiej grupy.",
           "Gdy to Ty jesteś zapraszany(-a), osoba zapraszająca widzi, czy zaproszenie czeka, zostało przyjęte czy odrzucone — ale nigdy tego, czy dany adres miał już konto w SplitDec.",
           "W każdym e-mailu z zaproszeniem jest link, który zatrzymuje wysyłkę na ten adres. Skorzystanie z niego nie mówi nic osobie zapraszającej — nie odróżni ona zaproszenia dostarczonego od wstrzymanego.",

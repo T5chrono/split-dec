@@ -606,6 +606,47 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   The client side of that contract is `useIdempotencyKey`: one key per open form, resent on
   every attempt. A retry that mints a fresh key is not a retry — if the first request landed
   and only its response was lost, the second one records the entry a second time.
+- **Ledger rows record who entered them and who last changed them**
+  (`created_by` / `updated_by` / `updated_at` on `expenses` and `settlements`,
+  migration `20260911010000`, stamped through `deps.record_edit`). Distinct from
+  `paid_by_user_id`, which is a claim about money rather than a statement about
+  authorship — any member may create, edit and withdraw any row in their group, and
+  nothing used to record which of them did. Four things worth knowing:
+  - **Every mutation stamps, including the soft-delete.** Withdrawing somebody
+    else's expense is the most disputable act available, and it is the one stamp
+    no screen ever shows — deleted rows are not rendered — so it only ever answers
+    a question asked afterwards.
+  - **`updated_by` is stored even when the author edits their own row.** The
+    column records what happened; the UI decides what is worth saying, and shows
+    it only when `updated_by` differs from `created_by`. Do not collapse those
+    two decisions into one by leaving the column blank.
+  - **A request that changes nothing is not an edit.** Both update endpoints
+    compare against the stored row — the metadata fields, and for the financial
+    branch the computed shares too — and stamp only on a real difference.
+    Without that, Bob opening Alice's expense and pressing Save marks it
+    "edited by Bob", which is a false positive on the one signal the record
+    exists to give. A delete always qualifies.
+  - **It is shown in the row's own view (`ExpenseFormModal`, `SettleUpModal`),
+    not in the list.** The list is scanned rather than read, and most edits are somebody
+    fixing their own typo, so a permanent badge on every one of them gives
+    ordinary collaborative behaviour an auditing tone. The discovery path is a
+    *balance* looking wrong, not a line in a list — and it ends with one expense
+    open, which is where the answer is. The list placement was tried first and
+    measured out: that row's secondary line has 117px at 375px wide, so even
+    "Alice paid · edited by Bob" truncated and a Polish name pushed the notice
+    off the row entirely.
+  - **No backfill, deliberately.** Rows older than the migration have no author,
+    and inferring one from the payer would invent a fact. A row with
+    `created_by IS NULL` and a non-null `updated_by` still shows its edit — the
+    change is known even though the authorship is not.
+  - **A deleted account keeps its attribution.** `updated_by` points at
+    `public.users`, which account deletion anonymizes rather than deletes, so the
+    reference stays valid and renders as "Deleted user" exactly like the expenses
+    that account took part in.
+  There is deliberately **no version history** — these columns answer "who last
+  touched this", not "what did it say before". An audit table is the answer to the
+  second question and a much larger pile of retained personal data; it waits until
+  somebody actually needs it.
 - `PATCH /expenses/{id}` is partial: metadata (description/category/expense_date) applies
   independently; the five split-affecting fields (split_type, total_amount, currency,
   paid_by_user_id, splits) are all-or-nothing and trigger a full splits rewrite. The frontend

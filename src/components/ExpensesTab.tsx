@@ -153,6 +153,14 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
               <CategoryIconButton expense={e} groupId={group.id} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{e.description}</div>
+                {/* Deliberately only the payer. Who last *edited* the row is
+                    in the expense's own view (ExpenseFormModal), not here: this
+                    list is scanned rather than read, most edits are somebody
+                    fixing a typo, and a permanent badge on every one of them
+                    gives ordinary collaborative behaviour an auditing tone. The
+                    question "who changed this?" is asked after a balance looks
+                    wrong, and it is asked of one expense — which is where the
+                    answer now lives. */}
                 <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {nameOf(e.paid_by_user_id)} {t("paidVerb")}
                 </div>

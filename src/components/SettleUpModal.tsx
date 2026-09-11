@@ -34,6 +34,12 @@ export default function SettleUpModal({
   const queryClient = useQueryClient();
 
   const source = editing ?? prefill;
+  /** Mirrors ExpensesTab and ExpenseFormModal: somebody who has since left the
+   *  group is not in `members`, so fall back rather than render a blank. */
+  const nameOf = (id: string) => {
+    const m = group.members.find((x) => x.id === id);
+    return m?.full_name ?? m?.email ?? t("formerMember");
+  };
   const [paidBy, setPaidBy] = useState(source?.paid_by_user_id ?? myId ?? "");
   const [paidTo, setPaidTo] = useState(
     source?.paid_to_user_id ?? group.members.find((m) => m.id !== myId)?.id ?? "",
@@ -169,6 +175,16 @@ export default function SettleUpModal({
         >
           {save.isPending ? t("saving") : editing ? t("saveChanges") : t("recordPayment")}
         </button>
+
+        {/* Same rule and same place as an expense's own view: only when the
+            last editor is not whoever recorded it. The backend attributes
+            settlement edits identically, so without this a settlement could be
+            rewritten by another member with nothing in the UI ever saying so. */}
+        {editing?.updated_by && editing.updated_by !== editing.created_by && (
+          <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+            {t("editedBy").replace("{name}", nameOf(editing.updated_by))}
+          </p>
+        )}
       </form>
     </Modal>
   );

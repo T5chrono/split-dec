@@ -81,6 +81,19 @@ class Expense(Base):
     idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who entered this row and who last changed it. Distinct from
+    # `paid_by_user_id`, which is a claim about money rather than a statement
+    # about authorship: any member may create, edit and withdraw any row in
+    # their group, and until 20260911010000 nothing recorded which of them did.
+    # Nullable with no backfill — rows older than that migration have no author
+    # on record, and guessing one from the payer would invent a fact.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Set by every mutation including the soft-delete, whoever made it. The UI
+    # only surfaces it when it differs from `created_by` (ExpensesTab), but the
+    # column stores the truth either way — display is a separate decision from
+    # what is on the record.
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     splits: Mapped[list["ExpenseSplit"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
@@ -112,6 +125,19 @@ class Settlement(Base):
     idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who entered this row and who last changed it. Distinct from
+    # `paid_by_user_id`, which is a claim about money rather than a statement
+    # about authorship: any member may create, edit and withdraw any row in
+    # their group, and until 20260911010000 nothing recorded which of them did.
+    # Nullable with no backfill — rows older than that migration have no author
+    # on record, and guessing one from the payer would invent a fact.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Set by every mutation including the soft-delete, whoever made it. The UI
+    # only surfaces it when it differs from `created_by` (ExpensesTab), but the
+    # column stores the truth either way — display is a separate decision from
+    # what is on the record.
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EmailSuppression(Base):

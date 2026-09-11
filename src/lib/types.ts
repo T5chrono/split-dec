@@ -34,6 +34,13 @@ export interface Expense {
   paid_by_user_id: string;
   expense_date: string; // ISO date (YYYY-MM-DD) the expense occurred
   created_at: string;
+  /** Who entered the row, and who last changed it — distinct from
+   *  `paid_by_user_id`, which says who put up the money rather than who typed
+   *  it. Null on rows created before the columns existed, and `updated_*` stays
+   *  null until somebody edits. */
+  created_by: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
   splits: ExpenseSplit[];
 }
 
@@ -51,6 +58,13 @@ export interface Settlement {
   amount: string;
   currency: string;
   created_at: string;
+  /** Who entered the row, and who last changed it — distinct from
+   *  `paid_by_user_id`, which says who put up the money rather than who typed
+   *  it. Null on rows created before the columns existed, and `updated_*` stays
+   *  null until somebody edits. */
+  created_by: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
 }
 
 export interface BalanceTransfer {

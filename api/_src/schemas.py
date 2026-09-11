@@ -158,6 +158,11 @@ class ExpenseOut(BaseModel):
     paid_by_user_id: uuid.UUID
     expense_date: date
     created_at: datetime
+    # Authorship, distinct from `paid_by_user_id`. NULL on rows older than
+    # migration 20260911010000, and on `updated_*` until somebody edits.
+    created_by: uuid.UUID | None = None
+    updated_by: uuid.UUID | None = None
+    updated_at: datetime | None = None
     splits: list[ExpenseSplitOut]
 
     @field_serializer("total_amount")
@@ -197,6 +202,11 @@ class SettlementOut(BaseModel):
     amount: Decimal
     currency: str
     created_at: datetime
+    # Authorship, distinct from `paid_by_user_id`. NULL on rows older than
+    # migration 20260911010000, and on `updated_*` until somebody edits.
+    created_by: uuid.UUID | None = None
+    updated_by: uuid.UUID | None = None
+    updated_at: datetime | None = None
 
     @field_serializer("amount")
     def _ser_amount(self, v: Decimal) -> str:

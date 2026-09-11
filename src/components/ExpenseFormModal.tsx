@@ -118,6 +118,12 @@ export default function ExpenseFormModal({
 
   const parseNum = (s: string) => parseFloat(normalizeAmountInput(s)) || 0;
   const selected = group.members.filter((m) => participants.has(m.id));
+  /** Mirrors ExpensesTab: an editor who has since left the group is not in
+   *  `members`, so fall back to the same placeholder rather than a blank. */
+  const nameOf = (id: string) => {
+    const m = group.members.find((x) => x.id === id);
+    return m?.full_name ?? m?.email ?? t("formerMember");
+  };
   const amountError = useAmountError(totalAmount, currency);
 
   // Percentage autofill: when exactly one selected member has no percentage,
@@ -440,6 +446,18 @@ export default function ExpenseFormModal({
         >
           {save.isPending ? t("saving") : expense ? t("saveChanges") : t("addExpense")}
         </button>
+
+        {/* Who last changed this, and only when it was not the person who
+            entered it — an author fixing their own wording says nothing. Shown
+            here rather than in the list because this is where somebody arrives
+            once a balance has made them ask. Above the delete button, never
+            below it: the last thing before the danger zone should not be a
+            sentence somebody is still reading. */}
+        {expense?.updated_by && expense.updated_by !== expense.created_by && (
+          <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+            {t("editedBy").replace("{name}", nameOf(expense.updated_by))}
+          </p>
+        )}
 
         {expense && onDelete && (
           <button
