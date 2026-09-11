@@ -48,6 +48,7 @@ quietly. Check these at each release.
 | Workflow permissions | *Read repository contents*, and "allow Actions to create and approve pull requests" **off** | GitHub → Settings → Actions → General |
 | Private vulnerability reporting | enabled — `SECURITY.md` points at it | GitHub → Settings → Code security |
 | Firewall rule "CSP report flood limit" | `path equals /api/csp-report`, 100 req/60s per IP, deny 5m | Vercel project — inspect with `vercel firewall rules list` |
+| Firewall rule for `/api/unsubscribe` | **none, and that is a gap** — the route has only its in-process 30/min bucket, which is a per-instance floor on a function that runs several. Unlike the CSP route it writes a row, though a forged token is refused before the database is touched and the primary key makes a replay idempotent. Add one if it ever sees traffic | Vercel project |
 | Inbound mail aliases | `privacy@` and `support@` both forwarding, each as an **explicit alias** — a catch-all alone was observed not to deliver | ImprovMX (the domain's MX records point there) |
 | `SENTRY_AUTH_TOKEN` | project-scoped, production only | Vercel env vars |
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |

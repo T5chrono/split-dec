@@ -347,6 +347,14 @@ decision inverts the order `delete_group` takes — group row first, its invitat
 and deadlocks against it. For the same reason `accept_invitation` flushes the new membership
 before touching the invitation: the FK insert takes the group's `FOR KEY SHARE` first.
 
+**That flush is also the one place a ledger race surfaces as an exception rather
+than a rowcount**, so it is caught: the group can be deleted between the unlocked
+read and the insert (the FK then finds no group row), and a concurrent accept of
+the same invitation collides on the membership primary key. Both are an
+`IntegrityError`, both mean the invitation is no longer there to answer, and both
+answer **404** — the same thing the loser of either race would have been told a
+moment later. Unhandled, they were a 500.
+
 **Creating** one is the other way round and does join the protocol: `invite_to_group`
 takes the group's `FOR SHARE`, because an invitation now outlives its inviter only until
 they leave (`remove_member` and `delete_account` cancel what they issued), and that sweep
