@@ -24,11 +24,19 @@ export default function MembersTab({ group }: { group: GroupDetail }) {
     queryFn: () => api.get<Invitation[]>(`/groups/${group.id}/invitations`),
   });
 
-  // A seat is a member or a pending invitation, exactly as the server counts
-  // them (deps.ensure_group_has_room). Both numbers are already loaded, so this
-  // costs nothing; the server still refuses, and this only keeps the form from
-  // offering something that cannot work.
-  const full = group.members.length + (invitations?.length ?? 0) >= MAX_GROUP_MEMBERS;
+  // Members only, though the server counts a pending invitation as a seat too
+  // (deps.ensure_group_has_room). This number arrives with the group; the
+  // pending count arrives from a query, and mixing the two means rendering a
+  // form as available and then withdrawing it a moment later on the one screen
+  // where the number matters. Waiting for the query instead is worse — it takes
+  // the invite button away from every group, full or not, for the length of a
+  // fetch.
+  //
+  // So the UI answers the half of the question it knows synchronously, and the
+  // server owns the exact rule: a group at 99 members with an invitation
+  // outstanding is offered the form and refused with a 400, which lands in the
+  // error slot below.
+  const full = group.members.length >= MAX_GROUP_MEMBERS;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["group", group.id] });

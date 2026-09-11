@@ -732,8 +732,13 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   counted **after** the replay check, like the send quota — a retried invitation must get
   its row back, not a 400 about a group it did not overfill. The number is a product
   decision, not a threshold: it is easier to raise than to lower, since lowering it
-  strands groups already over the line. The client copy is `src/lib/limits.ts`, which only
-  decides whether the invite form is offered.
+  strands groups already over the line. The client copy is `src/lib/limits.ts`, and `MembersTab`
+  deliberately counts **members only** with it: the member list arrives with the group
+  while the pending count arrives from a query, so counting both renders the invite form
+  as available and withdraws it a moment later, and waiting for the query takes the
+  button away from every group for the length of a fetch. The UI answers the half it
+  knows synchronously; a group at 99 members with an invitation outstanding is offered
+  the form and refused by the server.
 - **A group is never left without members.** `remove_member` refuses to remove the last one
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure

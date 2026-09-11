@@ -133,14 +133,22 @@ describe("MembersTab seat cap", () => {
     expect(screen.getByRole("button", { name: /invite/i })).toBeDisabled();
   });
 
-  it("counts a pending invitation as a seat", async () => {
-    // One short on members, but the pending invitation has the last seat --
-    // the same arithmetic the server does (deps.ensure_group_has_room).
+  it("leaves the last seat to the server when an invitation holds it", async () => {
+    // The server counts a pending invitation as a seat; this component counts
+    // members, which is the half it knows without waiting for a query. So the
+    // form is offered here and the 400 is what stops it -- deliberately, rather
+    // than flickering from enabled to disabled once the invitations load.
     vi.mocked(api.get).mockResolvedValue([invitation("carol@test.dev")]);
+    vi.mocked(api.post).mockRejectedValue(
+      new Error("This group is full (100 people is the limit)."),
+    );
     renderGroup(filled(MAX_GROUP_MEMBERS - 1));
 
-    expect(await screen.findByText(/this group is full/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /invite/i })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /invite/i })).toBeEnabled(),
+    );
+    await invite("dave@test.dev");
+    expect(await screen.findByText(/100 people is the limit/i)).toBeInTheDocument();
   });
 
   it("leaves the form alone while there is room", async () => {
