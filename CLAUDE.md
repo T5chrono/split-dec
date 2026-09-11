@@ -347,6 +347,15 @@ decision inverts the order `delete_group` takes — group row first, its invitat
 and deadlocks against it. For the same reason `accept_invitation` flushes the new membership
 before touching the invitation: the FK insert takes the group's `FOR KEY SHARE` first.
 
+**Creating** one is the other way round and does join the protocol: `invite_to_group`
+takes the group's `FOR SHARE`, because an invitation now outlives its inviter only until
+they leave (`remove_member` and `delete_account` cancel what they issued), and that sweep
+runs while holding the group's `FOR UPDATE`. Unlocked, the caller's own deletion could
+commit between this endpoint's membership read and its insert, leaving a live invitation
+issued by an account that no longer exists. Group row first, the quota's advisory lock
+second — the order `create_expense` takes — and released by the commit that precedes the
+Resend call, so it never spans the provider.
+
 **A ledger mutation may not leave a non-member with a non-zero balance**
 (`deps.ensure_no_outsider_debt`, called after the flush in expense/settlement update and
 delete). Removal already requires a zero balance, but nothing kept it there: withdrawing an
