@@ -15,7 +15,13 @@ from ..deps import (
     require_membership,
 )
 from ..models import Expense, ExpenseSplit, GroupMember
-from ..ratelimit import LEDGER, enforce_ledger_write_quota, record_write
+from ..ratelimit import (
+    LEDGER,
+    MUTATION,
+    enforce_ledger_mutation_quota,
+    enforce_ledger_write_quota,
+    record_write,
+)
 from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
 from ..splits import compute_splits
 
@@ -158,6 +164,13 @@ async def update_expense(
     independently; the split-affecting fields travel as an all-or-nothing
     group and trigger a full rewrite of expense_splits (spec §4)."""
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
+    # Charged before the work, not after: the point of this window is the
+    # revalidation, the splits recompute and the balances read below, and a
+    # caller who spends those must pay for them whether or not the request
+    # turns out to alter anything. `record_edit` decides the separate question
+    # of what gets *recorded* as an edit.
+    await enforce_ledger_mutation_quota(db, caller)
+    await record_write(db, caller, MUTATION)
     # Whether this request actually alters the row. A PATCH that resubmits what
     # is already stored — an empty body, or the form saved without a change —
     # must not stamp an edit: "edited by Bob" appearing because Bob opened
@@ -241,6 +254,8 @@ async def delete_expense(
     # Soft-deleting changes balances, so it must take the shared lock like
     # every other ledger mutation (serializes against member/group removal).
     expense = await get_expense_for_member(db, expense_id, caller, lock="shared")
+    await enforce_ledger_mutation_quota(db, caller)
+    await record_write(db, caller, MUTATION)
     expense.deleted_at = datetime.now(timezone.utc)
     # Withdrawing somebody else's expense is the most disputable thing a member
     # can do to the ledger, so it is attributed like any other edit — even

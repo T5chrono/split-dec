@@ -376,6 +376,23 @@ three (per inviter / per recipient / global). All of them use the dialect-aware
 `window_cutoff` helper, because SQLite (tests) stores naive UTC where Postgres
 stores TIMESTAMPTZ.
 
+**Changing a ledger row has its own window** (`MUTATION`, 300 per caller per
+24h, migration `20260912000000`). Creating was capped and editing was not, and
+an edit is not free: it revalidates the participants, recomputes every split
+and re-reads the group's balances, so a caller who had spent their 100 creates
+could still rewrite one expense in a loop indefinitely. Charged by both update
+endpoints and both soft-deletes. A new `kind` value is a schema change — the
+`write_events_kind_check` constraint enumerates them — so a fifth one needs a
+migration too.
+
+**That window charges for the work, not for the outcome, and it is the one
+place this and the attribution record disagree on purpose.** A PATCH that
+changes nothing is *not* recorded as an edit (see API contracts) because
+pressing Save without editing must not accuse anybody — but it does spend a
+slot, because the server did all of that work anyway. Charging only on a real
+change would make no-op PATCHes free and unlimited, which is exactly the loop
+the cap exists to close.
+
 **Every one of those windows counts `write_events`** — one append-only
 tombstone per quota-consuming write, charged by `record_write()` — and not the
 rows being created. That indirection is the whole point: deleting a group is a
