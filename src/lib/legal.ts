@@ -16,7 +16,7 @@ import type { Lang } from "./i18n";
 import { SUPPORT_URL } from "./support";
 
 /** Shown as "Last updated" on both documents. Date-only, local (see dates.ts). */
-export const LEGAL_UPDATED = "2026-09-03";
+export const LEGAL_UPDATED = "2026-09-11";
 
 export const LEGAL_CONTACT_EMAIL = "privacy@split-dec.app";
 
@@ -104,6 +104,7 @@ const PRIVACY_EN: LegalDoc = {
           "Everyone in a group you belong to sees your display name, your profile picture, and every expense, settlement and balance in that group — including the ones you created.",
           "When you invite someone by email, they are told who invited them and to which group.",
           "When you are invited, the person who invited you sees whether the invitation is still pending, accepted or declined — but never whether the address already had a SplitDec account.",
+          "Every invitation email carries a link that stops us emailing that address again. Using it does not tell the sender anything — they cannot tell a delivered invitation from a suppressed one.",
         ],
         "Nothing you record is public, indexed by search engines, or visible to people outside your groups.",
       ],
@@ -116,6 +117,7 @@ const PRIVACY_EN: LegalDoc = {
           "You can delete your account yourself at any time from **Account → Delete account**, once you are settled up in every group. This removes your sign-in credentials and replaces your name and email address in our database with anonymous placeholders.",
           "Expenses and settlements you took part in stay in the group after that, attributed to a deleted user. They cannot be removed without corrupting the balances of everyone else in the group, and they no longer identify you.",
           "Invitations still waiting for your email address are deleted along with your account; ones you already answered have the address removed.",
+          "If you ask us to stop emailing invitations to an address, we keep a one-way fingerprint of it — never the address itself — for as long as that request stands. This record survives deleting your account, and has to: forgetting it is how we would start emailing you again.",
           "Server logs are kept briefly by our hosting providers, under their own retention schedules.",
         ],
       ],
@@ -229,6 +231,7 @@ const PRIVACY_PL: LegalDoc = {
           "Każdy członek Twojej grupy widzi Twoją nazwę wyświetlaną, zdjęcie profilowe oraz wszystkie wydatki, rozliczenia i salda w tej grupie — w tym te utworzone przez Ciebie.",
           "Gdy zapraszasz kogoś e-mailem, ta osoba dowiaduje się, kto ją zaprosił i do jakiej grupy.",
           "Gdy to Ty jesteś zapraszany(-a), osoba zapraszająca widzi, czy zaproszenie czeka, zostało przyjęte czy odrzucone — ale nigdy tego, czy dany adres miał już konto w SplitDec.",
+          "W każdym e-mailu z zaproszeniem jest link, który zatrzymuje wysyłkę na ten adres. Skorzystanie z niego nie mówi nic osobie zapraszającej — nie odróżni ona zaproszenia dostarczonego od wstrzymanego.",
         ],
         "Nic, co zapisujesz, nie jest publiczne, indeksowane przez wyszukiwarki ani widoczne dla osób spoza Twoich grup.",
       ],
@@ -241,6 +244,7 @@ const PRIVACY_PL: LegalDoc = {
           "Konto możesz usunąć samodzielnie w każdej chwili w **Konto → Usuń konto**, gdy jesteś rozliczony(-a) w każdej grupie. Usuwa to Twoje dane logowania i zastępuje imię, nazwisko oraz adres e-mail w naszej bazie anonimowymi wartościami.",
           "Wydatki i rozliczenia, w których brałeś(-aś) udział, zostają po tym w grupie i są przypisane do usuniętego użytkownika. Nie można ich usunąć bez zaburzenia sald pozostałych osób, a nie identyfikują już Ciebie.",
           "Zaproszenia oczekujące na Twój adres są usuwane razem z kontem; w tych, na które już odpowiedziano, adres zostaje usunięty.",
+          "Jeśli poprosisz nas o zaprzestanie wysyłania zaproszeń na dany adres, przechowujemy jego jednokierunkowy odcisk — nigdy samego adresu — tak długo, jak długo ta prośba obowiązuje. Ten zapis przetrwa usunięcie konta i musi: zapomnienie go oznaczałoby, że zaczniemy pisać do Ciebie ponownie.",
           "Logi serwera nasi dostawcy hostingu przechowują krótko, zgodnie z własnymi zasadami retencji.",
         ],
       ],

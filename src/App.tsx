@@ -27,6 +27,7 @@ import Spinner from "./components/Spinner";
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const LegalPage = lazy(() => import("./pages/LegalPage"));
+const UnsubscribePage = lazy(() => import("./pages/UnsubscribePage"));
 const GroupPage = lazy(() => import("./pages/GroupPage"));
 
 /** The pathname with dynamic segments folded back into their route pattern.
@@ -94,6 +95,7 @@ export default function App() {
               fetches them cold) and must not be swallowed by the catch-all. */}
           <Route path="/privacy" element={<LegalPage doc="privacy" />} />
           <Route path="/terms" element={<LegalPage doc="terms" />} />
+          <Route path="/unsubscribe" element={<UnsubscribePage />} />
           <Route path="*" element={<LoginPage />} />
         </Routes>
         <Analytics beforeSend={foldAnalyticsUrl} />
@@ -118,6 +120,7 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/privacy" element={<LegalPage doc="privacy" />} />
         <Route path="/terms" element={<LegalPage doc="terms" />} />
+        <Route path="/unsubscribe" element={<UnsubscribePage />} />
         <Route element={<Layout />}>
           <Route path="/" element={<GroupsPage />} />
           <Route path="/groups/:groupId" element={<GroupPage />} />

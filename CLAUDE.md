@@ -633,7 +633,9 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   email attempt, same latency whether or not the address has an account (anyone can create a
   group and invite arbitrary addresses). Never reintroduce `user_exists`/`email_sent`/
   `invited_user_id` in a response. Sending is quota-limited (per inviter / per recipient /
-  global, 24h — counted from `write_events`, see above). Cancelling sets
+  global, 24h — counted from `write_events`, see above) and skipped entirely for an
+  address that has unsubscribed (see Email) — which changes the send and nothing
+  else: the row, its visibility and the sender's quota charge are all unaffected. Cancelling sets
   `status='CANCELLED'` rather than deleting: the quotas no longer depend on that, but the
   row is the group's record that the invitation happened, and the partial unique index
   covers only `PENDING` rows so re-inviting still works. Cancelling, accepting and declining
@@ -736,7 +738,8 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 - **Routing invariants that look like bugs but are not.** `/privacy` and
   `/terms` are registered in *both* auth branches (like `/reset-password`) so
   they resolve for signed-out visitors — Google's OAuth review fetches them
-  cold. The signed-out catch-all renders `LoginPage`, **not** the 404: an
+  cold. `/unsubscribe` is there for the sharper version of the same reason: the
+  person following that link has, in the ordinary case, never had an account. The signed-out catch-all renders `LoginPage`, **not** the 404: an
   invitation deep link lands signed-out, and the focused sign-in screen is what
   carries the visitor to the original URL afterwards. Only the signed-in
   catch-all renders `NotFoundPage`.
@@ -908,6 +911,41 @@ repopulates a row anonymized by account deletion, and never overwrites a value w
 mailto fallback) must name the **apex**: an installed PWA pins the origin it was installed
 from, so a link opening the `vercel.app` alias lands the reader outside their own app, and
 that host is `noindex` besides.
+
+**Every invitation email carries a way to stop it** (`api/_src/unsubscribe.py`,
+`routers/unsubscribe.py`). Anyone with an account can invite any address, so the
+recipient is in the general case somebody who has never used SplitDec — and the send
+quotas bound how *often* that happens without ever stopping it. The only previous way
+out was reporting the mail as spam, which works through the provider's complaint
+suppression at the exact cost the global invitation quota exists to protect.
+
+Four things there are load-bearing:
+
+- **`POST /api/unsubscribe` is POST-only, and that is not a style choice.**
+  `List-Unsubscribe-Post` (RFC 8058) means the mail provider POSTs that URL with no
+  human involved, while link scanners prefetch every GET in a message — so a GET that
+  unsubscribed would fire on delivery. The human-facing page is `/unsubscribe` in the
+  SPA, which explains itself and then POSTs. It is the second route reachable without
+  a token after `/api/csp-report`, and the first that writes.
+- **Opting out suppresses the email and nothing else.** The invitation row is still
+  created, still visible in the app if that address ever signs up, and **still charged
+  to the sender's quota**. Refunding the slot would let a caller read their own
+  remaining allowance to discover whether an address has unsubscribed — the
+  registration oracle `GET /users/search` was removed for, rebuilt out of a rate limit.
+- **`email_suppressions` is keyed by the unpeppered digest (`ratelimit.recipient_key`)
+  while the token is signed with `UNSUBSCRIBE_SECRET`.** Keying the table by an HMAC
+  instead would make rotating that secret silently orphan every row and resume mailing
+  people who opted out. Rotation therefore costs outstanding *links*, never the
+  objections. This also makes `recipient_key` durable in a way `write_events` is not —
+  that docstring's "the rows do not accumulate" now names the exception.
+- **Account deletion leaves a suppression standing.** Erasing it would make signing up
+  and deleting again the way to resume mail to an address that refused it; the row
+  names a digest, not an address.
+
+Without the secret the feature degrades to a `mailto:` `List-Unsubscribe` (RFC 2369,
+no endpoint and no stored row) rather than to a forgeable link. The suppression table
+is new retention, so adding it was a `src/lib/legal.ts` change with a `LEGAL_UPDATED`
+bump.
 
 Invitation emails go through Resend (`api/_src/emailer.py`), best-effort: without
 `RESEND_API_KEY` (or on failure) the UI falls back to a mailto draft. User-controlled names are

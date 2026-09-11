@@ -56,6 +56,16 @@ const dict = {
     resetLinkInvalid:
       "This link is invalid or has expired. Request a new one from the sign-in screen.",
     signOutRecovery: "Not you? Sign out",
+    unsubscribeTitle: "Stop invitation emails",
+    unsubscribeBody:
+      "SplitDec will stop emailing you when someone invites you to a group. If you ever sign up, invitations will still be waiting for you in the app.",
+    unsubscribeAction: "Stop these emails",
+    unsubscribeBusy: "Saving…",
+    unsubscribeDone: "Done — we won't email you invitations again.",
+    unsubscribeFailed: "That didn't work. Try again in a moment.",
+    unsubscribeInvalid:
+      "This unsubscribe link is not valid. Use the link in the email you received, or write to us at privacy@split-dec.app.",
+    unsubscribeHome: "Go to SplitDec",
     errInvalidCredentials: "Incorrect email or password.",
     errEmailNotConfirmed: "Confirm your email first — check your inbox for the link.",
     errEmailExists: "An account with this email already exists.",
@@ -290,6 +300,16 @@ const dict = {
     resetLinkInvalid:
       "Ten link jest nieprawidłowy lub wygasł. Poproś o nowy na ekranie logowania.",
     signOutRecovery: "To nie Ty? Wyloguj się",
+    unsubscribeTitle: "Zatrzymaj e-maile z zaproszeniami",
+    unsubscribeBody:
+      "SplitDec przestanie wysyłać Ci e-maile, gdy ktoś zaprosi Cię do grupy. Jeśli kiedyś założysz konto, zaproszenia i tak będą czekać w aplikacji.",
+    unsubscribeAction: "Zatrzymaj te e-maile",
+    unsubscribeBusy: "Zapisywanie…",
+    unsubscribeDone: "Gotowe — nie wyślemy Ci już zaproszeń e-mailem.",
+    unsubscribeFailed: "Nie udało się. Spróbuj ponownie za chwilę.",
+    unsubscribeInvalid:
+      "Ten link do wypisania się jest nieprawidłowy. Skorzystaj z linku w otrzymanym e-mailu lub napisz do nas na privacy@split-dec.app.",
+    unsubscribeHome: "Przejdź do SplitDec",
     errInvalidCredentials: "Nieprawidłowy e-mail lub hasło.",
     errEmailNotConfirmed: "Najpierw potwierdź swój e-mail — poszukaj linku w skrzynce.",
     errEmailExists: "Konto z tym adresem e-mail już istnieje.",

@@ -18,6 +18,7 @@ from ..schemas import (
     InvitationOut,
     MyInvitationOut,
 )
+from ..unsubscribe import is_suppressed, mint_token
 
 router = APIRouter(tags=["invitations"])
 
@@ -210,6 +211,18 @@ async def invite_to_group(
     group = await db.get(Group, group_id)
     inviter_name = inviter.full_name or inviter.email
     group_name = group.name
+    # Read here for the same reason as the two names above: the provider call
+    # happens after the commit, and a read taken then would have checked a
+    # pooler connection back out to hold across it.
+    #
+    # Note where this sits — *after* the quota was charged, not before. An
+    # opt-out suppresses the email and nothing else: the row below is still
+    # created, still visible in the app if this address ever signs up, and
+    # still costs the sender a slot. Skipping the charge would let a caller
+    # read their own remaining allowance to discover whether an address has
+    # unsubscribed, which is the registration oracle this endpoint is built to
+    # deny, rebuilt out of a rate limit.
+    muted = await is_suppressed(db, email)
 
     invitation = GroupInvitation(
         group_id=group_id,
@@ -242,9 +255,17 @@ async def invite_to_group(
     # get a nudge, and unregistered ones cannot be distinguished by the
     # caller through latency or a missing side effect. Best-effort — the
     # session's transaction is closed here, so no connection is held.
-    await send_invitation_email(
-        email, inviter_name, group_name, correlator=invitation.id
-    )
+    #
+    # Unless the address has opted out, which is the one thing that stops the
+    # send. The caller is told nothing either way, and the invitation stands.
+    if not muted:
+        await send_invitation_email(
+            email,
+            inviter_name,
+            group_name,
+            correlator=invitation.id,
+            unsubscribe_token=mint_token(email),
+        )
 
     return InvitationCreatedOut.model_validate(invitation)
 

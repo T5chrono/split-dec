@@ -114,6 +114,23 @@ class Settlement(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class EmailSuppression(Base):
+    """One row per address that has asked not to receive invitation email.
+
+    Keyed by the same digest `write_events` uses (`ratelimit.recipient_key`)
+    and holding nothing else, so the table never stores something you could
+    send mail to. Unlike those tombstones it is never pruned: the row *is* the
+    objection, and it stands until the person who made it says otherwise. See
+    unsubscribe.py for why the key is unpeppered and why account deletion
+    leaves it alone.
+    """
+
+    __tablename__ = "email_suppressions"
+
+    recipient_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WriteEvent(Base):
     """One append-only row per quota-consuming write; see ratelimit.py.
 
