@@ -142,11 +142,20 @@ async def update_settlement(
     currency = body.currency or settlement.currency
     await _validate_parties(db, settlement.group_id, paid_by, paid_to)
     _validate_amount_precision(amount, currency)
+    # Compared before assigning: a PUT that resubmits the stored values is not
+    # an edit, and must not stamp one. See the matching note in expenses.py.
+    changed = (
+        settlement.paid_by_user_id != paid_by
+        or settlement.paid_to_user_id != paid_to
+        or settlement.amount != amount
+        or settlement.currency != currency
+    )
     settlement.paid_by_user_id = paid_by
     settlement.paid_to_user_id = paid_to
     settlement.amount = amount
     settlement.currency = currency
-    record_edit(settlement, caller)
+    if changed:
+        record_edit(settlement, caller)
     # Both parties must be current members, so an edit that moves a settlement
     # off a former member leaves whatever they had settled unsettled again.
     await db.flush()

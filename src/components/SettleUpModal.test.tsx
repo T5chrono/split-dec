@@ -43,6 +43,46 @@ beforeEach(() => {
   vi.mocked(api.post).mockReset();
 });
 
+describe("SettleUpModal — edit attribution", () => {
+  const stored = {
+    id: "s1",
+    group_id: group.id,
+    paid_by_user_id: alice.id,
+    paid_to_user_id: bob.id,
+    amount: "5.0000",
+    currency: "PLN",
+    created_at: "2026-06-01T00:00:00Z",
+    created_by: alice.id,
+    updated_by: null as string | null,
+    updated_at: null as string | null,
+  };
+
+  function open(overrides: Partial<typeof stored>) {
+    renderWithProviders(
+      <SettleUpModal
+        group={group}
+        editing={{ ...stored, ...overrides }}
+        onClose={() => {}}
+      />,
+    );
+  }
+
+  it("names whoever last changed somebody else's settlement", () => {
+    open({ updated_by: bob.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(screen.getByText(/edited by Bob/)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the person who recorded it made the change", () => {
+    open({ updated_by: alice.id, updated_at: "2026-06-02T00:00:00Z" });
+    expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
+  });
+
+  it("stays quiet on an untouched settlement", () => {
+    open({});
+    expect(screen.queryByText(/edited by/)).not.toBeInTheDocument();
+  });
+});
+
 describe("SettleUpModal — idempotency key across retries", () => {
   it("resends the same key after a failed attempt", async () => {
     // A settlement whose response was lost is the worst thing to record twice:

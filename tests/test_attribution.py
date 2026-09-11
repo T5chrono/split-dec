@@ -108,6 +108,56 @@ class TestExpenses:
         assert patched.json()["updated_by"] == str(g["alice"].id)
         assert patched.json()["created_by"] == str(g["alice"].id)
 
+    async def test_a_patch_that_changes_nothing_is_not_an_edit(
+        self, client, db_session, two_user_group, current_user
+    ):
+        """Bob opens Alice's expense, presses Save, changes nothing. The form
+        sends a metadata body of identical values (ExpenseFormModal does this
+        whenever the financials are untouched), and "edited by Bob" appearing
+        from that is a false positive on the one signal this record gives."""
+        g = two_user_group
+        inv = (await _create_expense(client, g["group"], g["alice"], [g["alice"], g["bob"]])).json()
+
+        current_user.id = g["bob"].id
+        for body in ({}, {"description": inv["description"], "category": inv["category"]}):
+            patched = await client.patch(f"/api/expenses/{inv['id']}", json=body)
+            assert patched.status_code == 200
+            assert patched.json()["updated_by"] is None
+            assert patched.json()["updated_at"] is None
+
+    async def test_resubmitting_identical_financials_is_not_an_edit(
+        self, client, two_user_group, current_user
+    ):
+        """The full splits rewrite is compared too — including the computed
+        shares — so a caller echoing the stored expense back does not stamp."""
+        g = two_user_group
+        payload = expense_payload(g["alice"], [g["alice"], g["bob"]])
+        inv = (
+            await client.post(
+                f"/api/groups/{g['group'].id}/expenses", json=payload, headers=idem()
+            )
+        ).json()
+
+        current_user.id = g["bob"].id
+        patched = await client.patch(f"/api/expenses/{inv['id']}", json=payload)
+        assert patched.status_code == 200
+        assert patched.json()["updated_by"] is None
+
+    async def test_one_changed_field_among_unchanged_ones_still_counts(
+        self, client, two_user_group, current_user
+    ):
+        """The comparison must be an OR across fields, not a check of the last
+        one assigned."""
+        g = two_user_group
+        inv = (await _create_expense(client, g["group"], g["alice"], [g["alice"], g["bob"]])).json()
+
+        current_user.id = g["bob"].id
+        patched = await client.patch(
+            f"/api/expenses/{inv['id']}",
+            json={"description": "Changed", "category": inv["category"]},
+        )
+        assert patched.json()["updated_by"] == str(g["bob"].id)
+
     async def test_a_replayed_creation_keeps_the_first_author(
         self, client, two_user_group, current_user
     ):
@@ -161,6 +211,10 @@ class TestSettlements:
         s = (await self._settle(client, g["group"], g["alice"], g["bob"])).json()
 
         current_user.id = g["bob"].id
+        # Resubmitting the stored values is not an edit.
+        echoed = await client.put(f"/api/settlements/{s['id']}", json={"amount": "5.00"})
+        assert echoed.status_code == 200 and echoed.json()["updated_by"] is None
+
         edited = await client.put(f"/api/settlements/{s['id']}", json={"amount": "1.00"})
         assert edited.status_code == 200
         assert edited.json()["updated_by"] == str(g["bob"].id)

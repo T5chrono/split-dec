@@ -620,8 +620,14 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
     column records what happened; the UI decides what is worth saying, and shows
     it only when `updated_by` differs from `created_by`. Do not collapse those
     two decisions into one by leaving the column blank.
-  - **It is shown in the expense's own view (`ExpenseFormModal`), not in the
-    list.** The list is scanned rather than read, and most edits are somebody
+  - **A request that changes nothing is not an edit.** Both update endpoints
+    compare against the stored row — the metadata fields, and for the financial
+    branch the computed shares too — and stamp only on a real difference.
+    Without that, Bob opening Alice's expense and pressing Save marks it
+    "edited by Bob", which is a false positive on the one signal the record
+    exists to give. A delete always qualifies.
+  - **It is shown in the row's own view (`ExpenseFormModal`, `SettleUpModal`),
+    not in the list.** The list is scanned rather than read, and most edits are somebody
     fixing their own typo, so a permanent badge on every one of them gives
     ordinary collaborative behaviour an auditing tone. The discovery path is a
     *balance* looking wrong, not a line in a list — and it ends with one expense

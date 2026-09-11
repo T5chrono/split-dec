@@ -171,9 +171,15 @@ async def ensure_no_outsider_debt(db: AsyncSession, group_id: uuid.UUID) -> None
 def record_edit(row, caller: uuid.UUID) -> None:
     """Stamp who last changed a ledger row, and when.
 
-    Every mutation goes through here — the metadata-only PATCH, the full
-    splits rewrite, and the soft-delete, which is the most disputable of the
-    three and the one it would be easiest to leave out. `updated_by` is stored
+    Every mutation that actually changes something goes through here — the
+    metadata-only PATCH, the full splits rewrite, and the soft-delete, which is
+    the most disputable of the three and the one it would be easiest to leave
+    out. **Whether a request changed anything is the caller's judgement, not
+    this function's**: both update endpoints compare against the stored row
+    first, because a PATCH that resubmits what is already there is not an edit,
+    and "edited by Bob" because Bob opened the form and pressed Save is a false
+    positive on the one signal the record exists to give. A delete always
+    qualifies. `updated_by` is stored
     whoever the caller is, including the row's own author; whether that is
     *shown* is decided in the UI (ExpensesTab surfaces it only when it differs
     from `created_by`), because what belongs on the record and what belongs on
