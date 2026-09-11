@@ -347,6 +347,15 @@ decision inverts the order `delete_group` takes — group row first, its invitat
 and deadlocks against it. For the same reason `accept_invitation` flushes the new membership
 before touching the invitation: the FK insert takes the group's `FOR KEY SHARE` first.
 
+**Creating** one is the other way round and does join the protocol: `invite_to_group`
+takes the group's `FOR SHARE`, because an invitation now outlives its inviter only until
+they leave (`remove_member` and `delete_account` cancel what they issued), and that sweep
+runs while holding the group's `FOR UPDATE`. Unlocked, the caller's own deletion could
+commit between this endpoint's membership read and its insert, leaving a live invitation
+issued by an account that no longer exists. Group row first, the quota's advisory lock
+second — the order `create_expense` takes — and released by the commit that precedes the
+Resend call, so it never spans the provider.
+
 **A ledger mutation may not leave a non-member with a non-zero balance**
 (`deps.ensure_no_outsider_debt`, called after the flush in expense/settlement update and
 delete). Removal already requires a zero balance, but nothing kept it there: withdrawing an
@@ -605,6 +614,21 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 - Membership is invitation-based (`group_invitations`, matched by lowercased email so people
   who sign up later see their invites). The direct add-member endpoint and `GET /users/search`
   were removed (the latter was an email-registration oracle — deliberate spec deviation).
+  **Answering is authorized by `invited_user_id` alone once that column is set**
+  (`invitations.invitee_predicate`), and by the address only while it is NULL — the
+  state an invitation sent to an address with no account yet sits in. It used to be an
+  OR of the two, which meant whoever held the mailbox *next* could answer an invitation
+  bound to somebody else: addresses change hands (a user edits theirs and the old one is
+  free to register; a corporate address is reassigned) and nothing here expires, so the
+  window was unbounded. Revocation keeps the OR on purpose — revoking a capability too
+  widely is safe, granting one too widely is the bug.
+  **An invitation is also revoked when the member who *issued* it leaves** — `remove_member`
+  cancels it for that group, `delete_account` across all of them. Acceptance checks the
+  invitee and never the inviter, so an invitation outlives the membership that authorized
+  it: invite an address you control, get removed, accept afterwards, and the group readmits
+  a stranger with nobody left in it having agreed to that. The authority to invite is
+  membership, so it ends with the membership; an invitation still wanted is one a current
+  member can send again.
   **The invite endpoint must stay uniform for the same reason**: same response shape, same
   email attempt, same latency whether or not the address has an account (anyone can create a
   group and invite arbitrary addresses). Never reintroduce `user_exists`/`email_sent`/
@@ -626,8 +650,9 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   and deletes the `auth.users` row; endpoints not gated by membership must call
   `get_active_user` because old JWTs stay valid until expiry. It also drops pending
   invitations addressed to that email (they are unexpiring capabilities matched by email —
-  the next holder of the address would inherit them) and anonymizes the address on answered
-  ones.
+  the next holder of the address would inherit them), cancels the pending ones it *sent*
+  (see above; CANCELLED rather than deleted, because the recipient is a third party and the
+  row is still the group's record), and anonymizes the address on answered ones.
 - Expense splits rewrite pattern: clear the collection and `flush()` **before** assigning
   replacements, or `UNIQUE(expense_id, user_id)` fires (inserts flush before deletes).
 

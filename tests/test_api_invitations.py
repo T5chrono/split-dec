@@ -5,9 +5,11 @@ import uuid
 import pytest
 from conftest import make_group, make_user
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from _src import ratelimit
-from _src.models import GroupInvitation, WriteEvent
+from _src.models import GroupInvitation, User, WriteEvent
 
 
 async def _invite(client, group_id, email):
@@ -327,3 +329,171 @@ class TestRateLimits:
             replay = await _invite(client, g["group"].id, "carol@test.dev")
             assert replay.status_code == 200
             assert replay.json()["id"] == first.json()["id"]
+
+
+class TestAnInvitersAuthorityEndsWithTheirMembership:
+    """An invitation is a capability that creates membership on accept, and
+    acceptance checks only the invitee. So an invitation outlives whatever
+    authority issued it: a member can invite an address they control, leave or
+    be removed, and have it accepted afterwards — the group readmits somebody
+    nobody left in it agreed to. Both ways out of a group now revoke what the
+    departing member still had in flight."""
+
+    async def test_removing_the_inviter_revokes_what_they_issued(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+
+        current_user.id = g["bob"].id
+        assert (
+            await client.delete(f"/api/groups/{g['group'].id}/members/{g['alice'].id}")
+        ).status_code == 204
+
+        current_user.id = carol.id
+        assert (await client.get("/api/invitations/mine")).json() == []
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 404
+        # Cancelled, not deleted, like every other revoked invitation: the row
+        # is the group's record that it happened, and only PENDING rows are
+        # covered by the partial unique index, so Bob can still invite Carol.
+        async with db_session() as s:
+            row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+        assert row.status == "CANCELLED"
+
+        current_user.id = g["bob"].id
+        assert (await _invite(client, g["group"].id, "carol@test.dev")).status_code == 201
+
+    async def test_deleting_the_inviters_account_revokes_what_they_issued(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+
+        assert (await client.delete("/api/users/me")).status_code == 204
+
+        current_user.id = carol.id
+        assert (await client.get("/api/invitations/mine")).json() == []
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 404
+        # Bob is still in the group, so the group survived the deletion and
+        # this row was cancelled rather than purged along with it.
+        async with db_session() as s:
+            row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+        assert row is not None and row.status == "CANCELLED"
+
+    async def test_invitations_the_departing_member_did_not_issue_survive(
+        self, client, db_session, two_user_group, current_user
+    ):
+        """Revocation is scoped to the leaver. Bob's invitation is not Alice's
+        to take with her."""
+        g = two_user_group
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        current_user.id = g["bob"].id
+        inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+
+        assert (
+            await client.delete(f"/api/groups/{g['group'].id}/members/{g['alice'].id}")
+        ).status_code == 204
+
+        current_user.id = carol.id
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 204
+
+
+class TestBoundInvitationsMatchByIdOnly:
+    """An invitation created for an address that already had an account carries
+    that account's id. From then on the id is the only thing that authorizes an
+    answer: addresses change hands, nothing here expires, and matching on the
+    address as well would let whoever registers it next answer an invitation
+    meant for somebody else."""
+
+    async def _rehome_address(self, db_session, user, new_email):
+        """Give `user` a new address and hand their old one to a new account,
+        exactly as handle_user_updated plus a later signup would."""
+        old = user.email
+        async with db_session() as s:
+            row = await s.get(User, user.id)
+            row.email = new_email
+            await s.commit()
+        return await make_user(db_session, old, "Squatter")
+
+    async def test_the_next_holder_of_the_address_cannot_answer(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+        squatter = await self._rehome_address(db_session, carol, "carol-new@test.dev")
+
+        current_user.id = squatter.id
+        assert (await client.get("/api/invitations/mine")).json() == []
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 403
+        assert (await client.post(f"/api/invitations/{inv['id']}/decline")).status_code == 403
+
+        current_user.id = g["alice"].id
+        assert len((await client.get(f"/api/groups/{g['group'].id}")).json()["members"]) == 2
+
+    async def test_the_bound_invitee_still_answers_after_changing_address(
+        self, client, db_session, two_user_group, current_user
+    ):
+        g = two_user_group
+        carol = await make_user(db_session, "carol@test.dev", "Carol")
+        inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+        await self._rehome_address(db_session, carol, "carol-new@test.dev")
+
+        current_user.id = carol.id
+        mine = (await client.get("/api/invitations/mine")).json()
+        assert [m["id"] for m in mine] == [inv["id"]]
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 204
+
+    async def test_an_unbound_invitation_still_matches_by_address(
+        self, client, db_session, two_user_group, current_user
+    ):
+        """The narrowing must not touch the case email matching exists for: an
+        address invited before it had an account is unbound until its invitee
+        signs up."""
+        g = two_user_group
+        inv = (await _invite(client, g["group"].id, "future.user@test.dev")).json()
+        async with db_session() as s:
+            row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+            assert row.invited_user_id is None
+
+        newcomer = await make_user(db_session, "future.user@test.dev", "Future")
+        current_user.id = newcomer.id
+        assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 204
+
+
+async def test_accept_answers_404_when_the_membership_insert_fails(
+    client, db_session, two_user_group, current_user, monkeypatch
+):
+    """Accepting reads the invitation without a lock, so the group can be
+    deleted underneath it: the membership insert waits on delete_group's lock
+    and then finds no group row to reference. A concurrent accept of the same
+    invitation lands the same way, on the membership primary key. Both used to
+    be a 500.
+
+    The failure is forced here rather than raced. SQLite does not enforce
+    foreign keys unless the connection asks it to, so the real interleaving
+    cannot be reproduced on the test engine — what this pins is that the
+    endpoint answers an IntegrityError from that flush as an invitation that is
+    no longer there to answer.
+    """
+    g = two_user_group
+    carol = await make_user(db_session, "carol@test.dev", "Carol")
+    inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+
+    async def failing_flush(self, *args, **kwargs):
+        raise IntegrityError("INSERT INTO group_members", {}, Exception("FK violation"))
+
+    monkeypatch.setattr(AsyncSession, "flush", failing_flush)
+    current_user.id = carol.id
+    assert (await client.post(f"/api/invitations/{inv['id']}/accept")).status_code == 404
+
+    monkeypatch.undo()
+    # Nothing was committed on the way out.
+    current_user.id = g["alice"].id
+    detail = (await client.get(f"/api/groups/{g['group'].id}")).json()
+    assert len(detail["members"]) == 2
+    async with db_session() as s:
+        row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
+    assert row.status == "PENDING"

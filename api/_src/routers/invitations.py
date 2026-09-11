@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,36 @@ from ..schemas import (
 )
 
 router = APIRouter(tags=["invitations"])
+
+
+def invitee_predicate(caller: uuid.UUID, email: str):
+    """Which invitations `caller` may answer. Exclusive, not an OR.
+
+    An invitation carries `invited_user_id` from creation when the address
+    already had an account, and acquires it on the answer otherwise. Once it
+    is set, it is the *only* thing that authorizes: matching on the address as
+    well lets whoever holds that mailbox next answer an invitation bound to
+    somebody else. Addresses change hands — a user edits theirs
+    (handle_user_updated) and the old one is free to register, a corporate
+    address is reassigned — and nothing here expires, so the window is
+    unbounded.
+
+    Email matching stays for the case it exists for: an invitation sent to an
+    address with no account yet, which is unbound until its invitee signs up
+    and answers it.
+
+    Note this is narrower than the predicate *revocation* uses
+    (groups.remove_member, users.delete_account), which matches id OR address
+    on purpose. Revoking a capability too widely is safe; granting one too
+    widely is the bug above.
+    """
+    return or_(
+        GroupInvitation.invited_user_id == caller,
+        and_(
+            GroupInvitation.invited_user_id.is_(None),
+            GroupInvitation.email == email,
+        ),
+    )
 
 
 async def _get_pending_for_invitee(
@@ -44,7 +74,11 @@ async def _get_pending_for_invitee(
     # Deleted accounts must not respond. Accepting also creates a membership,
     # so that path holds the shared user lock against account deletion.
     me = await get_active_user(db, caller, lock="shared" if lock_user else None)
-    if invitation.invited_user_id != caller and invitation.email != me.email.lower():
+    if invitation.invited_user_id is not None:
+        authorized = invitation.invited_user_id == caller
+    else:
+        authorized = invitation.email == me.email.lower()
+    if not authorized:
         raise HTTPException(status_code=403, detail="This invitation is not addressed to you")
     return invitation
 
@@ -112,7 +146,22 @@ async def invite_to_group(
     would be an account-registration oracle open to anyone — the same reason
     GET /users/search was removed (see users.py).
     """
-    await require_membership(db, group_id, caller)
+    # Shared lock, like every other write that depends on the caller still
+    # being a member when it commits. Without it this endpoint read its
+    # membership under no lock at all, so the caller's own account deletion --
+    # which holds FOR UPDATE on each of their groups while it cancels the
+    # invitations they issued (routers/users.py) -- could commit in between,
+    # and this request would then land a PENDING invitation issued by an
+    # account that no longer exists. That is the bug the cancellation sweep
+    # exists to prevent, reintroduced through the back door. The lock makes the
+    # two orderings the only two: commit first and be swept, or block and then
+    # fail the membership check with 403.
+    #
+    # Group first, then the quota's advisory lock (enforce_invitation_quota) --
+    # the same order create_expense takes, so the two cannot invert. Released
+    # by the commit below, which is deliberately before the provider call, so
+    # it never spans the email.
+    await require_membership(db, group_id, caller, lock="shared")
     email = body.email.lower()
 
     # Whether the address is registered, and whether it is already in this
@@ -260,8 +309,7 @@ async def my_invitations(
             .join(User, User.id == GroupInvitation.invited_by)
             .where(
                 GroupInvitation.status == "PENDING",
-                (GroupInvitation.invited_user_id == caller)
-                | (GroupInvitation.email == me.email.lower()),
+                invitee_predicate(caller, me.email.lower()),
             )
             .order_by(GroupInvitation.created_at.desc())
         )
@@ -291,7 +339,19 @@ async def accept_invitation(
         # the group's row (an FK insert takes FOR KEY SHARE on it) and then the
         # invitation's — the order delete_group takes them in. The reverse
         # order is the one that deadlocks.
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            # Two shapes, one right answer. The group was deleted while this
+            # request sat between the unlocked read above and here: the FK
+            # insert waits on delete_group's FOR UPDATE and then finds no group
+            # row (purge_group took the invitation with it). Or a concurrent
+            # accept of the same invitation won and already inserted this
+            # membership, violating the primary key. Either way the invitation
+            # is gone as something to answer, which is what 404 says — an
+            # unhandled IntegrityError here is a 500 instead.
+            await db.rollback()
+            raise _already_answered()
     if not await _resolve_invitation(
         db, invitation_id, status="ACCEPTED", invited_user_id=caller
     ):
