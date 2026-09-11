@@ -9,7 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from _src import ratelimit
-from _src.models import GroupInvitation, User, WriteEvent
+from _src.deps import MAX_GROUP_MEMBERS
+from _src.models import GroupInvitation, GroupMember, User, WriteEvent
 
 
 async def _invite(client, group_id, email):
@@ -497,3 +498,86 @@ async def test_accept_answers_404_when_the_membership_insert_fails(
     async with db_session() as s:
         row = await s.get(GroupInvitation, uuid.UUID(inv["id"]))
     assert row.status == "PENDING"
+
+
+async def _fill_group(db_session, group, count: int) -> None:
+    """Put `count` more members in the group, straight into the table.
+
+    Driving 98 invitations through the endpoint would hit the per-inviter send
+    quota long before the seat cap, and the cap is not what that would be
+    testing.
+    """
+    async with db_session() as s:
+        for _ in range(count):
+            user = User(id=uuid.uuid4(), email=f"filler-{uuid.uuid4().hex}@test.dev")
+            s.add(user)
+            await s.flush()
+            s.add(GroupMember(group_id=group.id, user_id=user.id))
+        await s.commit()
+
+
+async def test_invite_refused_when_group_is_full(client, db_session, two_user_group):
+    g = two_user_group
+    await _fill_group(db_session, g["group"], MAX_GROUP_MEMBERS - 2)  # Alice + Bob
+
+    r = await _invite(client, g["group"].id, "carol@test.dev")
+    assert r.status_code == 400
+    assert str(MAX_GROUP_MEMBERS) in r.json()["detail"]
+
+    # And nothing was written on the way out — no invitation, no quota charge.
+    assert (await client.get(f"/api/groups/{g['group'].id}/invitations")).json() == []
+    async with db_session() as s:
+        assert (await s.execute(select(WriteEvent))).scalars().all() == []
+
+
+async def test_pending_invitation_holds_a_seat(client, db_session, two_user_group):
+    """A seat is a member *or* a pending invitation, so the group can never
+    issue more invitations than it has room for. Cancelling gives the seat
+    back."""
+    g = two_user_group
+    await _fill_group(db_session, g["group"], MAX_GROUP_MEMBERS - 3)  # one seat left
+
+    first = await _invite(client, g["group"].id, "carol@test.dev")
+    assert first.status_code == 201
+
+    assert (await _invite(client, g["group"].id, "dave@test.dev")).status_code == 400
+
+    assert (await client.delete(f"/api/invitations/{first.json()['id']}")).status_code == 204
+    assert (await _invite(client, g["group"].id, "dave@test.dev")).status_code == 201
+
+
+async def test_accept_refused_when_group_filled_after_the_invitation(
+    client, db_session, two_user_group, current_user
+):
+    """The invite-time check is a courtesy; the cap is decided at accept, where
+    the membership is created. Two invitations racing for the last seat both
+    pass the first check, which this reproduces by filling the group after the
+    invitation was issued."""
+    g = two_user_group
+    carol = await make_user(db_session, "carol@test.dev", "Carol")
+    inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+
+    await _fill_group(db_session, g["group"], MAX_GROUP_MEMBERS - 2)
+
+    current_user.id = carol.id
+    r = await client.post(f"/api/invitations/{inv['id']}/accept")
+    assert r.status_code == 400
+    assert str(MAX_GROUP_MEMBERS) in r.json()["detail"]
+
+    # Still pending: a full group is a "try later", not an answer.
+    async with db_session() as s:
+        assert (await s.get(GroupInvitation, uuid.UUID(inv["id"]))).status == "PENDING"
+        assert await s.get(GroupMember, (g["group"].id, carol.id)) is None
+
+
+async def test_replay_still_answered_when_group_is_full(client, db_session, two_user_group):
+    """Seats are counted after the replay check, like the send quota is. A
+    client retrying an invitation it already made must get its row back rather
+    than a 400 about a group it did not overfill."""
+    g = two_user_group
+    inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+    await _fill_group(db_session, g["group"], MAX_GROUP_MEMBERS - 2)
+
+    r = await _invite(client, g["group"].id, "carol@test.dev")
+    assert r.status_code == 200
+    assert r.json()["id"] == inv["id"]

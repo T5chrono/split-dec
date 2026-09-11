@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import verify_jwt
 from ..db import get_db
-from ..deps import get_active_user, require_membership
+from ..deps import (
+    ensure_group_has_room,
+    get_active_user,
+    hold_group_seats,
+    require_membership,
+)
 from ..emailer import send_invitation_email
 from ..models import Group, GroupInvitation, GroupMember, User
 from ..ratelimit import INVITE, enforce_invitation_quota, record_write
@@ -197,6 +202,20 @@ async def invite_to_group(
         response.status_code = 200
         return InvitationCreatedOut.model_validate(existing)
 
+    # Seats before the send window. A group with no room should say so rather
+    # than spend one of the caller's daily invitations discovering it, and the
+    # replay above stays free of both checks for the same reason it is free of
+    # the quota.
+    #
+    # A courtesy, not the gate: two invitations racing for the last seat both
+    # pass here, which is why accept_invitation counts again. What it buys is
+    # that the refusal reaches the member who can act on it instead of the
+    # invitee, who would otherwise be turned away by a link they were sent.
+    #
+    # Group row -> seats -> invite window, the one order every path takes.
+    await hold_group_seats(db, group_id)
+    await ensure_group_has_room(db, group_id, counting_invitations=True)
+
     await enforce_invitation_quota(db, caller, email)
     # Charged to the inviter and keyed to a digest of the recipient, in a table
     # that outlives this group — deleting the group used to hand all three
@@ -384,6 +403,27 @@ async def accept_invitation(
 ):
     invitation = await _get_pending_for_invitee(db, invitation_id, caller, lock_user=True)
     if await db.get(GroupMember, (invitation.group_id, caller)) is None:
+        # The seat cap is decided here, where the membership is actually
+        # created; invite_to_group's check is the courtesy version of it. Inside
+        # this branch on purpose — a caller who is already a member takes no new
+        # seat, and a full group must not turn a replay into an error.
+        #
+        # FOR SHARE on the group first, then the seat lock, which is the order
+        # invite_to_group takes and leaves the whole path at user -> group ->
+        # invitation: the order delete_group and delete_account take, not the
+        # one that deadlocks against them. It is compatible with the FOR KEY
+        # SHARE the insert below takes on the same row, and conflicts with
+        # delete_group's FOR UPDATE exactly where it should — an accept racing
+        # a deletion waits, then loses on _resolve_invitation's
+        # `status = 'PENDING'` predicate and answers 404, as it already did.
+        await db.execute(
+            select(Group.id)
+            .where(Group.id == invitation.group_id)
+            .with_for_update(read=True)
+        )
+        await hold_group_seats(db, invitation.group_id)
+        # Members only: this invitation already holds a pending seat.
+        await ensure_group_has_room(db, invitation.group_id, counting_invitations=False)
         db.add(GroupMember(group_id=invitation.group_id, user_id=caller))
         # Flushed before the invitation is touched, so this transaction takes
         # the group's row (an FK insert takes FOR KEY SHARE on it) and then the

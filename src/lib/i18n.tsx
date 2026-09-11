@@ -230,6 +230,8 @@ const dict = {
     deleteSettlementMsg: "The group's balances will be recalculated without it.",
     // members
     inviteByEmail: "Invite by email",
+    groupFull:
+      "This group is full — {max} people is the limit. Remove a member or cancel a pending invitation to make room.",
     find: "Find",
     add: "Add",
     removeMemberTitle: "Remove this member?",
@@ -464,6 +466,8 @@ const dict = {
     deleteSettlementTitle: "Usunąć tę płatność?",
     deleteSettlementMsg: "Salda grupy zostaną przeliczone bez niej.",
     inviteByEmail: "Zaproś przez e-mail",
+    groupFull:
+      "Ta grupa jest pełna — limit to {max} osób. Usuń członka lub anuluj oczekujące zaproszenie, aby zwolnić miejsce.",
     find: "Szukaj",
     add: "Dodaj",
     removeMemberTitle: "Usunąć tego członka?",

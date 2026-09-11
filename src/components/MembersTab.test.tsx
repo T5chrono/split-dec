@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/utils";
 import MembersTab from "./MembersTab";
 import type { GroupDetail, Invitation } from "../lib/types";
+import { MAX_GROUP_MEMBERS } from "../lib/limits";
 import { api } from "../lib/api";
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -97,5 +98,57 @@ describe("MembersTab invitations", () => {
       expect(screen.getByText(/too many invitations sent recently/i)).toBeInTheDocument(),
     );
     expect(screen.queryByText(/invitation saved/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("MembersTab seat cap", () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockResolvedValue([] as Invitation[]);
+    vi.mocked(api.post).mockClear();
+  });
+
+  const filled = (count: number): GroupDetail => ({
+    ...group,
+    members: Array.from({ length: count }, (_, i) => ({
+      id: `member-${i}`,
+      email: `member${i}@test.dev`,
+      full_name: `Member ${i}`,
+      avatar_url: null,
+    })),
+  });
+
+  function renderGroup(g: GroupDetail) {
+    return renderWithProviders(
+      <MemoryRouter>
+        <MembersTab group={g} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("stops offering an invitation once the group is full", async () => {
+    renderGroup(filled(MAX_GROUP_MEMBERS));
+
+    expect(await screen.findByText(/this group is full/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("friend@example.com")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /invite/i })).toBeDisabled();
+  });
+
+  it("counts a pending invitation as a seat", async () => {
+    // One short on members, but the pending invitation has the last seat --
+    // the same arithmetic the server does (deps.ensure_group_has_room).
+    vi.mocked(api.get).mockResolvedValue([invitation("carol@test.dev")]);
+    renderGroup(filled(MAX_GROUP_MEMBERS - 1));
+
+    expect(await screen.findByText(/this group is full/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /invite/i })).toBeDisabled();
+  });
+
+  it("leaves the form alone while there is room", async () => {
+    renderGroup(filled(MAX_GROUP_MEMBERS - 1));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /invite/i })).toBeEnabled(),
+    );
+    expect(screen.queryByText(/this group is full/i)).not.toBeInTheDocument();
   });
 });

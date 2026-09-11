@@ -715,6 +715,25 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   partial unique index, and a member list does not grow on its own, so both of
   those stay unpaged on purpose. The change from a bare array was breaking, and
   acceptable only because the sole client ships in the same deploy.
+- **A group holds 100 people** (`deps.MAX_GROUP_MEMBERS`), and a **seat** is a member
+  *or* a PENDING invitation. Two checks, and they count differently on purpose.
+  `invite_to_group` counts both and refuses at 400 — a courtesy, so the refusal reaches
+  the member who can act on it instead of the invitee, who would otherwise be turned
+  away by a link they were sent. `accept_invitation` counts members only (the invitation
+  being answered already holds a seat) and is the actual gate: two invitations racing for
+  the last seat both pass the first check. Both sit behind `deps.hold_group_seats`, an
+  advisory lock keyed to the group — count-then-insert is two statements, exactly like
+  the write quotas, and without it N parallel joins all count the same N−1 seats.
+  Deliberately **advisory rather than the group row lock**: `FOR UPDATE` here would make
+  joining a group queue behind every expense write on it, and the reverse, for a count
+  that has nothing to do with money. Its namespace is 5; `ratelimit._LOCK_SPACE` owns
+  1–4. The accept path takes `FOR SHARE` on the group first so the order stays
+  user → group → invitation, the one `delete_group` and `delete_account` take. Seats are
+  counted **after** the replay check, like the send quota — a retried invitation must get
+  its row back, not a 400 about a group it did not overfill. The number is a product
+  decision, not a threshold: it is easier to raise than to lower, since lowering it
+  strands groups already over the line. The client copy is `src/lib/limits.ts`, which only
+  decides whether the invite form is offered.
 - **A group is never left without members.** `remove_member` refuses to remove the last one
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure
