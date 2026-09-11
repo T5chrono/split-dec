@@ -800,9 +800,13 @@ Consequences worth keeping:
   row exists with no auth identity — no password, no session, nothing to reset. Its
   address (`support@split-dec.app`) is **reserved**: `handle_new_user` mirrors signups
   into `public.users` where `email` is UNIQUE, so a real account registered there would
-  fail to be mirrored and land with no profile row. `privacy@split-dec.app` is the contact
-  address (`src/lib/legal.ts`); this one is not for handing out. It *is* visible — the
-  members tab renders each member's address under their name.
+  fail to be mirrored and land with no profile row. **It is also a real mailbox**, and has
+  to be: the members tab renders every member's address under their name, so this one is
+  on screen for every account in its first group, where it reads as the way to ask for
+  help. It forwards to the maintainer through ImprovMX, as an explicit alias — the
+  domain's catch-all was observed not to deliver on its own. `privacy@split-dec.app`
+  remains the contact address the Privacy Policy publishes (`src/lib/legal.ts`); this one
+  is what someone writes to when they have not read it.
 - **Seeding is claimed, not checked.** `users.welcomed_at` is set by a conditional UPDATE
   (`... WHERE id = ? AND welcomed_at IS NULL`), so the row is its own lock and `rowcount`
   decides — parallel first requests, a retry and two open tabs cannot produce two groups.
