@@ -315,6 +315,13 @@ on `ENV=development`):
   assumes in their place is Pro-only and this project is on free, which
   `docs/supply-chain.md` records as an accepted risk; `errWeakPassword` names a
   length and nothing else, so turning classes on later makes it untrue.
+  **Setting a password revokes every other session** — `updatePassword` follows
+  the update with `signOut({ scope: "others" })`, because Supabase does not: its
+  `UpdateUser` writes the password and never touches the session table, so
+  without this the one gesture somebody reaches for when they think another
+  person is in their account would change nothing for that person. It signs
+  their own other devices out too, which is the intent. The failure is reported
+  and never thrown — the password has already changed by then.
   Signup/reset responses stay enumeration-safe, and **that no longer depends on the
   dashboard**: an address that already has an account is caught by
   `isEmailAlreadyRegistered` and shown the same check-your-email screen a new one

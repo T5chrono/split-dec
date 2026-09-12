@@ -17,7 +17,7 @@ vi.mock("../lib/supabase", () => ({
         return { data: { subscription: { unsubscribe: vi.fn() } } };
       }),
       signInWithOAuth: vi.fn(),
-      signOut: vi.fn(),
+      signOut: vi.fn().mockResolvedValue({ error: null }),
       signUp: vi.fn().mockResolvedValue({ data: { session: null, user: null }, error: null }),
       signInWithPassword: vi.fn().mockResolvedValue({ data: {}, error: null }),
       resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: null }),
@@ -26,6 +26,9 @@ vi.mock("../lib/supabase", () => ({
   },
 }));
 import { supabase } from "../lib/supabase";
+
+vi.mock("../lib/monitoring", () => ({ reportError: vi.fn() }));
+import { reportError } from "../lib/monitoring";
 
 const sessionFor = (userId: string) => ({ user: { id: userId } }) as Session;
 
@@ -180,6 +183,37 @@ describe("AuthProvider — email/password methods", () => {
 
     await act(() => auth.updatePassword("newpassword1"));
     expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: "newpassword1" });
+    expect(auth.passwordRecovery).toBe(false);
+  });
+
+  it("updatePassword turns every other session out", async () => {
+    // Supabase leaves them alive — its `UpdateUser` never touches the session
+    // table — so someone changing their password because they think another
+    // person is in their account would otherwise change nothing for that
+    // person. "others" is load-bearing: the plain call would sign the user
+    // out of the device they are standing at.
+    renderAuth();
+    await waitFor(() => expect(authCallback).not.toBeNull());
+
+    await act(() => auth.updatePassword("newpassword1"));
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "others" });
+  });
+
+  it("a failed revocation is reported, not raised", async () => {
+    // The password has already changed by then, so throwing would tell the
+    // caller it had not.
+    const failure = { message: "network" };
+    vi.mocked(supabase.auth.signOut).mockResolvedValueOnce({ error: failure } as never);
+    renderAuth();
+    await waitFor(() => expect(authCallback).not.toBeNull());
+
+    act(() => {
+      authCallback!("SIGNED_IN", sessionFor("user-a"));
+      authCallback!("PASSWORD_RECOVERY", sessionFor("user-a"));
+    });
+
+    await act(() => auth.updatePassword("newpassword1"));
+    expect(reportError).toHaveBeenCalledWith(failure);
     expect(auth.passwordRecovery).toBe(false);
   });
 
