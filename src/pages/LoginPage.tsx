@@ -9,6 +9,7 @@ import {
   MAX_FULL_NAME_LENGTH,
   MIN_PASSWORD_LENGTH,
   capFullName,
+  isEmailAlreadyRegistered,
   mapAuthError,
 } from "../lib/authErrors";
 
@@ -81,7 +82,16 @@ export default function LoginPage() {
       await signUpWithPassword(trimmedEmail, password, capFullName(fullName));
       setMode("checkEmailSignup");
     } catch (err) {
-      setError(mapAuthError(err));
+      // An address that already has an account gets exactly the screen a new
+      // one gets. Supabase normally hides this for us — with "Confirm email"
+      // on it answers a duplicate signup with a session-less success, which
+      // is indistinguishable from a real one — but that is a dashboard
+      // toggle, and the day it is off this branch is the only thing between a
+      // stranger and a way to test whether an address has an account here.
+      // Nothing is lost by staying quiet: whoever actually owns the address
+      // is told what happened by the email Supabase sends them.
+      if (isEmailAlreadyRegistered(err)) setMode("checkEmailSignup");
+      else setError(mapAuthError(err));
     } finally {
       setBusy(false);
     }

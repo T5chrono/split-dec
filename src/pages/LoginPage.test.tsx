@@ -132,6 +132,26 @@ describe("LoginPage", () => {
     expect(screen.getByText(/ala@example\.com/)).toBeInTheDocument();
   });
 
+  it("tells an address that already has an account exactly what it tells a new one", async () => {
+    // The enumeration guard. With Supabase's "Confirm email" on, a duplicate
+    // signup comes back as a session-less success and never reaches this
+    // path — but that is a dashboard toggle, and this page must not be the
+    // thing that starts answering "does this person have an account here?"
+    // the day somebody turns it off.
+    const user = userEvent.setup();
+    signUpWithPassword.mockRejectedValueOnce(authError("user_already_exists"));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Sign up" }));
+    await user.type(screen.getByLabelText("Full name"), "Ala Kot");
+    await user.type(screen.getByLabelText("Email"), "taken@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByText("Check your email")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("caps the name it sends, even when the input is filled around maxLength", async () => {
     // A courtesy cap, not a security boundary — `full_name` reaches the
     // database through Supabase Auth's signup metadata, not through our API,

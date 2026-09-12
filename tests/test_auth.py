@@ -383,3 +383,38 @@ class TestIssuer:
         claims = _claims()
         del claims["iss"]
         assert _call(jwt.encode(claims, SECRET, algorithm="HS256")) == SUBJECT
+
+
+class TestSigningKeyCache:
+    """A revoked signing key has to stop working, and PyJWT's second cache is
+    what decides when.
+
+    It keeps two. The JWKS *response* cache is on by default and holds the key
+    set for five minutes, which is what spares us a fetch per request. The
+    per-key cache behind `cache_keys=True` is an LRU with no expiry at all: a
+    `kid` it has already resolved never consults the key set again, so a key
+    Supabase revokes goes on verifying tokens for as long as the instance
+    stays warm — indefinitely, on a function that is kept alive by traffic.
+    The flag was set here for a year and bought nothing the response cache was
+    not already giving.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh_client(self, monkeypatch):
+        # The module builds the client once and keeps it. Clear it so the test
+        # gets a real construction, and blank DATABASE_URL so the project-ref
+        # cross-check has nothing to disagree with `PROJECT_URL` about — on a
+        # developer's machine `.env` names the real project and this would
+        # otherwise refuse before building anything.
+        monkeypatch.setattr(auth, "DATABASE_URL", "")
+        monkeypatch.setattr(auth, "_jwks_client", None)
+
+    def test_individual_keys_are_not_cached_for_ever(self):
+        # `cache_keys=True` replaces the bound method with an `lru_cache`
+        # wrapper, and that wrapper's `cache_info` is the only trace it leaves.
+        assert not hasattr(auth._get_jwks_client().get_signing_key, "cache_info")
+
+    def test_the_key_set_is_still_cached(self):
+        """The other way to get this wrong: turning the response cache off too,
+        which would fetch the JWKS over the network on every single request."""
+        assert auth._get_jwks_client().jwk_set_cache is not None
