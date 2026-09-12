@@ -9,6 +9,7 @@ import { MIN_PASSWORD_LENGTH, mapAuthError } from "../lib/authErrors";
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
 const labelCls = "mb-1 block text-sm font-medium";
+const hintCls = "mt-1 text-xs text-slate-500 dark:text-slate-400";
 const submitCls =
   "w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50";
 const linkBtnCls = "text-sm font-medium text-teal-700 hover:underline dark:text-teal-300";
@@ -94,10 +95,14 @@ export default function ResetPasswordPage() {
                 required
                 autoComplete="new-password"
                 autoFocus
+                aria-describedby="new-password-hint"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className={inputCls}
               />
+              <p id="new-password-hint" className={hintCls}>
+                {t("passwordHint", { min: MIN_PASSWORD_LENGTH })}
+              </p>
             </div>
             <div>
               <label htmlFor="confirm-password" className={labelCls}>
@@ -115,7 +120,7 @@ export default function ResetPasswordPage() {
             </div>
             {error && (
               <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                {t(error)}
+                {t(error, { min: MIN_PASSWORD_LENGTH })}
               </p>
             )}
             <button type="submit" disabled={busy} className={submitCls}>

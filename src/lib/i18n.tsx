@@ -69,7 +69,8 @@ const dict = {
     unsubscribeHome: "Go to SplitDec",
     errInvalidCredentials: "Incorrect email or password.",
     errEmailNotConfirmed: "Confirm your email first — check your inbox for the link.",
-    errWeakPassword: "Password must be at least 8 characters.",
+    errWeakPassword: "Password must be at least {min} characters.",
+    passwordHint: "At least {min} characters — four ordinary words work well.",
     errSamePassword: "The new password must be different from the old one.",
     errEmailRateLimit: "Too many emails sent — try again in a few minutes.",
     errInvalidEmail: "Enter a valid email address.",
@@ -315,7 +316,12 @@ const dict = {
     unsubscribeHome: "Przejdź do SplitDec",
     errInvalidCredentials: "Nieprawidłowy e-mail lub hasło.",
     errEmailNotConfirmed: "Najpierw potwierdź swój e-mail — poszukaj linku w skrzynce.",
-    errWeakPassword: "Hasło musi mieć co najmniej 8 znaków.",
+    // `znaków` is the genitive plural, which is what follows "co najmniej N"
+    // for every N except those ending in 2, 3 or 4 — 12, 13 and 14 excepted.
+    // MIN_PASSWORD_LENGTH is 12, so it reads correctly; a future 22 would
+    // want "znaki" and these two lines have to be re-read then.
+    errWeakPassword: "Hasło musi mieć co najmniej {min} znaków.",
+    passwordHint: "Co najmniej {min} znaków — cztery zwykłe słowa sprawdzą się dobrze.",
     errSamePassword: "Nowe hasło musi się różnić od poprzedniego.",
     errEmailRateLimit: "Wysłano zbyt wiele e-maili — spróbuj ponownie za kilka minut.",
     errInvalidEmail: "Podaj poprawny adres e-mail.",

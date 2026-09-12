@@ -1,9 +1,22 @@
 import { AuthError } from "@supabase/supabase-js";
 import type { TKey } from "./i18n";
 
-// Must match the "Minimum password length" setting in the Supabase dashboard —
-// otherwise the client accepts passwords the server rejects (or vice versa).
-export const MIN_PASSWORD_LENGTH = 8;
+/** Must match "Minimum password length" in the Supabase dashboard — otherwise
+the client accepts passwords the server rejects, or turns away ones it would
+have taken. It is the *whole* policy: "Password Requirements" there is left at
+"No required characters" on purpose.
+
+Length only, because required character classes get satisfied predictably —
+`P@ssw0rd` meets all four and is in every cracking list — which is why NIST
+SP 800-63B tells verifiers not to impose them. Twelve lowercase characters
+already out-space eight from the full printable set by a wide margin.
+
+The half of that guidance we cannot follow is the breach blocklist it assumes:
+Supabase screens against HaveIBeenPwned only on the Pro plan, and this project
+is on free. `docs/supply-chain.md` records the gap. If that ever changes and
+character classes are turned on with it, `errWeakPassword` stops being true —
+it names a length and nothing else. */
+export const MIN_PASSWORD_LENGTH = 12;
 
 // A courtesy cap on the signup name field, not a security boundary — and the
 // difference matters. `full_name` never passes through our API: it goes into
