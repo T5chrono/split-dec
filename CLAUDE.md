@@ -308,8 +308,17 @@ on `ENV=development`):
   Data API's anon/authenticated grants were revoked by migration. Do not enable RLS and do not
   weaken the FastAPI checks. Password-auth specifics: `signUp` must pass `full_name` in metadata
   (the `handle_new_user` trigger reads it); the client's `MIN_PASSWORD_LENGTH`
-  (`src/lib/authErrors.ts`) must match the dashboard's minimum length; signup/reset responses
-  stay deliberately enumeration-safe (don't distinguish existing emails). `/reset-password` is
+  (`src/lib/authErrors.ts`) must match the dashboard's minimum length, **12**, and
+  that length is the whole policy — "Password Requirements" is deliberately left at
+  "No required characters", because composition rules are satisfied predictably and
+  NIST SP 800-63B tells verifiers not to impose them. The blocklist that guidance
+  assumes in their place is Pro-only and this project is on free, which
+  `docs/supply-chain.md` records as an accepted risk; `errWeakPassword` names a
+  length and nothing else, so turning classes on later makes it untrue.
+  Signup/reset responses stay enumeration-safe, and **that no longer depends on the
+  dashboard**: an address that already has an account is caught by
+  `isEmailAlreadyRegistered` and shown the same check-your-email screen a new one
+  gets, so Supabase's "Confirm email" toggle drifting off changes nothing here. `/reset-password` is
   registered in **both** auth branches of `App.tsx` — the recovery link lands signed-out, the SDK
   exchanges the code, and the app re-renders signed-in on the same path (screen sits outside
   `Layout`). Production auth emails need Supabase custom SMTP via Resend.

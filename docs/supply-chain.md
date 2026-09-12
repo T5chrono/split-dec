@@ -54,7 +54,7 @@ quietly. Check these at each release.
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
 | Refresh-token rotation + reuse detection | both enabled — confirmed 2026-09-08 | Supabase → Authentication → Sessions |
-| Password minimum length | **8**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Confirmed 2026-09-08 | Supabase → Authentication, password settings under the Email provider |
+| Password policy | Minimum length **12**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Password Requirements **"No required characters"**, deliberately; see below. Set 2026-09-12 | Supabase → Authentication → Sign In / Providers → Email |
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
@@ -303,3 +303,28 @@ red `audit` informs rather than blocks. If one lands and cannot be fixed, the
 levers are `--omit=dev`, raising `--audit-level`, or a wrapper such as
 `audit-ci` — choose one, narrow it as far as it will go, and record it here
 with a date.
+
+### No breached-password screening
+
+**Risk.** Nothing checks a chosen password against known-leaked lists, so a
+password that appears in every credential-stuffing corpus is accepted as long
+as it is twelve characters long. `iloveyousomuch` passes.
+
+**Why accepted.** Supabase screens against HaveIBeenPwned, and the feature is
+Pro-plan and above; this organisation is on free. It is unavailable rather than
+declined — the security advisor
+(`get_advisors`, type `security`) reports it as the project's only open finding
+and will keep doing so.
+
+**Compensating controls.** A twelve-character minimum, which is the lever that
+is free. Character classes are **not** used as a substitute and would not be
+one: NIST SP 800-63B tells verifiers not to impose them, because they are
+satisfied predictably (`P@ssw0rd` meets all four), and they do not catch the
+phrase case either — `iloveyousomuch1` passes those too. Google sign-in is
+offered first on the login screen and handles the password elsewhere; as of
+2026-09-12 every account uses it and none has a password at all.
+
+**Revisit when.** The project moves to Pro — that day, enable leaked-password
+protection. Note that turning on character classes at the same time would make
+`errWeakPassword` untrue, since it names a length and nothing else
+(`src/lib/authErrors.ts` carries that warning next to the constant).

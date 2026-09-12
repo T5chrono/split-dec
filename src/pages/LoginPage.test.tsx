@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AuthError } from "@supabase/supabase-js";
 import LoginPage from "./LoginPage";
-import { MAX_FULL_NAME_LENGTH } from "../lib/authErrors";
+import { MAX_FULL_NAME_LENGTH, MIN_PASSWORD_LENGTH } from "../lib/authErrors";
 import { SUPPORT_URL } from "../lib/support";
 import { renderWithProviders } from "../test/utils";
 
@@ -25,6 +25,11 @@ vi.mock("../hooks/useAuth", () => ({
     updatePassword: vi.fn(),
   }),
 }));
+
+// Exactly the minimum, so the boundary is exercised as *accepted* on every
+// happy path, and one below it in the test that expects a refusal.
+const PASSWORD = "password1234";
+const ONE_SHORT = "password123";
 
 const authError = (code: string) =>
   Object.assign(new AuthError("nope"), { status: 400, code });
@@ -85,9 +90,9 @@ describe("LoginPage", () => {
     renderPage();
 
     await user.type(screen.getByLabelText("Email"), "ala@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(screen.getByLabelText("Password"), PASSWORD);
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(signInWithPassword).toHaveBeenCalledWith("ala@example.com", "password123");
+    expect(signInWithPassword).toHaveBeenCalledWith("ala@example.com", PASSWORD);
   });
 
   it("shows a mapped error for invalid credentials", async () => {
@@ -110,11 +115,32 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: "Sign up" }));
     await user.type(screen.getByLabelText("Full name"), "Ala Kot");
     await user.type(screen.getByLabelText("Email"), "ala@example.com");
-    await user.type(screen.getByLabelText("Password"), "short12");
+    // One character short, pinned to the constant so the fixture cannot drift
+    // away from the boundary it is here to test.
+    expect(ONE_SHORT).toHaveLength(MIN_PASSWORD_LENGTH - 1);
+    await user.type(screen.getByLabelText("Password"), ONE_SHORT);
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/at least 8 characters/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      `at least ${MIN_PASSWORD_LENGTH} characters`,
+    );
     expect(signUpWithPassword).not.toHaveBeenCalled();
+  });
+
+  it("states the length rule before anyone runs into it", () => {
+    renderPage();
+    // Sign-in has no hint — the rule only applies to a password being set.
+    expect(screen.queryByText(/at least 12 characters/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign up" }));
+    const hint = screen.getByText(`At least ${MIN_PASSWORD_LENGTH} characters`, {
+      exact: false,
+    });
+    expect(hint).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-describedby",
+      hint.id,
+    );
   });
 
   it("shows the check-your-email screen after signing up", async () => {
@@ -124,10 +150,10 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: "Sign up" }));
     await user.type(screen.getByLabelText("Full name"), "Ala Kot");
     await user.type(screen.getByLabelText("Email"), "ala@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(screen.getByLabelText("Password"), PASSWORD);
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(signUpWithPassword).toHaveBeenCalledWith("ala@example.com", "password123", "Ala Kot");
+    expect(signUpWithPassword).toHaveBeenCalledWith("ala@example.com", PASSWORD, "Ala Kot");
     expect(await screen.findByText("Check your email")).toBeInTheDocument();
     expect(screen.getByText(/ala@example\.com/)).toBeInTheDocument();
   });
@@ -145,7 +171,7 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: "Sign up" }));
     await user.type(screen.getByLabelText("Full name"), "Ala Kot");
     await user.type(screen.getByLabelText("Email"), "taken@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(screen.getByLabelText("Password"), PASSWORD);
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByText("Check your email")).toBeInTheDocument();
@@ -166,12 +192,12 @@ describe("LoginPage", () => {
 
     fireEvent.change(name, { target: { value: "A".repeat(MAX_FULL_NAME_LENGTH + 50) } });
     await user.type(screen.getByLabelText("Email"), "ala@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(screen.getByLabelText("Password"), PASSWORD);
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(signUpWithPassword).toHaveBeenCalledWith(
       "ala@example.com",
-      "password123",
+      PASSWORD,
       "A".repeat(MAX_FULL_NAME_LENGTH),
     );
   });

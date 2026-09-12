@@ -16,6 +16,10 @@ import {
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800";
 const labelCls = "mb-1 block text-sm font-medium";
+// The rule, stated before someone runs into it. Twelve characters is enough to
+// turn away a password chosen on the spot, so meeting it on the second attempt
+// is the common case unless the form says so first.
+const hintCls = "mt-1 text-xs text-slate-500 dark:text-slate-400";
 const submitCls =
   "w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50";
 const linkBtnCls =
@@ -115,7 +119,7 @@ export default function LoginPage() {
 
   const errorAlert = error && (
     <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-      {t(error)}
+      {t(error, { min: MIN_PASSWORD_LENGTH })}
     </p>
   );
 
@@ -273,10 +277,14 @@ export default function LoginPage() {
                     type="password"
                     required
                     autoComplete="new-password"
+                    aria-describedby="signup-password-hint"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className={inputCls}
                   />
+                  <p id="signup-password-hint" className={hintCls}>
+                    {t("passwordHint", { min: MIN_PASSWORD_LENGTH })}
+                  </p>
                 </div>
                 {errorAlert}
                 <button type="submit" disabled={busy} className={submitCls}>
