@@ -55,6 +55,11 @@ quietly. Check these at each release.
 | Database grants | `AUDIT_DATABASE_URL=<production> pytest tests/test_grants_pg.py` | run per release |
 | Refresh-token rotation + reuse detection | both enabled — confirmed 2026-09-08 | Supabase → Authentication → Sessions |
 | Password policy | Minimum length **12**, matching `MIN_PASSWORD_LENGTH` — must not be *lowered* to meet the client. Password Requirements **"No required characters"**, deliberately; see below. Set 2026-09-12 | Supabase → Authentication → Sign In / Providers → Email |
+| Anonymous sign-ins | **disabled**. The database would refuse one anyway — an anonymous user has no email and `public.users.email` is `NOT NULL` — but that is an accident of the schema, not a decision. Confirmed 2026-09-12 | Supabase → Authentication → Sign In / Providers |
+| Auth redirect allow-list | Site URL `https://split-dec.app`. Six redirect URLs, **no host wildcards**: the apex and `www.` hosts with and without `/reset-password`, `https://split-dec.vercel.app`, and `http://localhost:5173/**`. A seventh entry, or any `*` in a hostname, is drift. Confirmed 2026-09-12 | Supabase → Authentication → URL Configuration |
+| CAPTCHA protection | **off, deliberately** — enabling it rejects every auth call until the client sends a token, and the widget is a third-party script on the origin holding the Supabase session. Confirmed 2026-09-12 | Supabase → Authentication → Attack Protection |
+| Auth rate limits | Supabase defaults: 30 emails/h (project-wide, auth mail only), 150 token refreshes and 30 token verifications and 30 sign-ups+sign-ins per 5 min per IP. **IP address forwarding off** — on, a caller holding a secret key chooses the IP it is limited by. Confirmed 2026-09-12 | Supabase → Authentication → Rate Limits |
+| Access token expiry | **900s**, against Supabase's own recommendation of 3600. Stateless verification means this is the revocation window; see the accepted risk below. Confirmed 2026-09-12 | Supabase → Authentication → Sessions |
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
@@ -328,3 +333,82 @@ offered first on the login screen and handles the password elsewhere; as of
 protection. Note that turning on character classes at the same time would make
 `errWeakPassword` untrue, since it names a length and nothing else
 (`src/lib/authErrors.ts` carries that warning next to the constant).
+
+### No account lockout on failed sign-ins
+
+**Risk.** Nothing locks an account after repeated wrong passwords. Guessing is
+limited only by Supabase's per-IP throttle — 30 sign-in attempts per five
+minutes — which an attacker spread across addresses walks straight past.
+
+**Why accepted.** Supabase Auth has no lockout at any plan; it is unavailable
+rather than declined. Building one in FastAPI would not help either: sign-in
+never touches this API, it goes from the browser to Supabase directly.
+
+**Compensating controls.** The twelve-character minimum, which is what actually
+makes guessing impractical. Google sign-in, which has Google's own abuse
+handling behind it, is offered first and is what every account currently uses.
+
+**Revisit when.** Supabase ships lockout, or a sign-in path appears that this
+API can see.
+
+### No MFA
+
+**Risk.** A password alone is enough to sign in. There is no second factor, and
+no step-up before destructive actions like deleting an account.
+
+**Why accepted.** A deliberate product decision, not an oversight. MFA that is
+worth having needs enrolment, recovery codes and a story for the person who
+loses their phone — and getting that story wrong locks people out of their own
+ledger permanently, which is a worse outcome than the one it prevents for an
+app that holds who-owes-whom for a holiday. Supabase supports TOTP if that
+changes.
+
+**Compensating controls.** Google sign-in carries whatever second factor the
+account already has, and covers every account today.
+
+**Revisit when.** The app holds something worth more than a shared expense
+history, or a user asks for it.
+
+### Session tokens are held in `localStorage`
+
+**Risk.** `persistSession: true` (`src/lib/supabase.ts`) keeps the access and
+refresh tokens where any script running on the origin can read them. Script
+injection therefore means account takeover, not just a defaced page.
+
+**Why accepted.** It is the standard trade for a single-page app with no
+server-side session: the alternative — a `HttpOnly` cookie — needs a backend
+that participates in the auth handshake, which would mean moving sign-in out of
+supabase-js and into FastAPI. That is a large change to the one part of this
+system that is currently somebody else's problem, and it buys nothing unless
+script injection is possible in the first place.
+
+**Compensating controls.** The whole point of the enforced CSP: `default-src
+'self'`, a hash-pinned `script-src` with no `unsafe-inline`, and `connect-src`
+limited to this origin plus Supabase and Sentry — so an injected script has
+nowhere to send what it reads. No user content is ever rendered as markup.
+Refresh-token rotation with reuse detection limits how long a stolen refresh
+token stays usable.
+
+**Revisit when.** The CSP has to be loosened for any reason. That is the
+assumption this entry rests on, so weakening it moves this risk from accepted
+to open.
+
+### A stolen access token stays valid until it expires
+
+**Risk.** `api/_src/auth.py` verifies tokens by signature alone and never asks
+Supabase whether the session still exists. Signing out revokes the session at
+Supabase but cannot reach a token already issued, so a leaked one keeps working
+until `exp`.
+
+**Why accepted.** Checking revocation would mean a call to Supabase, or a
+session table read, on every single API request — the cost of the design that
+makes this function cheap and fast. The exposure is bounded by the expiry, and
+that is a dial rather than a fix.
+
+**Compensating controls.** Access token expiry set to **900s** rather than the
+recommended 3600. `Cache-Control: no-store` on every API response, so a token
+is not sitting in a disk cache. Sentry is configured never to capture request
+bodies or headers beyond an allow-list, so tokens do not leak into error
+reports.
+
+**Revisit when.** The expiry is raised, or a token is found in a log.
