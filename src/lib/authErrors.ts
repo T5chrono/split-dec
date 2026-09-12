@@ -65,6 +65,17 @@ export function mapAuthError(err: unknown): TKey {
       return "errInvalidCredentials";
     case "email_not_confirmed":
       return "errEmailNotConfirmed";
+    // "Secure password change" is on in the dashboard, so Supabase refuses a
+    // password change from a session older than 24 hours unless the request
+    // carries an emailed one-time code. We never send one — there is no
+    // in-app change-password screen — so the only way to reach this is a
+    // signed-in visitor typing /reset-password, which is precisely the case
+    // the setting exists to refuse: whoever holds a stolen session should not
+    // be able to lock the owner out of it. Sessions created by a recovery
+    // link are exempt on Supabase's side, so the ordinary forgot-password
+    // flow never lands here.
+    case "reauthentication_needed":
+      return "errReauthNeeded";
     case "weak_password":
       return "errWeakPassword";
     case "same_password":

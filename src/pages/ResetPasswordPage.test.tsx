@@ -119,6 +119,29 @@ describe("ResetPasswordPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/must be different/i);
   });
 
+  it("explains a refusal from an ordinary signed-in session", async () => {
+    // "Secure password change" is on in Supabase, so a session older than 24
+    // hours is refused unless it carries an emailed code. That is not the
+    // recovery flow — a recovery session is exempt on Supabase's side — it is
+    // somebody signed in normally who navigated here, which is the case the
+    // setting exists to stop. Without this mapping they get "Something went
+    // wrong", which reads as our bug rather than as a deliberate refusal.
+    const user = userEvent.setup();
+    updatePassword.mockRejectedValueOnce(
+      Object.assign(new AuthError("reauth"), {
+        status: 400,
+        code: "reauthentication_needed",
+      }),
+    );
+    renderPage();
+
+    await user.type(screen.getByLabelText("New password"), PASSWORD);
+    await user.type(screen.getByLabelText("Confirm password"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Set new password" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/reset email/i);
+  });
+
   it("offers a sign-out escape for unwanted recovery sessions", async () => {
     const user = userEvent.setup();
     renderPage();
