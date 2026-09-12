@@ -34,6 +34,17 @@ export function capFullName(name: string): string {
     : points.slice(0, MAX_FULL_NAME_LENGTH).join("");
 }
 
+/** Whether `err` says the address already has an account.
+
+Signup is the only place these codes appear, and the only safe answer to them
+is the one a brand-new address gets — see the call site in `LoginPage`. They
+are deliberately absent from `mapAuthError` below: there is no message to map
+them to, because saying anything at all is the bug. */
+export function isEmailAlreadyRegistered(err: unknown): boolean {
+  const code = err instanceof AuthError ? err.code : undefined;
+  return code === "user_already_exists" || code === "email_exists";
+}
+
 export function mapAuthError(err: unknown): TKey {
   const code = err instanceof AuthError ? err.code : undefined;
   switch (code) {
@@ -41,10 +52,6 @@ export function mapAuthError(err: unknown): TKey {
       return "errInvalidCredentials";
     case "email_not_confirmed":
       return "errEmailNotConfirmed";
-    // Only reachable if enumeration protection (Confirm email) is off.
-    case "user_already_exists":
-    case "email_exists":
-      return "errEmailExists";
     case "weak_password":
       return "errWeakPassword";
     case "same_password":

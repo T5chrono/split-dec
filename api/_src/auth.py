@@ -44,7 +44,8 @@ _UNAVAILABLE = "Authentication is unavailable"
 SYMMETRIC_ALGORITHMS = frozenset({"HS256"}) if ALLOW_LEGACY_HS256 else frozenset()
 ASYMMETRIC_ALGORITHMS = frozenset({"ES256", "RS256"})  # Supabase signing keys, via JWKS
 
-# Cached at module scope so warm invocations reuse fetched keys.
+# Cached at module scope so a warm invocation reuses the client, and through
+# it the JWKS response PyJWT holds for five minutes.
 _jwks_client: jwt.PyJWKClient | None = None
 
 
@@ -59,9 +60,15 @@ def _get_jwks_client() -> jwt.PyJWKClient:
         if problem:
             logger.error("Refusing to verify tokens: %s", problem)
             raise HTTPException(status_code=500, detail=_UNAVAILABLE)
-        _jwks_client = jwt.PyJWKClient(
-            f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True
-        )
+        # `cache_keys=True` is deliberately *not* passed. PyJWT keeps two
+        # caches: the JWKS response, on by default and good for five minutes,
+        # and behind that flag an LRU of individual signing keys with no
+        # expiry at all. With the flag on, a `kid` it has already resolved
+        # never consults the key set again, so a key Supabase revokes goes on
+        # verifying tokens for as long as this instance stays warm. The
+        # response cache is what spares us a fetch per request; the flag
+        # bought nothing on top of it and bounded nothing.
+        _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
     return _jwks_client
 
 
