@@ -186,6 +186,24 @@ describe("AuthProvider — email/password methods", () => {
     expect(auth.passwordRecovery).toBe(false);
   });
 
+  it("a failed sign-out still empties the cache, and is reported", async () => {
+    // The SDK clears the local session on every path, including this one — the
+    // test below pins that. What fails here is the revocation at Supabase, and
+    // the cache is ours: today it empties only as a side effect of the
+    // SIGNED_OUT event that `_removeSession` emits, so the one thing worth
+    // doing without the SDK's cooperation is emptying it ourselves.
+    const failure = { message: "network" };
+    vi.mocked(supabase.auth.signOut).mockResolvedValueOnce({ error: failure } as never);
+    const queryClient = renderAuth();
+    await waitFor(() => expect(authCallback).not.toBeNull());
+    queryClient.setQueryData(["groups"], ["a group"]);
+
+    await act(() => auth.signOut());
+
+    expect(reportError).toHaveBeenCalledWith(failure);
+    expect(queryClient.getQueryData(["groups"])).toBeUndefined();
+  });
+
   it("updatePassword turns every other session out", async () => {
     // Supabase leaves them alive — its `UpdateUser` never touches the session
     // table — so someone changing their password because they think another

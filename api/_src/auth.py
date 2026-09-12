@@ -149,6 +149,22 @@ def verify_jwt(
         raise
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # An anonymous sign-in produces a token with the same `aud` and `role` as a
+    # real one — "authenticated" in both — so nothing above this line separates
+    # the two. Three things currently stop such a token existing: the provider
+    # is switched off in the dashboard, every route needs a `public.users` row,
+    # and an anonymous account cannot get one because it has no email address
+    # and that column is NOT NULL, so the mirroring trigger rolls the sign-up
+    # back. All three are somewhere else, and the last is an accident of the
+    # schema rather than a decision — make `email` nullable one day and the
+    # door opens with nothing here to notice. `is_anonymous` travels in the
+    # token, which is the one thing this function is actually looking at.
+    #
+    # Absent or false both pass: only the literal claim is refused, so ordinary
+    # tokens — including any minted before Supabase added the claim — are
+    # unaffected.
+    if payload.get("is_anonymous"):
+        raise HTTPException(status_code=401, detail="Anonymous tokens are not accepted")
     try:
         return uuid.UUID(payload["sub"])
     except (KeyError, ValueError):
