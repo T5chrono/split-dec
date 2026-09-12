@@ -298,6 +298,13 @@ on `ENV=development`):
   token with no `iss` — which is why `auth.py` sets both. The issuer string was
   read off the project's own `/auth/v1/.well-known/openid-configuration`, not
   guessed; a wrong value there is a 401 for every user at once.
+  **A token claiming `is_anonymous` is refused**, absent and `false` both passing.
+  An anonymous sign-in carries the same `aud` and `role` as a real one, so nothing
+  else in `verify_jwt` separates them; the three things that actually stop such an
+  account existing — the provider being off, every route needing a `public.users`
+  row, and the mirroring trigger being unable to write one without an email
+  address — all live elsewhere, and the last is a `NOT NULL` column rather than a
+  decision.
   Unauthenticated failures answer generically ("Authentication is unavailable") and put
   the specifics in the log — an anonymous 500 naming an environment variable hands a
   stranger the deployment's shape for nothing.

@@ -89,7 +89,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      // Reaching here does *not* mean the session survived: the SDK removes it
+      // locally on every path — 401/403/404 are swallowed on purpose, and any
+      // other error still clears the session before returning it. What failed
+      // is the revocation at Supabase, so the refresh token stays usable
+      // wherever else it is held. Nothing else in the app would ever say so.
+      reportError(error);
+      // The cache is ours rather than the SDK's, and it only empties because
+      // `_removeSession` emits SIGNED_OUT. That is one library version away
+      // from not being true, and the failure mode — the next person on this
+      // browser rendering from the last person's cached groups and balances —
+      // is the one thing here we can close without asking the SDK anything.
+      // `tests/../useAuth.test.tsx` pins the SDK half; this is the half that
+      // does not depend on it.
+      queryClient.clear();
+      lastUserId.current = null;
+    }
   };
 
   const signUpWithPassword = async (

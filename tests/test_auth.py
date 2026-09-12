@@ -418,3 +418,34 @@ class TestSigningKeyCache:
         """The other way to get this wrong: turning the response cache off too,
         which would fetch the JWKS over the network on every single request."""
         assert auth._get_jwks_client().jwk_set_cache is not None
+
+
+class TestAnonymousTokens:
+    """An anonymous sign-in is authenticated, just not by anybody.
+
+    Supabase gives such a token the same `aud` and `role` as a real one, so
+    every check above this point passes it. The app has three other reasons an
+    anonymous account cannot exist here — the provider is off, every route
+    needs a `public.users` row, and the mirroring trigger cannot write one
+    without an email address — but all three live somewhere else, and the last
+    is a `NOT NULL` column rather than a decision. This is the check that sits
+    in the same place as the claim.
+    """
+
+    def test_an_anonymous_token_is_refused(self):
+        assert _status(_hs256(is_anonymous=True)) == 401
+
+    def test_the_same_on_the_path_the_app_actually_uses(self, jwks, signing_key):
+        private, _ = signing_key
+        token = jwt.encode(_claims(is_anonymous=True), private, algorithm="ES256")
+        assert _status(token) == 401
+
+    def test_an_ordinary_token_says_so_and_is_accepted(self):
+        assert _call(_hs256(is_anonymous=False)) == SUBJECT
+
+    def test_a_token_without_the_claim_is_accepted(self):
+        """Only the literal claim is refused. A token that predates Supabase
+        adding it, or any other issuer's, must not be turned away for silence."""
+        claims = _claims()
+        assert "is_anonymous" not in claims
+        assert _call(jwt.encode(claims, SECRET, algorithm="HS256")) == SUBJECT
