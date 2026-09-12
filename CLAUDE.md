@@ -298,6 +298,14 @@ on `ENV=development`):
   token with no `iss` — which is why `auth.py` sets both. The issuer string was
   read off the project's own `/auth/v1/.well-known/openid-configuration`, not
   guessed; a wrong value there is a 401 for every user at once.
+  **Signing keys are not cached individually.** PyJWT keeps two caches: the JWKS
+  response, on by default and good for five minutes, and behind `cache_keys=True`
+  an LRU of resolved keys with no expiry at all. That flag was set here for a year
+  and bought nothing the response cache was not already giving, while a key
+  Supabase revoked went on verifying tokens for as long as the instance stayed
+  warm. Do not pass it again; `tests/test_auth.py::TestSigningKeyCache` pins both
+  halves, since switching the response cache off instead would fetch the JWKS on
+  every request.
   **A token claiming `is_anonymous` is refused**, absent and `false` both passing.
   An anonymous sign-in carries the same `aud` and `role` as a real one, so nothing
   else in `verify_jwt` separates them; the three things that actually stop such an
@@ -332,7 +340,16 @@ on `ENV=development`):
   Signup/reset responses stay enumeration-safe, and **that no longer depends on the
   dashboard**: an address that already has an account is caught by
   `isEmailAlreadyRegistered` and shown the same check-your-email screen a new one
-  gets, so Supabase's "Confirm email" toggle drifting off changes nothing here. `/reset-password` is
+  gets, so Supabase's "Confirm email" toggle drifting off changes nothing here.
+  **`/reset-password` can legitimately refuse.** "Secure password change" is on in
+  the dashboard, so Supabase turns down a password change from a session older than
+  24 hours unless the request carries an emailed one-time code, which we never
+  send — that is the control against somebody who has taken a live session, since a
+  check in our own form would be skipped by anyone calling supabase-js directly.
+  Recovery sessions are exempt inside Supabase (`if !session.IsRecovery()`), so
+  forgot-password is untouched, and `errReauthNeeded` says where a new password
+  actually comes from. `docs/supply-chain.md` holds the setting itself.
+  `/reset-password` is
   registered in **both** auth branches of `App.tsx` — the recovery link lands signed-out, the SDK
   exchanges the code, and the app re-renders signed-in on the same path (screen sits outside
   `Layout`). Production auth emails need Supabase custom SMTP via Resend.
