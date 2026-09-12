@@ -9,6 +9,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { reportError } from "../lib/monitoring";
 
 interface AuthState {
   session: Session | null;
@@ -29,7 +30,8 @@ interface AuthState {
   signInWithPassword: (email: string, password: string) => Promise<void>;
   /** Throws AuthError (over_email_send_rate_limit, …). */
   requestPasswordReset: (email: string) => Promise<void>;
-  /** Throws AuthError (weak_password, same_password, …). */
+  /** Throws AuthError (weak_password, same_password, …). On success it also
+   *  revokes the user's *other* sessions — see the implementation. */
   updatePassword: (newPassword: string) => Promise<void>;
 }
 
@@ -124,6 +126,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updatePassword = async (newPassword: string) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
+    // Changing a password is what somebody does when they believe another
+    // person is in their account, and Supabase does not act on that belief:
+    // `UpdateUser` writes the new password and never touches the session
+    // table, so the other party keeps a refresh token that goes on minting
+    // access tokens indefinitely. Without this call the one gesture people
+    // reach for in that moment is the one that does nothing.
+    //
+    // `scope: "others"` revokes every session except this one — the SDK skips
+    // its own `_removeSession` for that scope — so whoever just set the
+    // password stays signed in here while everyone else is turned out. That
+    // includes their own other devices, which is the intent rather than a
+    // side effect.
+    //
+    // Its failure is reported, never thrown. The password has already changed
+    // by this point, so throwing would tell the caller it had not; a
+    // revocation lost to a flaky network leaves the other sessions exactly
+    // where they were a second earlier, which is bad but not worse.
+    const { error: revokeError } = await supabase.auth.signOut({ scope: "others" });
+    if (revokeError) reportError(revokeError);
     setPasswordRecovery(false);
   };
 
