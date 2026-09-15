@@ -84,6 +84,22 @@ Every workflow declares `permissions:` and passes `persist-credentials: false` t
 checkout, and every action is pinned to a commit SHA; `claude.yml` additionally runs
 only for the repository owner, because a public repo's issue body is otherwise an
 unreviewed prompt handed to an agent holding a write-scoped token.
+
+**Both Python locks are hash-pinned** (`--generate-hashes`, SHA-256 per artifact).
+A version pin is only as good as the index serving it; a hash names the file. pip
+switches hash checking on the moment it sees one and then refuses any requirement
+without one, and uv verifies a hash it finds without being asked — so CI and the
+Vercel build both enforce these with no flag set anywhere. Do **not** add
+`UV_REQUIRE_HASHES` to `vercel.json` to make that explicit: it is an environment
+variable, so it also governs Vercel's own hashless `vercel-runtime` install and the
+build dies before it reads `requirements.txt` (tried 2026-09-15; the preview failed
+with `none were provided for: vercel-runtime==0.23.0`, and
+`tests/test_vercel_config.py` now asserts its absence). The `locks` job passes
+`--generate-hashes` too, or its recompiled file has no hashes and the diff can never
+match. `tests/test_requirements_locks.py` holds the other half — every requirement
+carries a hash — from inside the *required* `backend` check, because hashes are
+all-or-nothing: losing them does not fail an install, it silently stops checking.
+
 The develop → PR → master sequence is now enforced by the ruleset rather than by convention
 alone — but treat it as the gate regardless of what any host or tool appears to allow.
 
@@ -123,6 +139,12 @@ on `ENV=development`):
   which arrives as a package — all eight `@sentry/cli-*` optional dependencies
   are in the lockfile. The download is its fallback for `--no-optional`
   installs, not its normal path.
+  **`.npmrc` carries `ignore-scripts=true` for the third machine.** The two
+  flags above cover Vercel and CI — the machines that build what users are
+  served — and covered nothing else, while the machine left out is the one
+  holding the deploy credentials. `npm run build` / `npm test` are
+  unaffected; it suppresses the `pre`/`post` hooks around them, of which
+  this package has none.
   **The script-level CSP is enforced** (`default-src 'self'`, hash-pinned
   `script-src`, `connect-src` limited to self + the Supabase project + the
   Sentry ingest host). It shipped staged on `Content-Security-Policy-Report-Only`
@@ -196,6 +218,19 @@ on `ENV=development`):
   therefore invisible to CI — inspect it with `vercel firewall rules list`,
   and if the in-function numbers change, change it too. Same
   "the dashboard is what actually runs" trap as the auth email templates.
+  **A field whose *type* is wrong is dropped, not stringified**
+  (`reports.text`). Every field arrives in JSON a stranger wrote, so the
+  type is as unchecked as the content: `{"csp-report": {"blocked-uri":
+  {"a": "b"}}}` is valid JSON, and it used to raise — a dict passes
+  `"://" not in value` (a key lookup, finding nothing) and then dies in
+  `re.fullmatch` inside `keyword`; a number dies at the `in` itself, and a
+  number in `document-uri` inside `urlsplit`. Three call sites, one cause,
+  and a 500 on the one route with no token in front of it — which the token
+  bucket cannot clip, since it meters log lines rather than exceptions, and
+  which Chrome reads as a failed delivery and retries. Dropping beats
+  stringifying: a `repr` in the log line is what `log_value` exists to
+  prevent.
+
   Pointing the reports at a third-party collector would be a new processor,
   and a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump.
   A host-scoped `X-Robots-Tag: noindex` keeps `split-dec.vercel.app` from competing

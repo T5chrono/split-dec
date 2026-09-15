@@ -50,6 +50,10 @@ quietly. Check these at each release.
 | Private vulnerability reporting | enabled — `SECURITY.md` points at it | GitHub → Settings → Code security |
 | Firewall rule "CSP report flood limit" | `path equals /api/csp-report`, 100 req/60s per IP, deny 5m | Vercel project — inspect with `vercel firewall rules list` |
 | Firewall rule for `/api/unsubscribe` | **none, and that is a gap** — the route has only its in-process 30/min bucket, which is a per-instance floor on a function that runs several. Unlike the CSP route it writes a row, though a forged token is refused before the database is touched and the primary key makes a replay idempotent. Add one if it ever sees traffic | Vercel project |
+| Deploy hooks on the Vercel project | **none** — each one is an unauthenticated URL that builds and deploys production for whoever holds it, with no commit behind it. Confirmed 2026-09-15 (`vercel deploy-hooks ls`) | Vercel project → Settings → Git |
+| Vercel access tokens | **none** — a token is a `vercel --prod` outside git entirely. The CLI login is a session credential and does not appear in this list, which is the better arrangement. Confirmed 2026-09-15 (`vercel api /v5/user/tokens`) | Vercel → Account Settings → Tokens |
+| Vercel team members | **one**, `t5chrono`, OWNER. Confirmed 2026-09-15 (`vercel api /v2/teams/<id>/members`) | Vercel → Team Settings → Members |
+| Deployment protection | SSO on, `all_except_custom_domains` — previews need a login, production does not. Confirmed 2026-09-15 | Vercel project → Settings → Deployment Protection |
 | Inbound mail aliases | `privacy@` and `support@` both forwarding, each as an **explicit alias** — a catch-all alone was observed not to deliver | ImprovMX (the domain's MX records point there) |
 | `SENTRY_AUTH_TOKEN` | project-scoped, production only | Vercel env vars |
 | Auth email templates | match `docs/auth-email-templates.md` | Supabase dashboard |
@@ -208,6 +212,13 @@ cannot be quietly rewritten.
 
 **Revisit when.** As above.
 
+**Raised again** by an external review on 2026-09-15, which proposed a
+`pull_request_target` policy workflow validating critical workflow files
+against SHA-256 digests held outside the repo. Declined: it buys tamper
+evidence, not a second reviewer — the review says so itself — and it is a
+standing piece of machinery to maintain for a gap that closes on its own the
+day a second committer joins.
+
 ### No SBOM and no build provenance attestation
 
 **Risk.** Nothing ties the bytes served in production to a reviewed commit,
@@ -221,6 +232,37 @@ lockfile already answer for a two-ecosystem, single-maintainer app.
 
 **Revisit when.** The deployment model changes to promote a built artifact, or
 someone asks for an SBOM.
+
+### Production deploys are bound to a green commit by circumstance, not by a gate
+
+**Risk.** Vercel deploys whatever reaches `master` and asks nothing about its
+checks. The binding is a property of the git path — `master` is protected, needs
+a PR, needs `backend`/`frontend`/`claude-review` green, and has no bypass actor,
+the maintainer included — so a commit that arrives that way has passed. Nothing
+checks a deploy that arrives another way: a deploy hook URL, a CLI token, or a
+`promote`/`rollback`, which re-points production at an older build with no commit
+behind it at all.
+
+**Why accepted.** The ways around the git path do not currently exist, which is a
+weaker statement than a gate but a checkable one. Verified 2026-09-15:
+
+| Checked | Result | How |
+| --- | --- | --- |
+| Deploy hooks | none | `vercel deploy-hooks ls` |
+| Access tokens | none | `vercel api /v5/user/tokens` |
+| Team members | one, OWNER | `vercel api /v2/teams/<id>/members` |
+| Production deploys | 7 of 7 on `master`, required checks green | `git merge-base --is-ancestor`, plus the commit's check-runs |
+| Deploy provenance | every entry names a repo, commit and branch; no CLI deploy, no `promote`, no `rollback` | `vercel activity` |
+
+Two notes for whoever re-runs that. Git Bash rewrites a leading-slash argument
+into a Windows path, so the `vercel api` calls need `MSYS_NO_PATHCONV=1`. And a
+`master` commit carries **two** required checks, not three: `claude-review` runs
+on `pull_request`, so it gates the PR head before the merge and never appears on
+the merge commit that triggers the deploy.
+
+**Revisit when.** A deploy hook or access token is created, a second member joins
+the Vercel team, or the deployment model changes. Re-run the table above at each
+release — it is five commands and it is the only thing standing in for a gate.
 
 ### `TEST_DATABASE_URL` is available to `pull_request` runs
 
@@ -265,6 +307,11 @@ would mean putting the OAuth token within reach of a branch nobody here wrote.
 
 **Compensating controls.** The `audit` and `locks` jobs run on those PRs, and
 are exactly the review a dependency bump needs.
+
+**Raised again** by the same review on 2026-09-15, proposing a blocking
+runtime audit gate. Declined for the reason above: a required check that can
+be held red by an unfixable advisory in somebody else's package trains the one
+person who reads these checks to stop reading them.
 
 ### Production configuration lives in dashboards
 
