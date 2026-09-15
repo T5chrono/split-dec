@@ -525,3 +525,105 @@ class TestPreflight:
         )
         assert r.status_code == 415
         assert r.headers["access-control-allow-origin"] == "*"
+
+
+class TestFieldsThatAreNotStrings:
+    """A field whose *type* is wrong, which is as unchecked as its content.
+
+    `{"csp-report": {"blocked-uri": {}}}` is valid JSON, and before `text()`
+    every one of these raised out of the folding helpers: a 500 on the one
+    route a stranger can reach without a token, and one the token bucket
+    cannot clip, because it meters log lines rather than exceptions. Chrome
+    treats a 500 as a failed delivery and puts the report back on its retry
+    queue, so it also came back.
+    """
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("blocked-uri", {"nested": "object"}),
+            ("blocked-uri", 42),
+            ("blocked-uri", ["https://evil.example/"]),
+            ("effective-directive", ["script-src"]),
+            ("violated-directive", 7),
+            ("disposition", {"enforce": True}),
+            ("document-uri", 123),
+            ("document-uri", None),
+        ],
+    )
+    async def test_report_uri_survives_any_field_type(self, client, field, value):
+        r = await client.post("/api/csp-report", json=_report_uri_body(**{field: value}))
+        assert r.status_code == 204
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("blockedURL", 5),
+            ("blockedURL", {"nested": "object"}),
+            ("effectiveDirective", ["script-src"]),
+            ("disposition", 0),
+            ("documentURL", 123),
+        ],
+    )
+    async def test_report_to_survives_any_field_type(self, client, field, value):
+        body = _report_to_body(**{field: value})
+        body[0]["url"] = "https://split-dec.app/groups"
+        r = await client.post("/api/csp-report", json=body)
+        assert r.status_code == 204
+
+    async def test_a_malformed_field_is_dropped_and_the_rest_is_kept(self, client, logged):
+        """Dropped, not stringified: a `repr` in the log line is exactly what
+        `log_value` exists to prevent. The report is still worth having — the
+        directive that fired is the part that says the policy is wrong."""
+        r = await client.post(
+            "/api/csp-report", json=_report_uri_body(**{"blocked-uri": {"a": "b"}})
+        )
+        assert r.status_code == 204
+        assert "blocked=-" in logged.text
+        assert "directive=script-src-elem" in logged.text
+        assert "a" not in logged.text.split("blocked=")[1].split()[0]
+
+    async def test_a_report_with_no_usable_document_url_is_dropped(self, client, logged):
+        """Same answer a string we do not serve gets: nothing to attribute it
+        to, so there is nothing to log."""
+        r = await client.post("/api/csp-report", json=_report_uri_body(**{"document-uri": 123}))
+        assert r.status_code == 204
+        assert logged.text == ""
+
+    async def test_the_envelope_url_still_carries_a_report_whose_body_is_malformed(
+        self, client, logged
+    ):
+        """`documentURL` and the envelope's own `url` are alternatives, and a
+        non-string first choice falls through to the second exactly as an
+        absent one does."""
+        body = _report_to_body(**{"documentURL": 123})
+        body[0]["url"] = GROUP_URL
+        r = await client.post("/api/csp-report", json=body)
+        assert r.status_code == 204
+        assert "route=/groups/[groupId]" in logged.text
+
+    def test_normalize_keeps_every_value_a_string(self):
+        """The contract the log line depends on: five fields, each a string or
+        `None`, whatever the body held."""
+        [report] = reports.normalize(
+            {
+                "csp-report": {
+                    "document-uri": "https://split-dec.app/",
+                    "blocked-uri": {"a": 1},
+                    "effective-directive": ["script-src"],
+                    "disposition": 0,
+                }
+            }
+        )
+        assert report == {
+            "directive": "-",
+            "blocked": "-",
+            "route": "/",
+            "origin": "split-dec.app",
+            "disposition": "report",
+        }
+
+    def test_a_non_dict_envelope_body_is_still_skipped(self):
+        assert reports.normalize([{"type": "csp-violation", "body": "not a dict"}]) == []
+        assert reports.normalize([{"type": "csp-violation", "body": None}]) == []
+        assert reports.normalize(["not an envelope", 5, None]) == []

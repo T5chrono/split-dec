@@ -23,7 +23,7 @@ already derive from the code stays in this file.
 | --- | --- |
 | Full transitive pins, both ecosystems | `package-lock.json` (v3, `sha512-` integrity on every entry, every resolve on registry.npmjs.org), `requirements.txt` / `requirements-dev.txt` (`uv pip compile`, `==` on everything) |
 | Reproducible production install | `vercel.json` → `npm ci --ignore-scripts`, asserted by `tests/test_vercel_config.py` |
-| No package install scripts run in CI or on Vercel | `--ignore-scripts` on both. Only two packages in the tree declare one: `@sentry/cli` (dev; its postinstall exits immediately because all eight `@sentry/cli-*` platform packages are in the lockfile) and `fsevents` (dev, darwin-only) |
+| No package install scripts run anywhere | `--ignore-scripts` in `vercel.json` and in the `frontend`/`audit` CI jobs; `.npmrc` → `ignore-scripts=true` covers a maintainer's own `npm install`, which the flags did not, on the machine holding the deploy credentials. `npm run build`/`test` are unaffected. Only two packages in the tree declare one: `@sentry/cli` (dev; its postinstall exits immediately because all eight `@sentry/cli-*` platform packages are in the lockfile) and `fsevents` (dev, darwin-only) |
 | Advisory scanning | `ci.yml` → `audit` job: `npm audit --audit-level=high`, and `pypa/gh-action-pip-audit` over both Python locks |
 | Production build path covered | `ci.yml` → `frontend` job builds a second time with a dummy `SENTRY_AUTH_TOKEN` and fails if any `.map` survives into `dist/` — both the upload failure and a surviving map are silent by design |
 | Lock freshness | `ci.yml` → `locks` job: constrained recompile of each `.in`, diffed against its `.txt` |
