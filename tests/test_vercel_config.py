@@ -358,3 +358,22 @@ def test_install_is_reproducible_and_runs_no_package_scripts():
     install = CONFIG["installCommand"]
     assert install.startswith("npm ci"), install
     assert "--ignore-scripts" in install, install
+
+
+def test_the_python_build_requires_hashed_artifacts():
+    """`UV_REQUIRE_HASHES` is what carries hash checking onto Vercel.
+
+    pip turns hash checking on by itself the moment a requirements file
+    contains one hash, and then refuses every requirement that lacks one. The
+    Vercel Python build does not use pip — it uses uv, which has to be told,
+    and the env var is the only place it can be told from this repo.
+
+    Without it the locks would still *carry* hashes and production would still
+    install whatever the index served, which is the failure worth guarding:
+    it looks exactly like success.
+    """
+    env = CONFIG["build"]["env"]
+    assert env.get("UV_REQUIRE_HASHES") == "1", env
+    # Not a replacement for the other one: copy mode is what makes the install
+    # work on Vercel's filesystem at all.
+    assert env.get("UV_LINK_MODE") == "copy", env
