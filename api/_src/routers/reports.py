@@ -171,6 +171,30 @@ _last_refill = time.monotonic()
 _suppressing = False
 
 
+def text(value: object) -> str:
+    """One field of a posted body, or nothing.
+
+    Every field below is read out of JSON a stranger wrote, so a field's
+    *type* is as unchecked as its content, and every helper under here assumes
+    a string. `{"csp-report": {"blocked-uri": {"a": "b"}}}` is valid JSON: the
+    dict passes `"://" not in value` (that is a *key* lookup, and it finds
+    nothing) and then raises out of `re.fullmatch` inside `keyword`. A number
+    in the same field raises one step earlier, at the `in` itself, and a number
+    in `document-uri` raises inside `urlsplit`. Three call sites, one cause.
+    That was a 500 on the one route reachable without a token — and one the
+    token bucket does not cover, because it meters log lines rather than
+    exceptions, so an unauthenticated caller could raise as fast as the
+    platform would serve them.
+
+    A non-string is treated as an absent field rather than stringified: the
+    field is dropped, the rest of the report survives, and the sender still
+    gets the 204 it cannot read anyway. Stringifying instead would put
+    attacker-shaped `repr` output into a log line, which is the thing
+    `log_value` exists to make impossible.
+    """
+    return value if isinstance(value, str) else ""
+
+
 def keyword(value: str) -> str:
     return value if _KEYWORD.fullmatch(value or "") else "-"
 
@@ -298,16 +322,17 @@ def normalize(payload: object) -> list[dict[str, str | None]]:
     """
     if isinstance(payload, dict) and isinstance(payload.get("csp-report"), dict):
         report = payload["csp-report"]
-        document = report.get("document-uri") or ""
+        document = text(report.get("document-uri"))
         return [
             {
                 "directive": keyword(
-                    report.get("effective-directive") or report.get("violated-directive") or ""
+                    text(report.get("effective-directive"))
+                    or text(report.get("violated-directive"))
                 ),
-                "blocked": fold_blocked(report.get("blocked-uri") or ""),
+                "blocked": fold_blocked(text(report.get("blocked-uri"))),
                 "route": fold_route(document),
                 "origin": fold_origin(document),
-                "disposition": keyword(report.get("disposition") or "report"),
+                "disposition": keyword(text(report.get("disposition")) or "report"),
             }
         ]
     if isinstance(payload, list):
@@ -318,16 +343,14 @@ def normalize(payload: object) -> list[dict[str, str | None]]:
             body = envelope.get("body")
             if not isinstance(body, dict):
                 continue
-            document = body.get("documentURL") or envelope.get("url") or ""
-            if not isinstance(document, str):
-                continue
+            document = text(body.get("documentURL")) or text(envelope.get("url"))
             collected.append(
                 {
-                    "directive": keyword(body.get("effectiveDirective") or ""),
-                    "blocked": fold_blocked(body.get("blockedURL") or ""),
+                    "directive": keyword(text(body.get("effectiveDirective"))),
+                    "blocked": fold_blocked(text(body.get("blockedURL"))),
                     "route": fold_route(document),
                     "origin": fold_origin(document),
-                    "disposition": keyword(body.get("disposition") or "report"),
+                    "disposition": keyword(text(body.get("disposition")) or "report"),
                 }
             )
         return collected
