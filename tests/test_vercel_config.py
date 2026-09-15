@@ -360,20 +360,27 @@ def test_install_is_reproducible_and_runs_no_package_scripts():
     assert "--ignore-scripts" in install, install
 
 
-def test_the_python_build_requires_hashed_artifacts():
-    """`UV_REQUIRE_HASHES` is what carries hash checking onto Vercel.
+def test_the_python_build_does_not_demand_hashes_of_vercels_own_packages():
+    """`UV_REQUIRE_HASHES` must stay out of the build env, and that is not
+    a preference — it breaks the deploy.
 
-    pip turns hash checking on by itself the moment a requirements file
-    contains one hash, and then refuses every requirement that lacks one. The
-    Vercel Python build does not use pip — it uses uv, which has to be told,
-    and the env var is the only place it can be told from this repo.
+    The locks carry a SHA-256 per artifact, and uv checks a hash it finds
+    without being told to, so Vercel enforces them with nothing set here.
+    `UV_REQUIRE_HASHES` adds the other half — refuse anything that has *no*
+    hash — and being an environment variable it applies to every uv call in
+    the container, including Vercel's own install of `vercel-runtime`, which
+    ships without hashes. The build then dies before it reads our
+    requirements at all:
 
-    Without it the locks would still *carry* hashes and production would still
-    install whatever the index served, which is the failure worth guarding:
-    it looks exactly like success.
+        error: In `--require-hashes` mode, all requirements must have a
+        hash, but none were provided for: vercel-runtime==0.23.0
+
+    Observed on a preview deploy, 2026-09-15. The half it would have added
+    is covered from inside CI instead, by tests/test_requirements_locks.py.
     """
     env = CONFIG["build"]["env"]
-    assert env.get("UV_REQUIRE_HASHES") == "1", env
-    # Not a replacement for the other one: copy mode is what makes the install
-    # work on Vercel's filesystem at all.
+    assert "UV_REQUIRE_HASHES" not in env, (
+        "this breaks the Vercel build — see the docstring; the locks are already verified without it"
+    )
+    # Copy mode is what makes the install work on Vercel's filesystem at all.
     assert env.get("UV_LINK_MODE") == "copy", env

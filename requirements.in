@@ -25,8 +25,13 @@
 #     build rather than quietly weakening it.
 #   - The `locks` job in ci.yml recompiles these files and diffs the result,
 #     so it passes the same flag. Drop it in one place and CI reddens.
-#   - Vercel builds with uv, not pip, so it does not inherit pip's automatic
-#     behaviour -- vercel.json sets UV_REQUIRE_HASHES next to UV_LINK_MODE.
+#   - uv verifies a hash it finds without being asked, so Vercel (which
+#     builds with uv, not pip) enforces these too, with no flag set.
+#     Do NOT add UV_REQUIRE_HASHES to vercel.json to make that explicit:
+#     it is an environment variable, so it governs Vercel's own install
+#     of `vercel-runtime` as well, which ships no hashes, and the build
+#     dies before it ever reads this file. Tried on 2026-09-15 -- the
+#     preview failed with "none were provided for: vercel-runtime==0.23.0".
 #
 # On a machine whose antivirus intercepts HTTPS (Norton, here), uv rejects the
 # substituted certificate — add --native-tls to read the OS trust store. Same

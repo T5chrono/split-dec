@@ -5,8 +5,7 @@
   "installCommand": "npm ci --ignore-scripts",
   "build": {
     "env": {
-      "UV_LINK_MODE": "copy",
-      "UV_REQUIRE_HASHES": "1"
+      "UV_LINK_MODE": "copy"
     }
   },
   "functions": {
