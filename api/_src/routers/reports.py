@@ -175,8 +175,12 @@ def text(value: object) -> str:
     """One field of a posted body, or nothing.
 
     Every field below is read out of JSON a stranger wrote, so a field's
-    *type* is as unchecked as its content: `{"csp-report": {"blocked-uri": {}}}`
-    is valid JSON, and a dict arriving at `"://" in value` is a `TypeError`.
+    *type* is as unchecked as its content, and every helper under here assumes
+    a string. `{"csp-report": {"blocked-uri": {"a": "b"}}}` is valid JSON: the
+    dict passes `"://" not in value` (that is a *key* lookup, and it finds
+    nothing) and then raises out of `re.fullmatch` inside `keyword`. A number
+    in the same field raises one step earlier, at the `in` itself, and a number
+    in `document-uri` raises inside `urlsplit`. Three call sites, one cause.
     That was a 500 on the one route reachable without a token — and one the
     token bucket does not cover, because it meters log lines rather than
     exceptions, so an unauthenticated caller could raise as fast as the

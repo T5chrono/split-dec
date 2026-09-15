@@ -530,12 +530,18 @@ class TestPreflight:
 class TestFieldsThatAreNotStrings:
     """A field whose *type* is wrong, which is as unchecked as its content.
 
-    `{"csp-report": {"blocked-uri": {}}}` is valid JSON, and before `text()`
-    every one of these raised out of the folding helpers: a 500 on the one
-    route a stranger can reach without a token, and one the token bucket
-    cannot clip, because it meters log lines rather than exceptions. Chrome
-    treats a 500 as a failed delivery and puts the report back on its retry
-    queue, so it also came back.
+    `{"csp-report": {"blocked-uri": {"a": "b"}}}` is valid JSON, and before
+    `text()` most of these raised: a 500 on the one route a stranger can reach
+    without a token, and one the token bucket cannot clip, because it meters
+    log lines rather than exceptions. Chrome treats a 500 as a failed delivery
+    and puts the report back on its retry queue, so it also came back.
+
+    Parametrized over types rather than over the three call sites that
+    actually raised (`keyword` for a dict or a list, `fold_blocked`'s `in` for
+    a number, `urlsplit` for a number in `document-uri`), because which one
+    fires is an accident of the helper a field happens to reach. The cases
+    that already answered 204 by luck — an empty container is falsy, `None`
+    was handled by `or ""` — are here to stay that way.
     """
 
     @pytest.mark.parametrize(
