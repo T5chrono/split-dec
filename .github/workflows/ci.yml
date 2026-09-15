@@ -149,9 +149,16 @@ jobs:
   # only way the diff moves is if the .in no longer resolves to what the .txt
   # holds.
   #
+  # --generate-hashes here for the same reason the locks carry it: without
+  # the flag the recompiled file has no hashes at all, every line differs,
+  # and the diff below can never match. The flag moves in both places or
+  # neither.
+  #
   # Known limit: it proves the lock is still a valid solution for the .in, not
   # that it is byte-for-byte the compiler's output. A hand-edited version that
-  # still satisfies every range is invisible to it.
+  # still satisfies every range is invisible to it -- though a hand-edited
+  # version now also has to arrive with a hash that matches the real artifact,
+  # which means fetching it rather than typing a number.
   locks:
     runs-on: ubuntu-latest
     steps:
@@ -161,11 +168,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: requirements.txt is still a solution for requirements.in
         run: |
-          uv pip compile requirements.in --universal --python-version 3.12 \
-            -c requirements.txt -o /tmp/requirements.check.txt --quiet
+          uv pip compile requirements.in --universal --python-version 3.12 --generate-hashes -c requirements.txt -o /tmp/requirements.check.txt --quiet
           diff <(grep -v '^[[:space:]]*#' requirements.txt) <(grep -v '^[[:space:]]*#' /tmp/requirements.check.txt)
       - name: requirements-dev.txt is still a solution for requirements-dev.in
         run: |
-          uv pip compile requirements-dev.in --universal --python-version 3.12 \
-            -c requirements.txt -c requirements-dev.txt -o /tmp/requirements-dev.check.txt --quiet
+          uv pip compile requirements-dev.in --universal --python-version 3.12 --generate-hashes -c requirements.txt -c requirements-dev.txt -o /tmp/requirements-dev.check.txt --quiet
           diff <(grep -v '^[[:space:]]*#' requirements-dev.txt) <(grep -v '^[[:space:]]*#' /tmp/requirements-dev.check.txt)

@@ -358,3 +358,29 @@ def test_install_is_reproducible_and_runs_no_package_scripts():
     install = CONFIG["installCommand"]
     assert install.startswith("npm ci"), install
     assert "--ignore-scripts" in install, install
+
+
+def test_the_python_build_does_not_demand_hashes_of_vercels_own_packages():
+    """`UV_REQUIRE_HASHES` must stay out of the build env, and that is not
+    a preference — it breaks the deploy.
+
+    The locks carry a SHA-256 per artifact, and uv checks a hash it finds
+    without being told to, so Vercel enforces them with nothing set here.
+    `UV_REQUIRE_HASHES` adds the other half — refuse anything that has *no*
+    hash — and being an environment variable it applies to every uv call in
+    the container, including Vercel's own install of `vercel-runtime`, which
+    ships without hashes. The build then dies before it reads our
+    requirements at all:
+
+        error: In `--require-hashes` mode, all requirements must have a
+        hash, but none were provided for: vercel-runtime==0.23.0
+
+    Observed on a preview deploy, 2026-09-15. The half it would have added
+    is covered from inside CI instead, by tests/test_requirements_locks.py.
+    """
+    env = CONFIG["build"]["env"]
+    assert "UV_REQUIRE_HASHES" not in env, (
+        "this breaks the Vercel build — see the docstring; the locks are already verified without it"
+    )
+    # Copy mode is what makes the install work on Vercel's filesystem at all.
+    assert env.get("UV_LINK_MODE") == "copy", env

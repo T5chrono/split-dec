@@ -22,6 +22,7 @@ already derive from the code stays in this file.
 | Control | Where |
 | --- | --- |
 | Full transitive pins, both ecosystems | `package-lock.json` (v3, `sha512-` integrity on every entry, every resolve on registry.npmjs.org), `requirements.txt` / `requirements-dev.txt` (`uv pip compile`, `==` on everything) |
+| Artifact hashes, both ecosystems | `package-lock.json` (`sha512-` on every entry); `requirements.txt` / `requirements-dev.txt` (`--generate-hashes`, SHA-256 per artifact, added 2026-09-15). A pin names a version; a hash names the file, so a substituted mirror is refused rather than installed. Both installers check a hash they find without being asked — pip and uv alike — so no flag is set anywhere. `UV_REQUIRE_HASHES` was tried and reverted: as an env var it also governs Vercel's own hashless `vercel-runtime` install and fails the build. The half it would have added — refusing a requirement with no hash at all — is covered by `tests/test_requirements_locks.py`, inside the required `backend` check, because losing the hashes does not fail an install, it silently stops checking |
 | Reproducible production install | `vercel.json` → `npm ci --ignore-scripts`, asserted by `tests/test_vercel_config.py` |
 | No package install scripts run anywhere | `--ignore-scripts` in `vercel.json` and in the `frontend`/`audit` CI jobs; `.npmrc` → `ignore-scripts=true` covers a maintainer's own `npm install`, which the flags did not, on the machine holding the deploy credentials. `npm run build`/`test` are unaffected. Only two packages in the tree declare one: `@sentry/cli` (dev; its postinstall exits immediately because all eight `@sentry/cli-*` platform packages are in the lockfile) and `fsevents` (dev, darwin-only) |
 | Advisory scanning | `ci.yml` → `audit` job: `npm audit --audit-level=high`, and `pypa/gh-action-pip-audit` over both Python locks |
@@ -206,26 +207,6 @@ declines to run at all when it differs from the default branch, so that file
 cannot be quietly rewritten.
 
 **Revisit when.** As above.
-
-### No hash pinning on the Python locks
-
-**Risk.** `requirements.txt` pins versions but not artifact hashes, so CI and
-the Vercel build accept whatever the index serves for a pinned version. The npm
-side has `sha512-` integrity on all 594 entries; the Python side has nothing
-equivalent.
-
-**Why accepted (for now).** This is the one change in the set that can break a
-production deploy. Hashes are all-or-nothing: once present, the installer
-refuses anything unhashed. Vercel's Python builder is `uv` — inferred from
-`UV_LINK_MODE` in `vercel.json`, so pip's documented hash-checking behaviour
-does not apply — and whether it honours `UV_REQUIRE_HASHES` is untested. The
-threat it closes is a compromised index or mirror serving a different artifact
-for an existing version, on top of TLS, from the default PyPI index.
-
-**Revisit when.** Doing it deliberately, gated on a preview deploy: regenerate
-both locks with `--generate-hashes` (keeping the existing header flags), add
-`UV_REQUIRE_HASHES` next to `UV_LINK_MODE`, prove the preview installs, then
-keep the hashes but drop the flag if the builder rejects it.
 
 ### No SBOM and no build provenance attestation
 

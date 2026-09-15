@@ -2,13 +2,36 @@
 # from this file and pins every package, including transitive ones — edit this
 # file, never that one, then regenerate:
 #
-#   uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt
-#   uv pip compile requirements-dev.in --universal --python-version 3.12 -c requirements.txt -o requirements-dev.txt
+#   uv pip compile requirements.in --universal --python-version 3.12 --generate-hashes -o requirements.txt
+#   uv pip compile requirements-dev.in --universal --python-version 3.12 -c requirements.txt --generate-hashes -o requirements-dev.txt
 #
 # --universal keeps the environment markers, so one lock serves Linux (CI and
 # Vercel) and Windows (local) — uvloop stays excluded on win32, colorama stays
 # included. --python-version 3.12 matches .python-version and CI; resolving on
 # the local 3.14 would pin versions production never sees.
+#
+# --generate-hashes records a SHA-256 for every artifact, which is what makes a
+# pinned version name a particular file rather than whatever the index serves
+# under that version today. A pin alone is only as good as the index: the
+# threat it closes is a compromised or substituted mirror, on top of TLS.
+#
+# Three things follow, and all three are load-bearing:
+#
+#   - Hashes are all-or-nothing. pip switches hash checking on by itself the
+#     moment it sees one, and then refuses every requirement that lacks one.
+#     So both locks carry them or neither does, and a package hand-added to
+#     either file fails the install instead of slipping in unnoticed. That is
+#     the point, but it also means regenerating without the flag breaks the
+#     build rather than quietly weakening it.
+#   - The `locks` job in ci.yml recompiles these files and diffs the result,
+#     so it passes the same flag. Drop it in one place and CI reddens.
+#   - uv verifies a hash it finds without being asked, so Vercel (which
+#     builds with uv, not pip) enforces these too, with no flag set.
+#     Do NOT add UV_REQUIRE_HASHES to vercel.json to make that explicit:
+#     it is an environment variable, so it governs Vercel's own install
+#     of `vercel-runtime` as well, which ships no hashes, and the build
+#     dies before it ever reads this file. Tried on 2026-09-15 -- the
+#     preview failed with "none were provided for: vercel-runtime==0.23.0".
 #
 # On a machine whose antivirus intercepts HTTPS (Norton, here), uv rejects the
 # substituted certificate — add --native-tls to read the OS trust store. Same
