@@ -41,6 +41,7 @@ domain's reputation — is shared and cannot be bought back.
 """
 
 import hashlib
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -49,6 +50,7 @@ from sqlalchemy import Integer, case, cast, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import WriteEvent
+from .monitoring import alert
 
 # The kinds of slot. Kept apart so a burst of expenses cannot exhaust the
 # allowance for creating a group or sending an invitation.
@@ -299,6 +301,36 @@ async def enforce_group_creation_quota(db: AsyncSession, caller: uuid.UUID) -> N
         raise _too_many("You have created too many groups recently. Please try again later.")
 
 
+# Once the global window is full it stays full until the oldest row in it ages
+# out, so the condition below is true for every invitation attempted in the
+# meantime -- and an alert raised per attempt is the failure reports.py names:
+# the thing announcing the flood becomes the flood. One line per instance per
+# hour is enough to be woken by, and the quota itself is what actually stops
+# the sending.
+#
+# Per warm instance, so a deployment running several may alert several times,
+# and a cold start may re-alert immediately. That is the right way round for a
+# notification -- duplicates are cheap, a missed one is not -- but it does mean
+# the count of these events measures instances, never attempts. Module-level
+# and mutated without a lock, like the buckets in reports.py and
+# routers/unsubscribe.py: no `await` between the read and the write, so within
+# one event loop it runs to completion.
+GLOBAL_ALERT_COOLDOWN = timedelta(hours=1)
+_global_alerted_at: float | None = None
+
+
+def _global_alert_due() -> bool:
+    global _global_alerted_at
+    now = time.monotonic()
+    if (
+        _global_alerted_at is not None
+        and now - _global_alerted_at < GLOBAL_ALERT_COOLDOWN.total_seconds()
+    ):
+        return False
+    _global_alerted_at = now
+    return True
+
+
 async def enforce_invitation_quota(
     db: AsyncSession, caller: uuid.UUID, email: str
 ) -> None:
@@ -321,6 +353,18 @@ async def enforce_invitation_quota(
             )
         )
     ).one()
+    # The only one of the three worth waking somebody for, and the only one a
+    # single caller cannot reach on their own: the per-inviter and
+    # per-recipient windows are ordinary back-pressure on one account, hit
+    # routinely by anyone organising a trip, and alerting on those would train
+    # whoever reads the channel to ignore it. The global window is different in
+    # kind. What it rations is the sending domain's reputation, which is shared
+    # by everyone and cannot be bought back, and reaching it means either
+    # deployment-wide activity far above anything this app sees or an account
+    # working through addresses. Either way the invitation email is now off for
+    # every user at once, and nothing else anywhere says so.
+    if overall >= INVITE_MAX_GLOBAL and _global_alert_due():
+        alert("Global invitation quota exhausted; invitation email is paused")
     exceeded = (
         (by_caller or 0) >= INVITE_MAX_PER_INVITER
         or (by_recipient or 0) >= INVITE_MAX_PER_RECIPIENT

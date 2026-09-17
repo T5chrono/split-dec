@@ -11,6 +11,7 @@ going wrong: that an event actually *arrives*. See `flush_on_response`.
 
 import importlib.util
 import inspect
+import logging
 import os
 
 import pytest
@@ -326,3 +327,138 @@ def test_the_vercel_entrypoint_is_shaped_like_an_asgi_app():
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     assert len(required) == 3
+
+
+class TestMissingDsnIsReported:
+    """A production deployment with no DSN reports nothing, and used to say nothing.
+
+    The failure it guards against is the quietest one available: monitoring
+    that was never switched on looks exactly like monitoring with nothing to
+    report. It cannot be sent to Sentry, so the log is the only channel left.
+    """
+
+    def test_production_without_a_dsn_logs_an_error(self, monkeypatch, caplog):
+        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.init_monitoring()
+        assert "SENTRY_DSN is not set" in caplog.text
+
+    def test_development_without_a_dsn_stays_silent(self, monkeypatch, caplog):
+        """Having no DSN locally is the intended state, not an incident."""
+        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.init_monitoring()
+        assert caplog.records == []
+
+
+class TestFlushFailureIsReported:
+    """A flush that gives up drops the event. Something has to say so.
+
+    `sentry_sdk.flush` returns None and the SDK's own complaint goes to
+    `sentry_sdk.errors`, which carries a NullHandler -- that counts as handled,
+    so Python's last-resort stderr output never fires and the message is lost.
+    The clock is the only unambiguous signal available.
+    """
+
+    def test_a_flush_that_uses_the_whole_budget_logs_an_error(self, monkeypatch, caplog):
+        def stall(timeout):
+            # What the worker does when the queue will not drain: both of its
+            # joins expire, so the call returns having spent the whole budget.
+            monkeypatch.setattr(
+                monitoring.time, "monotonic", lambda: start + monitoring.FLUSH_TIMEOUT
+            )
+
+        start = 1000.0
+        monkeypatch.setattr(monitoring.time, "monotonic", lambda: start)
+        monkeypatch.setattr(monitoring.sentry_sdk, "flush", stall)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring._flush_reporting_loss()
+        assert "flush timed out" in caplog.text
+
+    def test_a_flush_that_drains_says_nothing(self, monkeypatch, caplog):
+        """The overwhelming majority. Reporting on it would be the noise."""
+        clock = iter([1000.0, 1000.01])
+        monkeypatch.setattr(monitoring.time, "monotonic", lambda: next(clock))
+        monkeypatch.setattr(monitoring.sentry_sdk, "flush", lambda timeout: None)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring._flush_reporting_loss()
+        assert caplog.records == []
+
+
+class TestAlert:
+    """The deliberate channel for "a person has to look at this"."""
+
+    def test_an_alert_is_one_error_log_line(self, caplog):
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.alert("the roof is on fire")
+        assert [r.levelname for r in caplog.records] == ["ERROR"]
+        assert "the roof is on fire" in caplog.text
+
+    def test_it_does_not_also_capture_the_message_itself(self, monkeypatch, caplog):
+        """One incident must not arrive as two issues.
+
+        `LoggingIntegration` already promotes the line above into an event, so
+        an explicit `capture_message` beside it sent a `message` event *and* a
+        `logentry` event for the same alert — double the quota on the one
+        channel that is supposed to stay rare enough to be worth reading.
+        """
+
+        def explode(*_args, **_kwargs):
+            raise AssertionError("alert() captured an event on top of the log line")
+
+        monkeypatch.setattr(monitoring.sentry_sdk, "capture_message", explode)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.alert("still just the one")
+        assert "still just the one" in caplog.text
+
+
+class TestErrorIsTheEventContract:
+    """`logger.error` is an event. The whole module depends on it.
+
+    `emailer.py`'s three failure paths and `monitoring.alert` all reach Sentry
+    only because `LoggingIntegration` is a *default* integration running at
+    `event_level=ERROR`. Nothing in `init_monitoring` says so, which is the
+    fair objection to leaning on it — a future `init()` gaining
+    `default_integrations=False` or a `disabled_integrations` entry would
+    switch every one of those alerts off at once, silently, and the suite
+    would not notice because it mocks `init`.
+
+    So the assumption is pinned here rather than restated in a docstring.
+    """
+
+    @pytest.fixture
+    def options(self, monkeypatch):
+        monkeypatch.setattr(
+            monitoring, "SENTRY_DSN", "https://k@o0.ingest.de.sentry.io/1"
+        )
+        recorded: dict = {}
+        monkeypatch.setattr(
+            monitoring.sentry_sdk, "init", lambda **kwargs: recorded.update(kwargs)
+        )
+        monitoring.init_monitoring()
+        return recorded
+
+    def test_default_integrations_are_not_switched_off(self, options):
+        assert options.get("default_integrations", True) is not False
+
+    def test_nothing_is_added_to_disabled_integrations(self, options):
+        assert not options.get("disabled_integrations")
+
+    def test_the_logging_integration_is_not_among_the_explicit_ones(self, options):
+        """Passing one's own `LoggingIntegration` replaces the default, and the
+        replacement may carry a different `event_level`. Today none is passed;
+        if that changes, the level has to be checked rather than assumed."""
+        names = {type(i).__name__ for i in options["integrations"]}
+        assert "LoggingIntegration" not in names
+
+    def test_the_integration_default_is_still_error(self):
+        """The level the promotion happens at, read from the SDK rather than
+        assumed. A release that moved it would break every alert in this
+        codebase and nothing else here would catch it."""
+        from sentry_sdk.integrations.logging import LoggingIntegration
+
+        assert LoggingIntegration()._handler.level == logging.ERROR
