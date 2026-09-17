@@ -461,3 +461,122 @@ bodies or headers beyond an allow-list, so tokens do not leak into error
 reports.
 
 **Revisit when.** The expiry is raised, or a token is found in a log.
+
+### No audit record of an irreversible deletion
+
+**Risk.** Any member of a group may delete it, and `purge_group` is a *hard*
+delete — expenses, splits, settlements, invitations and members all leave the
+database, taking `created_by`/`updated_by` with them. Nothing anywhere records
+that it happened or who did it. The `write_events` tombstones are not that
+record: `record_write` prunes them after about a day and `delete_account` drops
+the caller's own. So a stolen session can erase a group's whole financial
+history and leave no trace.
+
+**Why accepted.** Raised by an external review on 2026-09-17, which rated it a
+blocker and proposed an append-only `audit_events` table written in the
+mutation's own transaction. Declined for three reasons, in order of weight.
+
+It is **new retention of personal data** — who deleted what, when, for twelve
+months — on an application whose entire privacy position is that it collects
+almost nothing. That is a `src/lib/legal.ts` change and a `LEGAL_UPDATED` bump,
+and it makes every user permanently more observed so that one hypothetical
+dispute could be settled.
+
+It adds code to the **delete path**, which includes `delete_account`. A write
+that fails there either blocks an erasure request over our own bookkeeping, or
+has to be written so it cannot block one — at which point it is a record that
+is allowed to be missing exactly when somebody wanted it missing.
+
+And it **recovers nothing**. It reports that a group was deleted; it does not
+bring the group back. The control that would actually help is a backup, which
+is a plan question tracked elsewhere and not a code change.
+
+**Compensating controls.** Ledger rows already carry `created_by`/`updated_by`
+while they exist, so every surviving row says who last touched it. Group
+deletion requires zero balances, so nothing can be erased mid-debt. The blast
+radius is one group's history of who owed whom for dinner; no money moves
+through this application.
+
+**Revisit when.** A real dispute occurs that this record would have settled, or
+the application starts handling actual payments. Either of those changes the
+calculation completely.
+
+### No tamper-evident export of the audit record
+
+**Risk.** One person holds every credential — Supabase, Vercel, GitHub,
+Sentry — so any record this deployment keeps is a record that same person can
+alter or delete. No record here proves anything to a third party.
+
+**Why accepted.** The same 2026-09-17 review proposed a hash chain (each row
+carrying a fingerprint of the row before it, so a removal or an edit breaks the
+sequence) exported daily by a GitHub Action which would publish only the head
+fingerprint to the public repository. Rewriting history would then require
+rewriting a visible public commit — tamper-*evident*, and deliberately not
+tamper-proof, since nothing stops the one identity that holds everything.
+
+Declined as moot: it anchors the `audit_events` table above, which does not
+exist and is not going to. Declined on its own merits too. Anchoring answers
+"prove to an outside party that you did not rewrite your own records", and this
+deployment has no outside party — no auditor, no regulator, no counterparty
+disputing a charge. Its users are people splitting a restaurant bill, and
+SplitDec never touches their money; it records who owes what and they settle
+between themselves.
+
+**Revisit when.** The audit record above is ever built. Not before — there is
+nothing to anchor.
+
+### Function and auth logs are not retained
+
+**Risk.** Vercel keeps runtime logs for roughly an hour on this plan and offers
+no drain from it, so every `logger` line in `api/_src/` is a live-debugging aid
+and never a forensic record. Supabase's auth logs — where sign-ins and *failed*
+sign-ins actually live, since neither ever reaches this function — are likewise
+neither drained nor monitored. Investigating anything more than an hour after
+it happened is not possible.
+
+**Why accepted.** A log drain is a paid Vercel feature and Supabase's auth-log
+export is likewise above this plan, so on the current tiers it is unavailable
+rather than declined. Beyond cost, wherever the logs went would be a new
+processor handling user data, with the `src/lib/legal.ts` change that implies.
+
+**Compensating controls.** This is the reasoning behind the 2026-09-17 logging
+work, and it is why that work raised *levels* rather than adding log lines:
+anything worth waking somebody for is an ERROR, and an ERROR is a Sentry event,
+which is durable, searchable and alerted on. The three Resend failure paths,
+`monitoring.alert`, a missing `SENTRY_DSN` and a flush that timed out all take
+that route. Logs carry the rest, and the rest is for reading while an incident
+is still in progress.
+
+**Revisit when.** The project moves to Vercel Pro for another reason — add the
+drain that day, it is nearly free at that point — or an incident is missed
+because the logs had already expired.
+
+### Unsubscribe tokens never expire
+
+**Risk.** `mint_token` signs a digest of the recipient address and nothing
+else, so the capability in every invitation email's unsubscribe link is
+perpetual. It travels in the query string, which platform request logs record
+verbatim, and `redact_url` covers Sentry rather than the access log. Anyone who
+can read such a log holds a permanent ability to suppress invitation mail to
+that address.
+
+**Why accepted.** Raised by the 2026-09-17 review, which rated it minor and
+downgraded it during its own deliberation. The blast radius is one address's
+invitation email, and the capability does exactly what its holder's victim
+could already do by following the link themselves; it discloses nothing and
+reaches no account. Against that, an expiry needs a timestamp inside the signed
+payload, a version flag, an acceptance window for links already sitting in
+inboxes, and a sunset date enforced by a test — a standing piece of machinery
+for a bounded nuisance.
+
+**Compensating controls.** The token is an HMAC and unforgeable without
+`UNSUBSCRIBE_SECRET`. Rotating that secret invalidates every outstanding link
+at once, and the suppressions themselves survive it, because
+`email_suppressions` is keyed by the unpeppered digest rather than by an HMAC —
+that choice exists for precisely this reason (`api/_src/unsubscribe.py`). So the
+blunt instrument is available and costs only the outstanding links.
+
+**Revisit when.** Link abuse is actually reported, or invitation volume grows
+enough that a suppressed address is a commercial rather than a cosmetic
+problem. Rotate the secret first; build the expiry only if that proves
+insufficient.
