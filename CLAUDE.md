@@ -1199,3 +1199,18 @@ cosmetic one. (`data:` URIs and inline `<svg>` are refused or stripped by Gmail/
   handshake to the ingest host (measured directly, not via the SDK) and the
   `event_id` of a probe event it captures and flushes, for you to look up. See
   Error monitoring for why a route was needed at all.
+  **It sends two probes, and the second one is the one that matters.**
+  `event_id` comes from `capture_message`; `logentry_event_id` comes from a
+  `logger.error`, which is the path *every* alert in this codebase actually
+  takes — the three Resend failures, `monitoring.alert`, a flush that gave up.
+  That path works only because `LoggingIntegration` is a **default** integration
+  promoting ERROR into an event, which nothing in `init_monitoring` configures
+  and nothing else would notice losing. For a year the probe exercised
+  `capture_message` alone and so answered "reporting works" about a path no
+  alert takes. `logentry_event_id` is `null` when the promotion is off, and it
+  is computed by *comparing* `last_event_id()` against the message probe's id
+  rather than trusting it — with the promotion off, the scope still holds the
+  id from two lines up, so returning it blindly reports a success nobody
+  observed. Null there means every alert in the deployment is going nowhere.
+  Both probes are `level="error"` and so both create issues; that is the cost
+  of the route, and the reason nothing schedules it.

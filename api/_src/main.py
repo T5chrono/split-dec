@@ -221,13 +221,21 @@ async def health_sentry(
     run from a laptop, while the function logged `SSLEOFError` against
     `/envelope/` every few minutes and said nothing about giving up.
 
-    Two independent answers, because they fail for different reasons and the
-    difference is the whole diagnosis. `tls` is this function reaching the
+    Three independent answers, because they fail for different reasons and the
+    differences are the whole diagnosis. `tls` is this function reaching the
     ingest host at all, measured directly. `event_id` is the SDK's own path
     end to end — look that id up in Sentry, and if it is there, reporting
-    works. The flush is what makes the second one meaningful: the worker
-    sends on a background thread, and without waiting the platform can freeze
-    the instance before the envelope leaves.
+    works. `logentry_event_id` is the same question asked of `logger.error`,
+    which is the path every alert in this codebase actually takes and which
+    depends on a default integration nothing here configures; `null` means
+    that promotion is off and every alert is going nowhere. The flush is what
+    makes the last two meaningful: the worker sends on a background thread,
+    and without waiting the platform can freeze the instance before the
+    envelope leaves.
+
+    Both probes are `level="error"`, so both create issues. That is the cost of
+    the route and the reason nothing schedules it — see the note on alert
+    fatigue in `docs/supply-chain.md`.
 
     Gated like the database probe, and for a better reason than symmetry: it
     names the ingest host and returns raw connection errors.
@@ -237,12 +245,34 @@ async def health_sentry(
         # Not an error. No DSN is how dev, CI and vitest stay out of the issue
         # stream (monitoring.py), so the honest answer is that there is
         # nothing configured to test.
-        return {"dsn_configured": False, "ingest_host": None, "tls": None, "event_id": None}
+        return {
+            "dsn_configured": False,
+            "ingest_host": None,
+            "tls": None,
+            "event_id": None,
+            "logentry_event_id": None,
+        }
     host = urlsplit(SENTRY_DSN).hostname or ""
     tls = await ingest_handshake(host)
     event_id = sentry_sdk.capture_message(
         "SplitDec Sentry reachability probe", level="error"
     )
+    # The second probe, and the one that matches what this codebase actually
+    # does. Every alert it raises — the three Resend failures, `monitoring.alert`,
+    # a flush that gave up — is a `logger.error`, which reaches Sentry only
+    # because `LoggingIntegration` is a *default* integration promoting ERROR
+    # into an event. Until this line existed the probe exercised
+    # `capture_message` and nothing else, so the route answered "reporting
+    # works" on the strength of a path no alert in the app takes.
+    #
+    # `last_event_id()` is compared rather than trusted: it returns the last
+    # event captured on the scope, so if the promotion is off it hands back the
+    # message probe's id from two lines up and the route would report a success
+    # it had not observed. Different id means the logger call really did produce
+    # an event of its own; `None` here means it did not, which is the alarm —
+    # every alert in the deployment is going nowhere.
+    logger.error("SplitDec Sentry logentry probe")
+    after = sentry_sdk.last_event_id()
     # Blocking, so off the event loop: the SDK's flush waits on a background
     # worker thread and would otherwise stall every other request this
     # instance is serving.
@@ -252,4 +282,5 @@ async def health_sentry(
         "ingest_host": host,
         "tls": tls,
         "event_id": event_id,
+        "logentry_event_id": after if after != event_id else None,
     }
