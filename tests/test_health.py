@@ -100,6 +100,11 @@ class TestSentryProbe:
             "flush",
             lambda *a, **k: calls.__setitem__("flushed", True),
         )
+        # Stands in for `LoggingIntegration` promoting the `logger.error`
+        # below it into an event of its own. A distinct id is the working
+        # case; the broken case is covered separately, and it is the one the
+        # field exists for.
+        monkeypatch.setattr(main.sentry_sdk, "last_event_id", lambda: "cafef00d")
         return calls
 
     async def test_it_is_gated_like_the_database_probe(self, client, monkeypatch):
@@ -128,6 +133,7 @@ class TestSentryProbe:
             "ingest_host": None,
             "tls": None,
             "event_id": None,
+            "logentry_event_id": None,
         }
 
     async def test_it_reports_the_handshake_and_the_event(
@@ -161,3 +167,61 @@ class TestSentryProbe:
         monkeypatch.setattr(main, "ingest_handshake", _handshake("ok"))
         await client.get("/api/health/sentry", headers=self.KEY)
         assert sent["flushed"] is True
+
+
+class TestLogentryProbe:
+    """The half of the probe that matches what the app actually does.
+
+    Every alert this codebase raises is a `logger.error` — the three Resend
+    failures, `monitoring.alert`, a flush that gave up — and each reaches
+    Sentry only because `LoggingIntegration` is a *default* integration that
+    promotes ERROR into an event. Nothing in `init_monitoring` configures it,
+    so the assumption is invisible, and until this probe existed the route
+    answered "reporting works" having exercised `capture_message` and nothing
+    else: a path no alert in the app takes.
+    """
+
+    KEY = {"X-Health-Key": "s3cret"}
+
+    @pytest.fixture(autouse=True)
+    def _keyed(self, monkeypatch):
+        monkeypatch.setenv("HEALTH_PROBE_KEY", "s3cret")
+        monkeypatch.setattr(main, "SENTRY_DSN", "https://k@o1.ingest.de.sentry.io/2")
+        monkeypatch.setattr(main, "ingest_handshake", _handshake("ok"))
+        monkeypatch.setattr(main.sentry_sdk, "flush", lambda *a, **k: None)
+        monkeypatch.setattr(
+            main.sentry_sdk, "capture_message", lambda *a, **k: "deadbeef"
+        )
+
+    async def test_a_promoted_log_call_is_reported_as_its_own_event(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setattr(main.sentry_sdk, "last_event_id", lambda: "cafef00d")
+        body = (await client.get("/api/health/sentry", headers=self.KEY)).json()
+        assert body["event_id"] == "deadbeef"
+        assert body["logentry_event_id"] == "cafef00d"
+
+    async def test_an_unpromoted_log_call_reads_as_null_not_as_success(
+        self, client, monkeypatch
+    ):
+        """The whole point of comparing rather than trusting `last_event_id`.
+
+        With the promotion off, the logger call captures nothing, so the scope
+        still holds the id from `capture_message` two lines up. Returned
+        blindly it would report the message probe's id as proof that the
+        logentry path works — a false success on exactly the question the
+        probe was added to answer.
+        """
+        monkeypatch.setattr(main.sentry_sdk, "last_event_id", lambda: "deadbeef")
+        body = (await client.get("/api/health/sentry", headers=self.KEY)).json()
+        assert body["event_id"] == "deadbeef"
+        assert body["logentry_event_id"] is None
+
+    async def test_it_survives_an_sdk_that_has_no_event_to_report(
+        self, client, monkeypatch
+    ):
+        """No init, no scope, no last event — must answer, not raise."""
+        monkeypatch.setattr(main.sentry_sdk, "last_event_id", lambda: None)
+        r = await client.get("/api/health/sentry", headers=self.KEY)
+        assert r.status_code == 200
+        assert r.json()["logentry_event_id"] is None
