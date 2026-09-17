@@ -123,6 +123,10 @@ class TestLogHygiene:
 
     async def test_skip_without_api_key_logs_no_address(self, caplog, monkeypatch):
         monkeypatch.setattr(emailer, "RESEND_API_KEY", "")
+        # Pinned rather than inherited: this branch is deliberately silent in
+        # development, so an ambient ENV would decide whether it logs at all.
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
         correlator = uuid.uuid4()
         assert await send_invitation_email(
             RECIPIENT, "Alice", "Trip", correlator=correlator
@@ -161,3 +165,73 @@ class TestLogHygiene:
         ) is False
         self._assert_clean(caplog, correlator)
         assert "TimeoutError" in caplog.text
+
+
+class TestFailureLevels:
+    """Every way sending can fail has to be an *event*, not a breadcrumb.
+
+    `LoggingIntegration` files a WARNING as a breadcrumb attached to whatever
+    unrelated event happens to be captured next, and an ERROR as an event of
+    its own. Invitation email is how somebody is granted access to a group and
+    the app records the invitation either way, so a provider that has started
+    refusing us is invisible from inside the product. The level is the entire
+    difference between being told and not.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _production(self, caplog, monkeypatch):
+        caplog.set_level(logging.INFO, logger="splitdec.emailer")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
+
+    @staticmethod
+    def _levels(caplog):
+        return [record.levelname for record in caplog.records]
+
+    async def test_a_missing_key_in_production_is_an_error(self, caplog, monkeypatch):
+        """It was INFO, which nothing configures a handler for: discarded.
+
+        The root logger defaults to WARNING and this codebase installs no
+        handler, so the one line saying a deployment had stopped sending mail
+        never reached the function log at all.
+        """
+        monkeypatch.setattr(emailer, "RESEND_API_KEY", "")
+        assert await send_invitation_email(
+            RECIPIENT, "Alice", "Trip", correlator=uuid.uuid4()
+        ) is False
+        assert self._levels(caplog) == ["ERROR"]
+
+    async def test_a_missing_key_in_development_says_nothing(self, caplog, monkeypatch):
+        """Locally there is no key by design and the mailto fallback is the path."""
+        monkeypatch.setattr(emailer, "RESEND_API_KEY", "")
+        monkeypatch.setenv("ENV", "development")
+        assert await send_invitation_email(
+            RECIPIENT, "Alice", "Trip", correlator=uuid.uuid4()
+        ) is False
+        assert caplog.records == []
+
+    async def test_a_provider_rejection_is_an_error(self, caplog, monkeypatch):
+        """403 sandbox restriction, 422 bad sender, 429 throttle — all actionable."""
+
+        def _raise(payload):
+            raise urllib.error.HTTPError(
+                "https://api.resend.com/emails", 403, "Forbidden", {}, io.BytesIO(b"{}")
+            )
+
+        monkeypatch.setattr(emailer, "RESEND_API_KEY", API_KEY)
+        monkeypatch.setattr(emailer, "_post_resend", _raise)
+        assert await send_invitation_email(
+            RECIPIENT, "Alice", "Trip", correlator=uuid.uuid4()
+        ) is False
+        assert self._levels(caplog) == ["ERROR"]
+
+    async def test_an_unexpected_failure_is_an_error(self, caplog, monkeypatch):
+        def _raise(payload):
+            raise TimeoutError("provider unreachable")
+
+        monkeypatch.setattr(emailer, "RESEND_API_KEY", API_KEY)
+        monkeypatch.setattr(emailer, "_post_resend", _raise)
+        assert await send_invitation_email(
+            RECIPIENT, "Alice", "Trip", correlator=uuid.uuid4()
+        ) is False
+        assert self._levels(caplog) == ["ERROR"]

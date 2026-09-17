@@ -581,3 +581,73 @@ async def test_replay_still_answered_when_group_is_full(client, db_session, two_
     r = await _invite(client, g["group"].id, "carol@test.dev")
     assert r.status_code == 200
     assert r.json()["id"] == inv["id"]
+
+
+class TestGlobalQuotaAlert:
+    """The one quota breach worth waking somebody for.
+
+    The per-inviter and per-recipient windows are ordinary back-pressure on a
+    single account — anyone organising a trip will hit them — so alerting on
+    those would teach whoever reads the channel to ignore it. The global window
+    rations the sending domain's reputation, which every user shares and which
+    cannot be bought back, and reaching it means invitation email is off for
+    the whole deployment with nothing else anywhere saying so.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _tiny_global(self, monkeypatch):
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_PER_INVITER", 50)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_PER_RECIPIENT", 50)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_GLOBAL", 2)
+        # The cooldown is module state that outlives a test, so every case
+        # starts from "nothing has been alerted yet".
+        monkeypatch.setattr(ratelimit, "_global_alerted_at", None)
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        recorded: list[str] = []
+        monkeypatch.setattr(ratelimit, "alert", lambda message: recorded.append(message))
+        return recorded
+
+    async def test_the_global_breach_raises_an_alert(self, client, two_user_group, alerts):
+        g = two_user_group
+        for i in range(2):
+            assert (await _invite(client, g["group"].id, f"p{i}@test.dev")).status_code == 201
+        assert alerts == []  # at the limit, not over it
+
+        assert (await _invite(client, g["group"].id, "p2@test.dev")).status_code == 429
+        assert len(alerts) == 1
+        assert "invitation" in alerts[0].lower()
+
+    async def test_the_alert_does_not_become_the_flood(self, client, two_user_group, alerts):
+        """Once full, the window stays full until its oldest row ages out, so
+        the condition is true for every attempt in between. One per hour."""
+        g = two_user_group
+        for i in range(2):
+            await _invite(client, g["group"].id, f"p{i}@test.dev")
+        for i in range(5):
+            assert (await _invite(client, g["group"].id, f"q{i}@test.dev")).status_code == 429
+        assert len(alerts) == 1
+
+    async def test_a_per_caller_breach_alerts_nothing(
+        self, client, db_session, two_user_group, alerts, monkeypatch
+    ):
+        """Routine back-pressure on one account. Not an operational event."""
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_GLOBAL", 300)
+        monkeypatch.setattr(ratelimit, "INVITE_MAX_PER_INVITER", 2)
+        g = two_user_group
+        for i in range(3):
+            await _invite(client, g["group"].id, f"p{i}@test.dev")
+        assert alerts == []
+
+    async def test_the_alert_never_names_an_address(self, client, two_user_group, alerts):
+        """It reaches Sentry, which is a processor. The quota's own 429 is
+        already deliberately silent about which limit was hit; the alert is
+        about the deployment, so it needs no recipient either."""
+        g = two_user_group
+        for i in range(2):
+            await _invite(client, g["group"].id, f"p{i}@test.dev")
+        await _invite(client, g["group"].id, "victim@test.dev")
+        assert alerts
+        assert "victim@test.dev" not in alerts[0]
+        assert "@" not in alerts[0]

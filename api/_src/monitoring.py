@@ -42,8 +42,10 @@ to line up with anything, so it can afford the stricter rule.
 """
 
 import asyncio
+import logging
 import re
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
@@ -52,7 +54,12 @@ import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
-from .config import SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_RELEASE
+from .config import SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_RELEASE, current_env
+
+# The one reader left when Sentry is the thing that is broken. Every line this
+# module logs is about the reporter itself, so none of it can be reported --
+# which is the whole reason these two call sites exist.
+logger = logging.getLogger("splitdec.monitoring")
 
 _UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
@@ -100,6 +107,27 @@ def captures_seen() -> int:
     with _capture_lock:
         return _capture_count
 
+
+def alert(message: str) -> None:
+    """Raise an operational alert: a Sentry event plus a log line.
+
+    For the small set of conditions that mean something outside this process
+    is wrong and a person has to look — not for anything a caller can trigger
+    at will, which is how an alert channel becomes noise nobody reads.
+
+    `capture_message` explicitly rather than leaning on `LoggingIntegration`
+    to promote the `logger.error` below: that integration's behaviour is a
+    default that a future `init()` change could switch off without anything
+    here noticing, and the two calls say different things anyway -- one is the
+    alert, the other is the record for whoever is reading the function log.
+
+    A no-op on the Sentry side when no DSN is configured, which is how the
+    test suite and a local uvicorn stay out of the issue stream. The log line
+    is unconditional.
+    """
+    logger.error("%s", message)
+    if SENTRY_DSN:
+        sentry_sdk.capture_message(message, level="error")
 
 
 def redact_ids(text: str) -> str:
@@ -267,8 +295,17 @@ def init_monitoring() -> None:
     Called at import time from `main.py`, before the FastAPI app is constructed:
     the Starlette integration patches middleware and route handling on the
     class, so an app built first would come out unpatched.
+
+    Outside development a missing DSN is an *error*, not a configuration
+    choice. Silence here is indistinguishable from an app that never throws --
+    the same ambiguity `/api/health/sentry` exists to resolve -- except that it
+    starts before the first request, so nothing downstream can ever notice. It
+    cannot be reported to Sentry for the obvious reason, so it goes to the log
+    and the deployment answers for it there.
     """
     if not SENTRY_DSN:
+        if current_env() != "development":
+            logger.error("SENTRY_DSN is not set; API errors are not being reported")
         return
 
     sentry_sdk.init(
@@ -373,6 +410,33 @@ def flush_on_response(
             # it — `flush` blocks on the worker thread, and blocking here would
             # stall every other request this instance is serving.
             if captures_seen() != before:
-                await asyncio.to_thread(sentry_sdk.flush, FLUSH_TIMEOUT)
+                await asyncio.to_thread(_flush_reporting_loss)
 
     return flushing_app
+
+
+def _flush_reporting_loss() -> None:
+    """`sentry_sdk.flush`, plus the one line that says it did not work.
+
+    A flush that times out is the original three-month outage happening again
+    at a smaller scale — the event is dropped and nothing anywhere says so.
+    `sentry_sdk.flush` returns `None`, so there is no result to check; its
+    `callback=` fires as soon as anything is still pending 100ms in, which a
+    slow-but-successful flush also does, so that is a false-positive generator
+    rather than a signal. What is unambiguous is the clock: the worker's two
+    joins add up to exactly `FLUSH_TIMEOUT`, so a flush that used the whole
+    budget is a flush that gave up.
+
+    The SDK does notice, on `sentry_sdk.errors` — and that logger carries a
+    `NullHandler`, which counts as handled and so suppresses Python's
+    last-resort stderr output. Its own report of the failure therefore goes
+    nowhere. Hence ours.
+    """
+    started = time.monotonic()
+    sentry_sdk.flush(FLUSH_TIMEOUT)
+    elapsed = time.monotonic() - started
+    if elapsed >= FLUSH_TIMEOUT * 0.95:
+        logger.error(
+            "Sentry flush timed out after %.2fs; at least one event was dropped",
+            elapsed,
+        )

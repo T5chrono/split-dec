@@ -69,6 +69,25 @@ quietly. Check these at each release.
 | `SUPABASE_JWT_SECRET` | **absent** — verified 2026-09-08 | Vercel env vars |
 | Supabase pooler CA | `Supabase Root 2021 CA`, expires **2031-04-26** | `AUDIT_DATABASE_URL=<production> pytest tests/test_db_tls_pg.py` — a rotation arrives as a connection failure, not a warning |
 
+### Whether an alert is actually received
+
+The rows above are controls that stop something happening. These are the ones
+that decide whether anybody *finds out* — and they rot the same way, with the
+extra twist that their failure mode is silence, which is also what working
+correctly looks like on a quiet week. Added 2026-09-17 after a review pointed
+out that this document inventoried every control except the ones carrying its
+own findings to a person.
+
+| Setting | Expected | Where |
+| --- | --- | --- |
+| Sentry issue alert rules | **unverified — check and record the answer here.** The API project now raises deliberate ERROR events (`monitoring.alert`, the Resend failure paths, a missing DSN, a flush that timed out). Each is written to be worth an interruption; none of it arrives if no rule fires on a new issue | Sentry → `splitdec-api` / `splitdec-frontend` → Alerts |
+| Sentry notification target | **unverified.** A rule delivering to an address nobody reads is the same as no rule. One maintainer, so it is one address | Sentry → Settings → Notifications |
+| Browser DSN rate limit | **100/hour**, set deliberately because a public DSN is a public write endpoint. Note what it costs: the drops are silent and they land *during* a widespread incident, which is exactly when the events matter most | Sentry → `splitdec-frontend` → Client Keys |
+| Prevent Storing of IP Addresses | **off** — Sentry stores a city-level location derived from the reporting IP, which `src/lib/legal.ts` discloses rather than denies. Turning it on narrows that and is a `LEGAL_UPDATED` question, not a free win | Sentry → `splitdec-api` → Security & Privacy |
+| Sentry uptime monitor | five-minute ping of `/api/health`. It is also what made release-health traffic the bulk of this project's Sentry volume before `auto_session_tracking=False` | Sentry → Crons / Uptime |
+| Function log drain | **none, and that is a known gap.** Vercel retains runtime logs for about an hour with no export on this tier, so every `logger.*` line in `api/_src/` is a live-debugging aid and never a forensic record. Anything that must survive the hour has to be a Sentry event — which is why the levels in `emailer.py` and `monitoring.py` were raised rather than merely logged | Vercel project → Settings → Log Drains |
+| Supabase auth logs | not drained and not monitored. Sign-in and failed sign-in happen entirely inside Supabase and never reach the function, so `api/_src/auth.py` cannot see them and its own 401s are a different population | Supabase → Logs |
+
 Inbound mail is the one row above with no account to log into from CI at all,
 and it fails silently in the direction that matters: a dead alias bounces or
 swallows mail without anything here noticing. What the MX records say is at

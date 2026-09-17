@@ -13,6 +13,8 @@ import unicodedata
 import urllib.error
 import urllib.request
 
+from .config import current_env
+
 logger = logging.getLogger("splitdec.emailer")
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
@@ -194,9 +196,25 @@ async def send_invitation_email(
     not even users yet. Provider responses are logged as a status code only:
     Resend echoes the payload (recipient, sender, sometimes the key prefix)
     in its error bodies.
+
+    **Every failure here is ERROR, and the level is the point.** Invitation
+    email is how somebody is given access to a group, so a provider that has
+    started refusing us is an outage of the only feature a non-user ever
+    touches — and it is invisible from inside the app, which records the
+    invitation either way and falls back to a mailto draft. WARNING was the
+    wrong level for that: `LoggingIntegration` files a warning as a breadcrumb
+    on some later, unrelated event, so a revoked key or a 403 sandbox
+    restriction raised no alert of its own and surfaced, if ever, as
+    decoration on an exception from somewhere else. ERROR is an event.
     """
     if not RESEND_API_KEY:
-        logger.info("RESEND_API_KEY unset; skipping invitation email %s", correlator)
+        # Silent in development, where having no key is the normal state and
+        # the mailto fallback is the intended path. In production it means a
+        # deployment that has quietly stopped inviting anybody.
+        if current_env() != "development":
+            logger.error(
+                "RESEND_API_KEY unset; invitation email %s was not sent", correlator
+            )
         return False
     payload = {
         "from": RESEND_FROM,
@@ -210,10 +228,10 @@ async def send_invitation_email(
     except urllib.error.HTTPError as e:
         # The status code alone distinguishes the cases worth acting on
         # (403 sandbox restriction, 422 bad sender, 429 provider throttle).
-        logger.warning("Resend rejected invitation email %s: HTTP %s", correlator, e.code)
+        logger.error("Resend rejected invitation email %s: HTTP %s", correlator, e.code)
         return False
     except Exception as e:  # noqa: BLE001 — best-effort; must not fail the request
-        logger.warning(
+        logger.error(
             "Failed to send invitation email %s: %s", correlator, type(e).__name__
         )
         return False

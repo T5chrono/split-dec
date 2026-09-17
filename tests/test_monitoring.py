@@ -326,3 +326,94 @@ def test_the_vercel_entrypoint_is_shaped_like_an_asgi_app():
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     assert len(required) == 3
+
+
+class TestMissingDsnIsReported:
+    """A production deployment with no DSN reports nothing, and used to say nothing.
+
+    The failure it guards against is the quietest one available: monitoring
+    that was never switched on looks exactly like monitoring with nothing to
+    report. It cannot be sent to Sentry, so the log is the only channel left.
+    """
+
+    def test_production_without_a_dsn_logs_an_error(self, monkeypatch, caplog):
+        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.init_monitoring()
+        assert "SENTRY_DSN is not set" in caplog.text
+
+    def test_development_without_a_dsn_stays_silent(self, monkeypatch, caplog):
+        """Having no DSN locally is the intended state, not an incident."""
+        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.delenv("VERCEL_ENV", raising=False)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.init_monitoring()
+        assert caplog.records == []
+
+
+class TestFlushFailureIsReported:
+    """A flush that gives up drops the event. Something has to say so.
+
+    `sentry_sdk.flush` returns None and the SDK's own complaint goes to
+    `sentry_sdk.errors`, which carries a NullHandler -- that counts as handled,
+    so Python's last-resort stderr output never fires and the message is lost.
+    The clock is the only unambiguous signal available.
+    """
+
+    def test_a_flush_that_uses_the_whole_budget_logs_an_error(self, monkeypatch, caplog):
+        def stall(timeout):
+            # What the worker does when the queue will not drain: both of its
+            # joins expire, so the call returns having spent the whole budget.
+            monkeypatch.setattr(
+                monitoring.time, "monotonic", lambda: start + monitoring.FLUSH_TIMEOUT
+            )
+
+        start = 1000.0
+        monkeypatch.setattr(monitoring.time, "monotonic", lambda: start)
+        monkeypatch.setattr(monitoring.sentry_sdk, "flush", stall)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring._flush_reporting_loss()
+        assert "flush timed out" in caplog.text
+
+    def test_a_flush_that_drains_says_nothing(self, monkeypatch, caplog):
+        """The overwhelming majority. Reporting on it would be the noise."""
+        clock = iter([1000.0, 1000.01])
+        monkeypatch.setattr(monitoring.time, "monotonic", lambda: next(clock))
+        monkeypatch.setattr(monitoring.sentry_sdk, "flush", lambda timeout: None)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring._flush_reporting_loss()
+        assert caplog.records == []
+
+
+class TestAlert:
+    """The deliberate channel for "a person has to look at this"."""
+
+    def test_an_alert_is_both_an_event_and_a_log_line(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            monitoring, "SENTRY_DSN", "https://k@o0.ingest.de.sentry.io/1"
+        )
+        captured: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            monitoring.sentry_sdk,
+            "capture_message",
+            lambda message, level: captured.append((message, level)),
+        )
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.alert("the roof is on fire")
+        assert captured == [("the roof is on fire", "error")]
+        assert "the roof is on fire" in caplog.text
+
+    def test_without_a_dsn_it_logs_but_posts_nothing(self, monkeypatch, caplog):
+        """Same off switch as everything else here, so the suite stays quiet."""
+        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+
+        def explode(*_args, **_kwargs):
+            raise AssertionError("capture_message reached without a DSN")
+
+        monkeypatch.setattr(monitoring.sentry_sdk, "capture_message", explode)
+        with caplog.at_level("ERROR", logger="splitdec.monitoring"):
+            monitoring.alert("still worth a log line")
+        assert "still worth a log line" in caplog.text
