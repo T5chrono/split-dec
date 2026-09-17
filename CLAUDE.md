@@ -676,6 +676,50 @@ Delivery confirmed from production on 2026-09-08: `tls: "ok"` and six of six
 probe events delivered, the first events `splitdec-api` has ever received from
 the function rather than from a laptop.
 
+**`logger.error` is an event, and that is the contract the whole alerting
+design rests on.** `LoggingIntegration` is a *default* integration running at
+`event_level=ERROR`, and `integrations=[...]` adds to the defaults rather than
+replacing them — so an ERROR becomes a Sentry event with nothing in
+`init_monitoring` saying so. Everything worth waking somebody for is therefore
+an ERROR and nothing else may use that level: the three Resend failure paths,
+`monitoring.alert`, a missing `SENTRY_DSN` outside development, and a flush
+that timed out. WARNING is a breadcrumb attached to some later unrelated event,
+which is where those Resend failures used to go — a revoked key raised no alert
+of its own while invitations, the mechanism by which group access is granted,
+stopped being delivered. **Do not add an explicit `capture_message` beside an
+`logger.error`**: that was tried and produced two events per alert, a `message`
+and a `logentry`, one incident arriving as two issues. Because the suite mocks
+`init()`, the promotion never runs there and nothing in the tests would notice
+it breaking, so `tests/test_monitoring.py::TestErrorIsTheEventContract` pins the
+assumption directly — default integrations not disabled, nothing in
+`disabled_integrations`, no hand-rolled `LoggingIntegration` replacing the
+default, and the default's `event_level` read from the SDK rather than assumed.
+Verified end to end against production on 2026-09-17 via the two-probe health
+route: a `logger.error` arrived as its own event, was classified high priority,
+tripped the project's alert rule and reached the maintainer's mailbox.
+
+**A flush that gives up says so** (`monitoring._flush_reporting_loss`). This is
+the outage above recurring one event at a time, and three things hide it:
+`sentry_sdk.flush` returns `None`, so there is no result to check; its
+`callback=` fires whenever anything is still pending 100ms in, which a
+slow-but-successful flush also does, making it a false-positive generator rather
+than a signal; and the SDK's own complaint goes to `sentry_sdk.errors`, a logger
+carrying a `NullHandler`, which counts as handled and so suppresses Python's
+last-resort stderr output. What is unambiguous is the clock — the worker's two
+joins sum to exactly `FLUSH_TIMEOUT`, so a flush that spent the whole budget is
+one that gave up.
+
+**Only the global invitation cap alerts, of the three quotas**
+(`ratelimit.enforce_invitation_quota`). The per-inviter and per-recipient
+windows are ordinary back-pressure on one account, hit routinely by anyone
+organising a trip, and alerting on them would train whoever reads the channel to
+ignore it; the global one rations the sending domain's reputation, which every
+user shares and which cannot be bought back. It sits behind an hourly
+per-instance cooldown, because the window stays full until its oldest row ages
+out and an alert per attempt is the failure `reports.py` already names. That
+cooldown is per warm instance, so the event count measures instances rather than
+attempts — **never derive a threshold from it**.
+
 `connect-src` in `vercel.json` carries the org's ingest host pinned exactly
 (`https://o4512011830886400.ingest.de.sentry.io`); `*.ingest.sentry.io` would
 admit every other tenant on the platform. Asserted in `tests/test_vercel_config.py`,
