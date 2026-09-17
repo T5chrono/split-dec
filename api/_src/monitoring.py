@@ -109,25 +109,31 @@ def captures_seen() -> int:
 
 
 def alert(message: str) -> None:
-    """Raise an operational alert: a Sentry event plus a log line.
+    """Raise an operational alert: one log line, which is one Sentry event.
 
     For the small set of conditions that mean something outside this process
     is wrong and a person has to look — not for anything a caller can trigger
     at will, which is how an alert channel becomes noise nobody reads.
 
-    `capture_message` explicitly rather than leaning on `LoggingIntegration`
-    to promote the `logger.error` below: that integration's behaviour is a
-    default that a future `init()` change could switch off without anything
-    here noticing, and the two calls say different things anyway -- one is the
-    alert, the other is the record for whoever is reading the function log.
+    **One call, deliberately.** `LoggingIntegration` is on by default with
+    `event_level=ERROR`, and `integrations=[...]` adds to the defaults rather
+    than replacing them (see the module docstring), so `logger.error` is
+    already an event. Adding an explicit `capture_message` beside it produced
+    *two* — a `message` event and a `logentry` event, one incident arriving as
+    two issues — on precisely the channel this codebase works hardest to keep
+    meaningful. The mocked `init()` in the test suite hid it, so
+    `TestErrorIsTheEventContract` pins the promotion instead.
 
-    A no-op on the Sentry side when no DSN is configured, which is how the
-    test suite and a local uvicorn stay out of the issue stream. The log line
-    is unconditional.
+    That the whole module leans on an SDK default is the fair objection to
+    this, and the answer is the test rather than a second call: every `ERROR`
+    in `emailer.py` relies on exactly the same promotion, so an explicit
+    capture here would have bought consistency nowhere while costing a
+    duplicate everywhere it was used.
+
+    No DSN means no SDK, so this degrades to the log line on its own — which
+    is how the suite and a local uvicorn stay out of the issue stream.
     """
     logger.error("%s", message)
-    if SENTRY_DSN:
-        sentry_sdk.capture_message(message, level="error")
 
 
 def redact_ids(text: str) -> str:

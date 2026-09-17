@@ -11,6 +11,7 @@ going wrong: that an event actually *arrives*. See `flush_on_response`.
 
 import importlib.util
 import inspect
+import logging
 import os
 
 import pytest
@@ -391,29 +392,73 @@ class TestFlushFailureIsReported:
 class TestAlert:
     """The deliberate channel for "a person has to look at this"."""
 
-    def test_an_alert_is_both_an_event_and_a_log_line(self, monkeypatch, caplog):
-        monkeypatch.setattr(
-            monitoring, "SENTRY_DSN", "https://k@o0.ingest.de.sentry.io/1"
-        )
-        captured: list[tuple[str, str]] = []
-        monkeypatch.setattr(
-            monitoring.sentry_sdk,
-            "capture_message",
-            lambda message, level: captured.append((message, level)),
-        )
+    def test_an_alert_is_one_error_log_line(self, caplog):
         with caplog.at_level("ERROR", logger="splitdec.monitoring"):
             monitoring.alert("the roof is on fire")
-        assert captured == [("the roof is on fire", "error")]
+        assert [r.levelname for r in caplog.records] == ["ERROR"]
         assert "the roof is on fire" in caplog.text
 
-    def test_without_a_dsn_it_logs_but_posts_nothing(self, monkeypatch, caplog):
-        """Same off switch as everything else here, so the suite stays quiet."""
-        monkeypatch.setattr(monitoring, "SENTRY_DSN", "")
+    def test_it_does_not_also_capture_the_message_itself(self, monkeypatch, caplog):
+        """One incident must not arrive as two issues.
+
+        `LoggingIntegration` already promotes the line above into an event, so
+        an explicit `capture_message` beside it sent a `message` event *and* a
+        `logentry` event for the same alert — double the quota on the one
+        channel that is supposed to stay rare enough to be worth reading.
+        """
 
         def explode(*_args, **_kwargs):
-            raise AssertionError("capture_message reached without a DSN")
+            raise AssertionError("alert() captured an event on top of the log line")
 
         monkeypatch.setattr(monitoring.sentry_sdk, "capture_message", explode)
         with caplog.at_level("ERROR", logger="splitdec.monitoring"):
-            monitoring.alert("still worth a log line")
-        assert "still worth a log line" in caplog.text
+            monitoring.alert("still just the one")
+        assert "still just the one" in caplog.text
+
+
+class TestErrorIsTheEventContract:
+    """`logger.error` is an event. The whole module depends on it.
+
+    `emailer.py`'s three failure paths and `monitoring.alert` all reach Sentry
+    only because `LoggingIntegration` is a *default* integration running at
+    `event_level=ERROR`. Nothing in `init_monitoring` says so, which is the
+    fair objection to leaning on it — a future `init()` gaining
+    `default_integrations=False` or a `disabled_integrations` entry would
+    switch every one of those alerts off at once, silently, and the suite
+    would not notice because it mocks `init`.
+
+    So the assumption is pinned here rather than restated in a docstring.
+    """
+
+    @pytest.fixture
+    def options(self, monkeypatch):
+        monkeypatch.setattr(
+            monitoring, "SENTRY_DSN", "https://k@o0.ingest.de.sentry.io/1"
+        )
+        recorded: dict = {}
+        monkeypatch.setattr(
+            monitoring.sentry_sdk, "init", lambda **kwargs: recorded.update(kwargs)
+        )
+        monitoring.init_monitoring()
+        return recorded
+
+    def test_default_integrations_are_not_switched_off(self, options):
+        assert options.get("default_integrations", True) is not False
+
+    def test_nothing_is_added_to_disabled_integrations(self, options):
+        assert not options.get("disabled_integrations")
+
+    def test_the_logging_integration_is_not_among_the_explicit_ones(self, options):
+        """Passing one's own `LoggingIntegration` replaces the default, and the
+        replacement may carry a different `event_level`. Today none is passed;
+        if that changes, the level has to be checked rather than assumed."""
+        names = {type(i).__name__ for i in options["integrations"]}
+        assert "LoggingIntegration" not in names
+
+    def test_the_integration_default_is_still_error(self):
+        """The level the promotion happens at, read from the SDK rather than
+        assumed. A release that moved it would break every alert in this
+        codebase and nothing else here would catch it."""
+        from sentry_sdk.integrations.logging import LoggingIntegration
+
+        assert LoggingIntegration()._handler.level == logging.ERROR
