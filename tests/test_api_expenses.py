@@ -2,7 +2,12 @@
 
 import uuid
 
+import pytest
 from conftest import expense_payload, idem
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from _src.deps import MAX_GROUP_MEMBERS
 
 
 async def test_create_expense(client, two_user_group):
@@ -530,3 +535,54 @@ class TestDebtCannotOutliveMembership:
         assert (await client.delete(f"/api/expenses/{expense_id}")).status_code == 204
         assert (await client.delete(f"/api/settlements/{settlements[0]['id']}")).status_code == 204
         assert (await client.get(f"/api/groups/{gid}/balances")).json() == {}
+
+
+async def test_an_unrelated_integrity_error_is_not_a_key_collision(
+    client, two_user_group, monkeypatch
+):
+    """The except clause used to assume the idempotency index was the only
+    constraint that could fire at commit, and answered anything else as a 409
+    about the key — with no log line, so a real defect reached nobody. When no
+    row anywhere holds the key, the error now propagates (a 500 Sentry sees).
+    Forced, because every other constraint is checked before the insert."""
+    real_commit = AsyncSession.commit
+    calls = 0
+
+    async def fail_first(self):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise IntegrityError("INSERT INTO expense_splits", {}, Exception("CHECK"))
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_first)
+    g = two_user_group
+    with pytest.raises(IntegrityError):
+        await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(g["alice"], [g["alice"]]),
+            headers=idem(),
+        )
+
+
+async def test_splits_are_capped_at_a_full_group(client, two_user_group):
+    """A group holds MAX_GROUP_MEMBERS people, so no honest expense names more.
+    One over is refused at parse time; exactly the cap still reaches the
+    handler (and fails there, on membership, because these ids are strangers)."""
+    g = two_user_group
+    strangers = [{"user_id": str(uuid.uuid4())} for _ in range(MAX_GROUP_MEMBERS + 1)]
+    url = f"/api/groups/{g['group'].id}/expenses"
+
+    over = expense_payload(g["alice"], [], splits=strangers)
+    assert (await client.post(url, json=over, headers=idem())).status_code == 422
+
+    at_cap = expense_payload(g["alice"], [], splits=strangers[:MAX_GROUP_MEMBERS])
+    assert (await client.post(url, json=at_cap, headers=idem())).status_code == 400
+
+    created = await client.post(
+        url, json=expense_payload(g["alice"], [g["alice"]]), headers=idem()
+    )
+    financials = ("split_type", "total_amount", "currency", "paid_by_user_id", "splits")
+    patch = {k: over[k] for k in financials}
+    r = await client.patch(f"/api/expenses/{created.json()['id']}", json=patch)
+    assert r.status_code == 422

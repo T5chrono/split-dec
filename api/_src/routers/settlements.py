@@ -13,6 +13,7 @@ from ..db import get_db
 from ..deps import (
     ensure_no_outsider_debt,
     get_settlement_for_member,
+    idempotency_key_taken,
     record_edit,
     require_membership,
 )
@@ -148,12 +149,18 @@ async def create_settlement(
         # carrying the same key can both miss it and race to insert.
         await db.rollback()
         existing = await _find_by_idempotency_key(db, group_id, idempotency_key)
-        if existing is None:
+        if existing is not None:
+            response.status_code = 200
+            return existing
+        if await idempotency_key_taken(db, Settlement, idempotency_key):
             raise HTTPException(
                 status_code=409, detail="Idempotency-Key is already in use"
             )
-        response.status_code = 200
-        return existing
+        # No row anywhere holds the key, so the idempotency index is not what
+        # fired. Every other constraint is checked above before the insert, so
+        # this is a bug; re-raised to reach Sentry as one, instead of being
+        # told to the caller as a key collision and to nobody else at all.
+        raise
     return settlement
 
 

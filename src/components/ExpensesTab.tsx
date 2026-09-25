@@ -29,6 +29,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const [paidBy, setPaidBy] = useState<string | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [adding, setAdding] = useState(false);
+  const [categoryError, setCategoryError] = useState<Error | null>(null);
   const [deleting, setDeleting] = useState<Expense | null>(null);
 
   const membersById = new Map(group.members.map((m) => [m.id, m]));
@@ -116,6 +117,9 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
           {(deleteExpense.error as Error).message}
         </p>
       )}
+      {categoryError && (
+        <p className="mb-2 text-sm text-red-600 dark:text-red-400">{categoryError.message}</p>
+      )}
 
       {data && data.items.length === 0 && offset === 0 && (
         <EmptyState
@@ -150,7 +154,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
                   {monthFmt.format(date).replace(".", "")}
                 </div>
               </div>
-              <CategoryIconButton expense={e} groupId={group.id} />
+              <CategoryIconButton expense={e} groupId={group.id} onError={setCategoryError} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{e.description}</div>
                 {/* Deliberately only the payer. Who last *edited* the row is
