@@ -49,7 +49,7 @@ quietly. Check these at each release.
 | Workflow permissions | *Read repository contents*, and "allow Actions to create and approve pull requests" **off** | GitHub → Settings → Actions → General |
 | Private vulnerability reporting | enabled — `SECURITY.md` points at it | GitHub → Settings → Code security |
 | Firewall rule "CSP report flood limit" | `path equals /api/csp-report`, 100 req/60s per IP, deny 5m | Vercel project — inspect with `vercel firewall rules list` |
-| Firewall rule for `/api/unsubscribe` | **none, and that is a gap** — the route has only its in-process 30/min bucket, which is a per-instance floor on a function that runs several. Unlike the CSP route it writes a row, though a forged token is refused before the database is touched and the primary key makes a replay idempotent. Add one if it ever sees traffic | Vercel project |
+| Firewall rule "Unsubscribe flood limit" | `path equals /api/unsubscribe`, 30 req/60s per IP, deny 5m. Added 2026-09-25; before that the route had only its in-process bucket, a per-instance floor. 30 matches that bucket on purpose — one-click POSTs come from the mail provider's servers, so recipients share IPs | Vercel project — inspect with `vercel firewall rules list` |
 | Deploy hooks on the Vercel project | **none** — each one is an unauthenticated URL that builds and deploys production for whoever holds it, with no commit behind it. Confirmed 2026-09-15 (`vercel deploy-hooks ls`) | Vercel project → Settings → Git |
 | Vercel access tokens | **none** — a token is a `vercel --prod` outside git entirely. The CLI login is a session credential and does not appear in this list, which is the better arrangement. Confirmed 2026-09-15 (`vercel api /v5/user/tokens`) | Vercel → Account Settings → Tokens |
 | Vercel team members | **one**, `t5chrono`, OWNER. Confirmed 2026-09-15 (`vercel api /v2/teams/<id>/members`) | Vercel → Team Settings → Members |
@@ -335,7 +335,7 @@ person who reads these checks to stop reading them.
 
 ### Production configuration lives in dashboards
 
-**Risk.** The Vercel Firewall rule, Vercel env vars, the Supabase auth email
+**Risk.** The Vercel Firewall rules, Vercel env vars, the Supabase auth email
 templates, the out-of-band `splitdec_app` role and hand-applied migrations are
 all outside version control, PR review and CI.
 
@@ -580,3 +580,113 @@ blunt instrument is available and costs only the outstanding links.
 enough that a suppressed address is a commercial rather than a cosmetic
 problem. Rotate the secret first; build the expiry only if that proves
 insufficient.
+
+### Declined from the 2026-09-25 error-handling review
+
+The review raised sixteen findings against the API's error handling. Nine were
+fixed (PRs #133–#135: JWKS outages, the CSP collector, idempotency
+discrimination, database timeouts and the rest); the entries below are the
+ones that were not, each checked against the code and production before it
+was declined. A future review raising one of them again should start here.
+
+### A missing `DATABASE_URL` crashes before Sentry starts
+
+**Risk.** `config.py` defaults `DATABASE_URL` to `""` and `db.py` builds its
+engine at import, which raises before `main.py` calls `init_monitoring()`. So a
+deployment missing the variable fails every request and sends Sentry nothing.
+
+**Why accepted.** It is not silent, only absent from one channel: the Vercel
+runtime log carries the traceback, and the Sentry uptime monitor on
+`/api/health` sees every request fail within five minutes. It can only happen
+at deploy time, never to a running deployment. The fix — initialising
+monitoring before importing the app — reorders `api/index.py`, whose shape
+Vercel uses to decide between ASGI and WSGI (see CLAUDE.md), which is a larger
+risk than the one it removes.
+
+**Revisit when.** The uptime monitor is removed, or a configuration value is
+added whose absence breaks only *some* requests, which the monitor would not see.
+
+### Every failed invitation email is its own Sentry event
+
+**Risk.** The three Resend failure paths in `emailer.py` each `logger.error`
+with no cooldown, so a provider outage produces one event per attempted send,
+each also waiting on the response flush.
+
+**Why accepted.** Volume is bounded by `INVITE_MAX_GLOBAL` (300 a day). Sentry
+groups them into one issue, so the alert arrives once. And unlike the JWKS
+outage, where every event is the same fact, each of these is a distinct person
+who did not get their invitation — worth a record.
+
+**Revisit when.** The global invitation cap is raised well past 300, or Sentry's
+monthly error quota comes under pressure.
+
+### Renaming a group is not metered
+
+**Risk.** `rename_group` charges no `write_events` row, so a member who has
+spent every quota can still rename their group in a loop. Each rename is an
+`UPDATE` on the group row, which briefly conflicts with the `FOR SHARE` lock
+ledger writes take on it.
+
+**Why accepted.** The quotas meter what piles up — rows, emails — and a rename
+overwrites one column. It costs about what a `GET` costs, and reads are not
+metered either. The contention lands only on the caller's own group, whose
+members that person can already inconvenience in worse ways.
+
+**Revisit when.** A rename gains a side effect — a notification, an email, an
+entry in a history — at which point it creates something and needs a window.
+
+### `GET /invitations/mine` is not paged
+
+**Risk.** It returns every pending invitation addressed to the caller. The
+partial unique index allows one pending invitation per group, not per address,
+so the list has no fixed ceiling.
+
+**Why accepted.** `INVITE_MAX_PER_RECIPIENT` caps one address at 3 invitations
+a day from everyone combined, so even a determined stranger reaches about 1,100
+in a year, and declining one removes it. Paging would change the response shape
+and the screen for a list nobody has seen grow past a handful.
+
+**Revisit when.** The per-recipient cap is raised, or a real account's list is
+seen above a few dozen.
+
+### `GET /groups` is not paged
+
+**Risk.** It returns every group the caller belongs to.
+
+**Why accepted.** Nobody can add you to a group: a membership exists only
+because you created the group (25 a day) or accepted an invitation. The only
+person a long list slows down is the person who built it.
+
+**Revisit when.** Anything adds members without their consent — a direct-add
+endpoint returning, an import, an admin tool.
+
+### `/api/health/db` fails with a bare 500
+
+**Risk.** When the database is unreachable the probe answers Starlette's generic
+"Internal Server Error" rather than a structured body the way
+`/api/health/sentry` does.
+
+**Why accepted.** The route is gated by `HEALTH_PROBE_KEY`, and a non-200 is
+already the signal a monitor reads; the exception itself reaches Sentry. A
+structured body is where `str(exc)` tends to end up, and a database error's text
+can carry the connection string.
+
+**Revisit when.** A monitor needs to tell kinds of database failure apart — and
+then return a fixed category, never the exception text.
+
+### The unsubscribe token has no length limit
+
+**Risk.** `POST /api/unsubscribe?token=` accepts a token of any length before
+checking it.
+
+**Why accepted.** `verify_token` does a shape check, two base64 decodes and a
+length check before any HMAC — work that grows linearly with the input, with
+nothing expensive to multiply. The rate limits (the in-process bucket and the
+Firewall rule above) run first, and the platform caps URL length. The obvious
+fix is worse than the gap: `Query(max_length=...)` answers with FastAPI's 422,
+which echoes the offending input back on the one unauthenticated route that
+writes.
+
+**Revisit when.** `verify_token` gains anything superlinear, or the token format
+changes. If a bound is ever added, check the length inside the handler and
+answer generically.

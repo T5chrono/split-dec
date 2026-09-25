@@ -230,6 +230,18 @@ on `ENV=development`):
   which Chrome reads as a failed delivery and retries. Dropping beats
   stringifying: a `repr` in the log line is what `log_value` exists to
   prevent.
+  **`RecursionError` is not a `ValueError`**, so it is caught beside it at
+  `json.loads`. On Python 3.12, which production runs, the parser gives up
+  under 3,000 levels of `[[[…]]]` while the 16 kB cap allows 8,000, so a nested
+  array was a 500 here until September 2026. On 3.14 the limit is the C stack
+  and the same body parses — a local run on the maintainer's 3.14 does not
+  reproduce it, which is why the test forces the error rather than relying on
+  the body. The cap is counted as the body streams in (`request.stream()`)
+  rather than after `request.body()`, since a chunked body has no
+  Content-Length, and `normalize` stops at the report cap instead of being
+  sliced afterwards. Both limited routes share `token_bucket.TokenBucket`,
+  which logs one WARNING per drought — `/api/unsubscribe` used to refuse with
+  a 429 and log nothing, so a flood left no trace.
 
   Pointing the reports at a third-party collector would be a new processor,
   and a `src/lib/legal.ts` change with a `LEGAL_UPDATED` bump.
@@ -877,7 +889,9 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   the invite form as available and withdraws it a moment later, and waiting for the
   query takes the button away from every group for the length of a fetch. The UI
   answers the half it knows synchronously; a group at 99 members with an invitation
-  outstanding is offered the form and refused by the server.
+  outstanding is offered the form and refused by the server. The same constant caps
+  `splits` on `ExpenseCreate`/`ExpenseUpdate` (422 at parse time), since no expense can
+  name more people than a group holds.
 - **A group is never left without members.** `remove_member` refuses to remove the last one
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure
@@ -995,6 +1009,10 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   authenticated user id changes. Keep both halves of that invariant.
 - Opening a group prefetches all four tabs; deletes are optimistic with rollback; global
   `staleTime` 60s but balances override to 15s (other members' actions change it).
+  **A rollback always says why.** `CategoryIconButton`'s quick change rolled back in
+  silence until September 2026, so a 429 from the edit quota looked like the icon
+  flipping back on its own; it now hands its error to `ExpensesTab`, which shows it
+  where the delete error goes. Not `reportError` — a refusal is not a bug.
 - Date-only strings (`expense_date`) must never round-trip through UTC
   (`new Date("YYYY-MM-DD")`/`toISOString` shift the calendar day) — use `src/lib/dates.ts`.
 - The expense form guesses the category from the description (`src/lib/categoryGuess.ts`):
@@ -1174,7 +1192,12 @@ Four things there are load-bearing:
   human involved, while link scanners prefetch every GET in a message — so a GET that
   unsubscribed would fire on delivery. The human-facing page is `/unsubscribe` in the
   SPA, which explains itself and then POSTs. It is the second route reachable without
-  a token after `/api/csp-report`, and the first that writes.
+  a token after `/api/csp-report`, and the first that writes. It has its own Firewall
+  rule, **"Unsubscribe flood limit"** (`path equals /api/unsubscribe`, 30 req/60s per
+  IP, deny 5m, added 2026-09-25). 30 rather than the CSP route's 100 on purpose, and
+  not lower: a one-click POST comes from the mail provider's servers, so many
+  recipients share a handful of IPs, and matching the in-function bucket means the
+  edge never refuses what the function would accept. Change both together.
 - **Opting out suppresses the email and nothing else.** The invitation row is still
   created, still visible in the app if that address ever signs up, and **still charged
   to the sender's quota**. Refunding the slot would let a caller read their own

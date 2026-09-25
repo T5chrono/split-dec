@@ -19,7 +19,15 @@ primary key, which makes the write idempotent rather than unbounded -- the same
 address arriving a thousand times is one row; and the per-process token bucket
 below. The bucket is a floor and not a ceiling for the reason spelled out at
 length in reports.py: this is a serverless function with several instances that
-cannot see each other's counters. The edge is where a ceiling would go.
+cannot see each other's counters.
+
+**The ceiling is at the edge**: a Vercel Firewall rule named "Unsubscribe flood
+limit", `path equals /api/unsubscribe`, 30 requests per 60s keyed by IP, denying
+for 5m. It lives in the Vercel project, invisible from here and from CI
+(`vercel firewall rules list`). The number matches `REQUESTS_PER_MINUTE` on
+purpose and is not lower: RFC 8058 one-click POSTs come from the mail
+provider's servers, so many recipients share a handful of IPs. If the number
+below changes, change the rule too.
 """
 
 import logging
@@ -36,7 +44,8 @@ logger = logging.getLogger("splitdec.unsubscribe")
 router = APIRouter(tags=["unsubscribe"])
 
 # A real person unsubscribes once. This is sized for a mail provider retrying a
-# one-click POST and for a page someone double-clicks, not for traffic.
+# one-click POST and for a page someone double-clicks, not for traffic. The
+# Firewall rule in the module docstring carries the same number; change both.
 REQUESTS_PER_MINUTE = 30
 
 # Refusals are logged once per drought: before the shared helper existed this

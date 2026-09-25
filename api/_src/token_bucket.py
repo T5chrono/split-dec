@@ -9,7 +9,8 @@ bucket exists for, left no trace in the log.
 **A floor, never a ceiling.** This is a serverless function with several warm
 instances that cannot see each other's counters, so the effective limit is the
 rate times however many instances the platform chose to run. The ceiling is at
-the edge (a Vercel Firewall rule; see reports.py's module docstring).
+the edge: one Vercel Firewall rule per route, described in reports.py and
+routers/unsubscribe.py, and invisible to CI.
 
 Mutated without a lock: `take` has no `await` in it, so within one event loop
 it runs to completion.
