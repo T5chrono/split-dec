@@ -1,0 +1,42 @@
+-- Time limits for the app's own database role.
+--
+-- Before this, `splitdec_app` carried no settings of its own, so it ran on the
+-- cluster's: `lock_timeout` and `idle_in_transaction_session_timeout` both 0,
+-- meaning wait for ever, and `statement_timeout` 120s from the configuration
+-- file -- four times the function's whole `maxDuration`. The write path waits
+-- on row locks and advisory locks by design (CLAUDE.md, the concurrency
+-- protocol), so one stalled transaction queued everything behind it, and each
+-- waiter held a pooler connection until Vercel killed the function at 30s.
+-- Enough of them and the whole app stalls, not one group.
+--
+-- The three are ordered, and the order is the point:
+--
+--   lock_timeout                         5s   give up waiting for a lock
+--   statement_timeout                   12s   cancel one query
+--   idle_in_transaction_session_timeout 15s   end a transaction nobody drives
+--   asyncpg command_timeout (db.py)     15s   the client stops waiting
+--   Vercel maxDuration (vercel.json)    30s   the platform stops the function
+--
+-- Headroom measured, not assumed: the slowest statement `splitdec_app` had
+-- ever run, per pg_stat_statements when this was written, took 20ms.
+--
+-- The idle limit is safe because nothing here idles inside a transaction on
+-- purpose. The one slow outbound call, Resend, happens after the commit that
+-- releases the connection (routers/invitations.py) -- a rule this now enforces
+-- rather than merely documents.
+--
+-- Set on the role rather than per transaction: Postgres applies role settings
+-- when a backend starts as that role, which through the transaction pooler is
+-- every connection Supavisor opens as `splitdec_app`, at no per-request cost.
+-- Backends the pooler already holds keep the old values until it replaces
+-- them. `postgres`, which runs migrations, is untouched.
+--
+-- Undo: ALTER ROLE splitdec_app RESET lock_timeout; (and the other two).
+-- tests/test_grants_pg.py asserts these three against production.
+--
+-- The role exists on every database this applies to: 20260904100000 creates a
+-- NOLOGIN stand-in wherever the real one was not made out of band.
+
+ALTER ROLE splitdec_app SET lock_timeout = '5s';
+ALTER ROLE splitdec_app SET statement_timeout = '12s';
+ALTER ROLE splitdec_app SET idle_in_transaction_session_timeout = '15s';

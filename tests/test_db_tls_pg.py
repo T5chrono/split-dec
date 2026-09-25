@@ -61,11 +61,9 @@ async def test_the_pooler_passes_verification(strict_tls):
     engine = create_async_engine(
         AUDIT_DATABASE_URL,
         poolclass=NullPool,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-            "ssl": strict_tls,
-        },
+        # The app's own arguments, not a copy of them, so the gate connects
+        # exactly the way the deployment does -- `command_timeout` included.
+        connect_args={**db._connect_args, "ssl": strict_tls},
     )
     try:
         async with engine.connect() as conn:

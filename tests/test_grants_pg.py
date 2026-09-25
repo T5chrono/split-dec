@@ -387,6 +387,65 @@ async def test_the_app_role_has_no_attributes_and_no_memberships(catalog):
     )
 
 
+# The database half of the timeout ladder (migration 20260925000000; the client
+# half is `db.COMMAND_TIMEOUT`). Without them the role runs on the cluster's
+# defaults: wait for ever on a lock, and 120s per statement.
+APP_ROLE_TIMEOUTS = {
+    "lock_timeout": "5s",
+    "statement_timeout": "12s",
+    "idle_in_transaction_session_timeout": "15s",
+}
+
+
+async def test_the_app_role_carries_its_timeouts(catalog):
+    """Role settings are exactly the kind of thing that drifts without a
+    migration -- one `ALTER ROLE ... RESET` in the SQL editor and every lock
+    wait is unbounded again, with nothing in the repo any different.
+
+    Read from `pg_db_role_setting` rather than `rolconfig` so a per-database
+    override, which takes precedence over the role-wide value, cannot hide
+    behind a correct role-wide one."""
+    rows = (
+        await catalog.execute(
+            text(
+                """
+                SELECT s.setdatabase = 0 AS role_wide, unnest(s.setconfig) AS setting
+                  FROM pg_db_role_setting s
+                  JOIN pg_roles r ON r.oid = s.setrole
+                 WHERE r.rolname = :role
+                """
+            ),
+            {"role": APP_ROLE},
+        )
+    ).all()
+    role_wide = dict(s.split("=", 1) for wide, s in rows if wide)
+    overrides = [s for wide, s in rows if not wide]
+    for name, expected in APP_ROLE_TIMEOUTS.items():
+        assert role_wide.get(name) == expected, (
+            f"{APP_ROLE} has {name}={role_wide.get(name)!r}, expected {expected!r} "
+            "-- see 20260925000000"
+        )
+    assert not overrides, f"{APP_ROLE} has per-database overrides: {overrides}"
+
+
+async def test_the_pooler_applies_them_to_the_app_role(catalog):
+    """The catalog says what is configured; this asks a live session what it
+    got. Role settings reach a session when its backend starts, and through
+    the transaction pooler that is whenever Supavisor opens a connection -- the
+    assumption the migration rests on, checked rather than trusted.
+
+    Only meaningful when AUDIT_DATABASE_URL connects *as* the app role, which
+    the grants tests above do not need, so it skips otherwise. Straight after
+    the settings change, a backend the pooler opened earlier can still answer
+    with the old values; that clears as the pooler replaces them."""
+    role = (await catalog.execute(text("SELECT current_user"))).scalar()
+    if role != APP_ROLE:
+        pytest.skip(f"connected as {role}, not {APP_ROLE}")
+    for name, expected in APP_ROLE_TIMEOUTS.items():
+        actual = (await catalog.execute(text(f"SHOW {name}"))).scalar()
+        assert actual == expected, f"live session has {name}={actual!r}"
+
+
 async def test_the_auth_user_wrapper_is_reachable_by_the_app_role_alone(catalog):
     """public.delete_auth_user is a privilege-escalation surface by
     construction: it runs as postgres and deletes any auth user by id. That is

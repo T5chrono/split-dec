@@ -101,3 +101,12 @@ def test_the_connection_never_settles_for_a_bare_sslmode():
     behind, so any certificate at all still passes."""
     assert "ssl" not in db._connect_args
     assert "sslmode" not in db.DATABASE_URL
+
+
+def test_the_client_stops_waiting_before_the_platform_does():
+    """The database-side limits (lock 5s, statement 12s, idle 15s) are set on
+    the role and do nothing if the server never answers. This one is the
+    client's, and it has to sit inside Vercel's 30s maxDuration or the
+    platform kills the function first and nothing reports why."""
+    assert db._connect_args["command_timeout"] == db.COMMAND_TIMEOUT
+    assert db.COMMAND_TIMEOUT < 30

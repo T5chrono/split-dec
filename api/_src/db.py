@@ -20,9 +20,21 @@ from .supabase_ca import SUPABASE_ROOT_2021_CA_PEM
 # asyncpg.
 _USES_ASYNCPG = "+asyncpg" in DATABASE_URL
 
+# How long asyncpg waits for any one operation before giving up on the server.
+# The last of a ladder whose other rungs live on the `splitdec_app` role
+# (migration 20260925000000): lock 5s, statement 12s, idle transaction 15s.
+# Those are enforced by the database and do nothing if the database never
+# answers at all -- a dropped path to the pooler -- which is what this covers,
+# well inside the function's 30s maxDuration.
+COMMAND_TIMEOUT = 15
+
 _connect_args: dict[str, int] = {}
 if _USES_ASYNCPG:
-    _connect_args = {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    _connect_args = {
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+        "command_timeout": COMMAND_TIMEOUT,
+    }
 
 engine = create_async_engine(
     DATABASE_URL,
