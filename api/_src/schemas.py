@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .categories import Category
+from .deps import MAX_GROUP_MEMBERS
 
 SplitType = Literal["EQUAL", "EXACT", "PERCENTAGE"]
 
@@ -114,7 +115,10 @@ class ExpenseCreate(BaseModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     paid_by_user_id: uuid.UUID
     expense_date: date | None = None  # defaults to today on the server
-    splits: list[SplitInput] = Field(min_length=1)
+    # At most one share per person a group can hold. Duplicates collapse later
+    # anyway; this is what stops an oversized list being parsed and validated
+    # before anything else gets to refuse it.
+    splits: list[SplitInput] = Field(min_length=1, max_length=MAX_GROUP_MEMBERS)
 
 
 class ExpenseUpdate(BaseModel):
@@ -131,7 +135,9 @@ class ExpenseUpdate(BaseModel):
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     paid_by_user_id: uuid.UUID | None = None
     expense_date: date | None = None
-    splits: list[SplitInput] | None = Field(default=None, min_length=1)
+    splits: list[SplitInput] | None = Field(
+        default=None, min_length=1, max_length=MAX_GROUP_MEMBERS
+    )
 
 
 class ExpenseSplitOut(BaseModel):

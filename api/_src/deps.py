@@ -291,6 +291,26 @@ def record_edit(row, caller: uuid.UUID) -> None:
     row.updated_at = datetime.now(timezone.utc)
 
 
+async def idempotency_key_taken(
+    db: AsyncSession, model: type[Expense] | type[Settlement], key: uuid.UUID
+) -> bool:
+    """Whether any row of `model`, in *any* group, already carries `key`.
+
+    What tells a failed create's IntegrityError apart. The replay lookup is
+    scoped to the path group on purpose, but the unique index on
+    `idempotency_key` is global, so "no row in this group" does not mean "not
+    the idempotency index": a key reused from another group lands exactly
+    there, and that is the documented 409. Only when no row anywhere holds the
+    key did some *other* constraint fire, which is a bug and not a collision.
+    Portable on purpose — it needs no constraint name, so SQLite and Postgres
+    answer the same way.
+    """
+    found = await db.execute(
+        select(model.id).where(model.idempotency_key == key).limit(1)
+    )
+    return found.first() is not None
+
+
 async def get_expense_for_member(
     db: AsyncSession,
     expense_id: uuid.UUID,

@@ -754,6 +754,10 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
 
 - `POST .../expenses` and `.../settlements` require an `Idempotency-Key` UUID header; replays
   return 200 with the existing row, **scoped to the path group** (cross-group key reuse → 409).
+  An `IntegrityError` at commit is told apart by `deps.idempotency_key_taken`, an
+  *unscoped* lookup: a key held in this group is a replay, a key held anywhere else is
+  the 409, and a key held nowhere means some other constraint fired — re-raised as the
+  bug it is, never answered as a key collision (which it used to be, with no log line).
   The client side of that contract is `useIdempotencyKey`: one key per open form, resent on
   every attempt. A retry that mints a fresh key is not a retry — if the first request landed
   and only its response was lost, the second one records the entry a second time.

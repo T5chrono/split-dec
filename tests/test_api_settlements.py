@@ -2,7 +2,10 @@
 
 import uuid
 
+import pytest
 from conftest import idem
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def settlement_payload(payer, payee, **overrides) -> dict:
@@ -196,3 +199,27 @@ async def test_settlement_list_rejects_an_unbounded_page(client, two_user_group)
     assert (await client.get(f"/api/groups/{gid}/settlements?limit=1000")).status_code == 422
     assert (await client.get(f"/api/groups/{gid}/settlements?limit=0")).status_code == 422
     assert (await client.get(f"/api/groups/{gid}/settlements?offset=-1")).status_code == 422
+
+
+async def test_an_unrelated_integrity_error_is_not_a_key_collision(
+    client, two_user_group, monkeypatch
+):
+    """See the matching test in test_api_expenses.py."""
+    real_commit = AsyncSession.commit
+    calls = 0
+
+    async def fail_first(self):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise IntegrityError("INSERT INTO settlements", {}, Exception("CHECK"))
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_first)
+    g = two_user_group
+    with pytest.raises(IntegrityError):
+        await client.post(
+            f"/api/groups/{g['group'].id}/settlements",
+            json=settlement_payload(g["bob"], g["alice"]),
+            headers=idem(),
+        )

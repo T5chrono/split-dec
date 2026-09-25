@@ -335,6 +335,28 @@ describe("ExpensesTab — row interactions", () => {
     expect(api.patch).toHaveBeenCalledWith("/expenses/e1", { category: "Climbing" });
     expect(screen.queryByText("Edit expense")).not.toBeInTheDocument();
   });
+
+  it("says so when a quick category change is refused, and rolls it back", async () => {
+    // Used to roll back in silence: the icon just flipped back, so a 429
+    // from the edit quota or an expired session looked like nothing at all.
+    const pending = deferred<Expense>();
+    vi.mocked(api.patch).mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("Groceries");
+
+    const row = screen.getByText("Groceries").closest("li")!;
+    const icon = within(row).getByRole("button", { name: /category/i });
+    expect(icon).toHaveAttribute("title", "Category: General");
+    await user.click(icon);
+    await user.click(screen.getByRole("option", { name: "Climbing" }));
+    expect(icon).toHaveAttribute("title", "Category: Climbing"); // optimistic
+
+    pending.reject(new ApiError(429, "Too many changes today"));
+
+    expect(await screen.findByText("Too many changes today")).toBeInTheDocument();
+    await waitFor(() => expect(icon).toHaveAttribute("title", "Category: General"));
+  });
 });
 
 describe("ExpensesTab — empty state", () => {

@@ -651,3 +651,43 @@ class TestGlobalQuotaAlert:
         assert alerts
         assert "victim@test.dev" not in alerts[0]
         assert "@" not in alerts[0]
+
+
+def _fail_first_commit(monkeypatch):
+    real_commit = AsyncSession.commit
+    calls = 0
+
+    async def fail_first(self):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise IntegrityError("INSERT INTO group_invitations", {}, Exception("CHECK"))
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_first)
+
+
+async def test_an_unrelated_integrity_error_on_invite_propagates(
+    client, two_user_group, monkeypatch
+):
+    """With no invitation row for the address at all, the partial unique index
+    cannot be what fired, so the error is a bug and must not be answered as a
+    routine 400."""
+    _fail_first_commit(monkeypatch)
+    with pytest.raises(IntegrityError):
+        await _invite(client, two_user_group["group"].id, "carol@test.dev")
+
+
+async def test_a_lost_race_whose_winner_was_already_answered_is_still_a_400(
+    client, two_user_group, monkeypatch
+):
+    """The double-click race: the winner may be cancelled or accepted before
+    the loser looks for it. An earlier row for the address keeps the old
+    answer rather than turning that into a 500."""
+    g = two_user_group
+    inv = (await _invite(client, g["group"].id, "carol@test.dev")).json()
+    assert (await client.delete(f"/api/invitations/{inv['id']}")).status_code == 204
+
+    _fail_first_commit(monkeypatch)
+    r = await _invite(client, g["group"].id, "carol@test.dev")
+    assert r.status_code == 400

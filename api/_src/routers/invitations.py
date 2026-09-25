@@ -265,10 +265,28 @@ async def invite_to_group(
                 )
             )
         ).scalar_one_or_none()
-        if existing is None:
-            raise HTTPException(status_code=400, detail="Invitation could not be created")
-        response.status_code = 200
-        return InvitationCreatedOut.model_validate(existing)
+        if existing is not None:
+            response.status_code = 200
+            return InvitationCreatedOut.model_validate(existing)
+        # The winner may have been accepted, declined or cancelled in the
+        # moment since, so a missing PENDING row does not by itself mean the
+        # partial unique index was not what fired. Any row at all for this
+        # address in this group is consistent with that race and keeps the
+        # old answer. None is not: then some other constraint fired, which is
+        # a bug, and it is re-raised to reach Sentry as one.
+        earlier = (
+            await db.execute(
+                select(GroupInvitation.id)
+                .where(
+                    GroupInvitation.group_id == group_id,
+                    GroupInvitation.email == email,
+                )
+                .limit(1)
+            )
+        ).first()
+        if earlier is None:
+            raise
+        raise HTTPException(status_code=400, detail="Invitation could not be created")
 
     # Emailed whether or not the address is registered: registered invitees
     # get a nudge, and unregistered ones cannot be distinguished by the

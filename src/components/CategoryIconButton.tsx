@@ -8,13 +8,20 @@ import { CategoryOptions } from "./CategorySelect";
 
 /** The expense-row category icon: click to change the category in place,
  *  without opening the edit view. Uses the partial PATCH (category only)
- *  and updates the list optimistically. */
+ *  and updates the list optimistically.
+ *
+ *  `onError` hands a failure to the list, which has room to say it: a row
+ *  icon does not, and rolling back with no message made a refused change
+ *  (a 429 from the edit quota, an expired session) look like the icon simply
+ *  flipping back. Called with `null` when a new attempt starts. */
 export default function CategoryIconButton({
   expense,
   groupId,
+  onError,
 }: {
   expense: Expense;
   groupId: string;
+  onError?: (error: Error | null) => void;
 }) {
   const queryClient = useQueryClient();
   const { t, tCategory } = useI18n();
@@ -39,6 +46,7 @@ export default function CategoryIconButton({
     mutationFn: (category: string) =>
       api.patch<Expense>(`/expenses/${expense.id}`, { category }),
     onMutate: async (category: string) => {
+      onError?.(null);
       await queryClient.cancelQueries({ queryKey: ["expenses", groupId] });
       const previous = queryClient.getQueriesData<ExpenseList>({
         queryKey: ["expenses", groupId],
@@ -55,8 +63,9 @@ export default function CategoryIconButton({
       );
       return { previous };
     },
-    onError: (_err, _category, ctx) => {
+    onError: (err, _category, ctx) => {
       ctx?.previous.forEach(([key, value]) => queryClient.setQueryData(key, value));
+      onError?.(err as Error);
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["expenses", groupId] }),
   });
