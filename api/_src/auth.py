@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 import uuid
 
@@ -64,18 +65,30 @@ JWKS_TIMEOUT = 5.0
 # instead of one per request, each of which would also wait on a flush. Per
 # warm instance, like the invitation alert in ratelimit.py: the count of these
 # events measures instances, never requests.
+#
+# Locked, unlike the cooldown in ratelimit.py and the buckets in
+# token_bucket.py. Those run inside async handlers on one event loop; this
+# runs inside `verify_jwt`, a plain `def` that FastAPI calls on its thread
+# pool, so during an outage several threads reach the check at once and,
+# unlocked, each sees the window as expired and sends its own alert.
 KEY_OUTAGE_ALERT_COOLDOWN = 300.0
 _key_outage_alerted_at: float | None = None
+_key_outage_lock = threading.Lock()
 
 
 def _report_key_outage() -> None:
     global _key_outage_alerted_at
-    now = time.monotonic()
-    if (
-        _key_outage_alerted_at is None
-        or now - _key_outage_alerted_at >= KEY_OUTAGE_ALERT_COOLDOWN
-    ):
-        _key_outage_alerted_at = now
+    with _key_outage_lock:
+        now = time.monotonic()
+        due = (
+            _key_outage_alerted_at is None
+            or now - _key_outage_alerted_at >= KEY_OUTAGE_ALERT_COOLDOWN
+        )
+        if due:
+            _key_outage_alerted_at = now
+    # Logged outside the lock: the decision is what needs serializing, and a
+    # log handler (Sentry's included) has no business holding it.
+    if due:
         logger.error("Signing keys could not be loaded", exc_info=True)
     else:
         logger.warning("Signing keys could not be loaded", exc_info=True)

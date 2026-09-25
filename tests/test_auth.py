@@ -18,6 +18,7 @@ import hmac
 import io
 import json
 import logging
+import types
 import urllib.error
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -557,3 +558,36 @@ class TestKeyOutage:
         """PyJWT's default is 30s: the function's whole maxDuration."""
         assert auth._get_jwks_client().timeout == auth.JWKS_TIMEOUT
         assert auth.JWKS_TIMEOUT <= 5
+
+    def test_the_cooldown_is_decided_under_a_lock(self, monkeypatch, signing_key):
+        """`verify_jwt` is a plain `def`, so FastAPI runs it on a thread pool:
+        an outage fails many requests on many threads at once, which is when
+        an unlocked check-and-set lets each of them alert. The race itself is
+        too narrow to lose on purpose in a test, so this pins the lock."""
+
+        class RecordingLock:
+            held = False
+            entered = 0
+
+            def __enter__(self):
+                RecordingLock.held = True
+                RecordingLock.entered += 1
+
+            def __exit__(self, *exc):
+                RecordingLock.held = False
+
+        stamps = []
+
+        def clock():
+            stamps.append(RecordingLock.held)
+            return 0.0
+
+        def unreachable(*args, **kwargs):
+            raise urllib.error.URLError("connection refused")
+
+        self._serve(monkeypatch, unreachable)
+        monkeypatch.setattr(auth, "_key_outage_lock", RecordingLock())
+        monkeypatch.setattr(auth, "time", types.SimpleNamespace(monotonic=clock))
+        self._refused(self._token(signing_key))
+        assert RecordingLock.entered == 1
+        assert stamps == [True], "the clock must be read while the lock is held"
