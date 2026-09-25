@@ -15,7 +15,11 @@ cannot pass unnoticed either.
 
 import hashlib
 import hmac
+import io
 import json
+import logging
+import types
+import urllib.error
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -449,3 +453,141 @@ class TestAnonymousTokens:
         claims = _claims()
         assert "is_anonymous" not in claims
         assert _call(jwt.encode(claims, SECRET, algorithm="HS256")) == SUBJECT
+
+
+class TestKeyOutage:
+    """A key endpoint that cannot be read is our outage, not the caller's.
+
+    Both exceptions PyJWT raises for it subclass `PyJWTError`, so for a year
+    they fell into the clause meant for bad tokens: every signed-in user got
+    "Invalid or expired token" at once, and nothing was logged. These drive a
+    real `PyJWKClient` with only the network stubbed, so the exception classes
+    are the ones the library actually raises.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _real_client(self, monkeypatch):
+        # Same reasoning as TestSigningKeyCache: a fresh client, and no
+        # DATABASE_URL for the project-ref cross-check to disagree with.
+        monkeypatch.setattr(auth, "DATABASE_URL", "")
+        monkeypatch.setattr(auth, "_jwks_client", None)
+        monkeypatch.setattr(auth, "_key_outage_alerted_at", None)
+
+    @pytest.fixture
+    def logged(self, caplog):
+        caplog.set_level(logging.WARNING, logger="splitdec.auth")
+        return caplog
+
+    @staticmethod
+    def _serve(monkeypatch, respond):
+        """Replace the one network call PyJWKClient makes."""
+        monkeypatch.setattr(jwt.jwks_client.urllib.request, "urlopen", respond)
+
+    @staticmethod
+    def _token(signing_key, kid: str = "current") -> str:
+        private, _ = signing_key
+        return jwt.encode(_claims(), private, algorithm="ES256", headers={"kid": kid})
+
+    @staticmethod
+    def _key_set(signing_key, kid: str = "current") -> dict:
+        _, public_pem = signing_key
+        jwk = jwt.algorithms.ECAlgorithm.to_jwk(
+            serialization.load_pem_public_key(public_pem), as_dict=True
+        )
+        return {"keys": [{**jwk, "kid": kid, "alg": "ES256", "use": "sig"}]}
+
+    def _refused(self, token: str) -> HTTPException:
+        with pytest.raises(HTTPException) as excinfo:
+            _call(token)
+        return excinfo.value
+
+    def test_an_unreachable_endpoint_is_503_and_an_error(
+        self, monkeypatch, signing_key, logged
+    ):
+        def unreachable(*args, **kwargs):
+            raise urllib.error.URLError("connection refused")
+
+        self._serve(monkeypatch, unreachable)
+        refusal = self._refused(self._token(signing_key))
+        assert refusal.status_code == 503
+        assert refusal.detail == auth._UNAVAILABLE
+        assert [r.levelno for r in logged.records] == [logging.ERROR]
+
+    def test_an_error_status_is_503(self, monkeypatch, signing_key, logged):
+        def failing(request, *args, **kwargs):
+            raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, None)
+
+        self._serve(monkeypatch, failing)
+        assert self._refused(self._token(signing_key)).status_code == 503
+
+    def test_an_unreadable_key_set_is_503(self, monkeypatch, signing_key, logged):
+        """PyJWKSetError descends from PyJWKError, not PyJWKClientError, so it
+        needs naming on its own."""
+        self._serve(monkeypatch, lambda *a, **k: io.BytesIO(b'{"keys": []}'))
+        assert self._refused(self._token(signing_key)).status_code == 503
+
+    def test_an_unknown_key_id_is_still_401_and_not_logged(
+        self, monkeypatch, signing_key, logged
+    ):
+        """The kid travels in the token. If a miss were an outage, anyone could
+        mint 503s — and Sentry events — by making one up."""
+        body = json.dumps(self._key_set(signing_key)).encode()
+        self._serve(monkeypatch, lambda *a, **k: io.BytesIO(body))
+        assert self._refused(self._token(signing_key, kid="made-up")).status_code == 401
+        assert logged.records == []
+
+    def test_a_healthy_endpoint_still_verifies(self, monkeypatch, signing_key):
+        body = json.dumps(self._key_set(signing_key)).encode()
+        self._serve(monkeypatch, lambda *a, **k: io.BytesIO(body))
+        assert _call(self._token(signing_key)) == SUBJECT
+
+    def test_one_outage_is_one_alert(self, monkeypatch, signing_key, logged):
+        """Every signed-in request fails during an outage. An ERROR each would
+        be an event each, and every one of them would wait on a flush."""
+
+        def unreachable(*args, **kwargs):
+            raise urllib.error.URLError("connection refused")
+
+        self._serve(monkeypatch, unreachable)
+        for _ in range(3):
+            self._refused(self._token(signing_key))
+        levels = [r.levelno for r in logged.records]
+        assert levels == [logging.ERROR, logging.WARNING, logging.WARNING]
+
+    def test_the_fetch_cannot_outlast_the_request(self):
+        """PyJWT's default is 30s: the function's whole maxDuration."""
+        assert auth._get_jwks_client().timeout == auth.JWKS_TIMEOUT
+        assert auth.JWKS_TIMEOUT <= 5
+
+    def test_the_cooldown_is_decided_under_a_lock(self, monkeypatch, signing_key):
+        """`verify_jwt` is a plain `def`, so FastAPI runs it on a thread pool:
+        an outage fails many requests on many threads at once, which is when
+        an unlocked check-and-set lets each of them alert. The race itself is
+        too narrow to lose on purpose in a test, so this pins the lock."""
+
+        class RecordingLock:
+            held = False
+            entered = 0
+
+            def __enter__(self):
+                RecordingLock.held = True
+                RecordingLock.entered += 1
+
+            def __exit__(self, *exc):
+                RecordingLock.held = False
+
+        stamps = []
+
+        def clock():
+            stamps.append(RecordingLock.held)
+            return 0.0
+
+        def unreachable(*args, **kwargs):
+            raise urllib.error.URLError("connection refused")
+
+        self._serve(monkeypatch, unreachable)
+        monkeypatch.setattr(auth, "_key_outage_lock", RecordingLock())
+        monkeypatch.setattr(auth, "time", types.SimpleNamespace(monotonic=clock))
+        self._refused(self._token(signing_key))
+        assert RecordingLock.entered == 1
+        assert stamps == [True], "the clock must be read while the lock is held"

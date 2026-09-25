@@ -8,6 +8,7 @@ that follows from skipping the send is a known oracle, argued in
 routers/invitations.py and deliberately not asserted away here.
 """
 
+import logging
 import uuid
 
 import pytest
@@ -15,6 +16,7 @@ from conftest import make_user
 from sqlalchemy import select
 
 from _src import emailer, unsubscribe
+from _src.routers import unsubscribe as unsubscribe_route
 from _src.models import EmailSuppression, GroupInvitation, WriteEvent
 from _src.ratelimit import recipient_key
 
@@ -31,10 +33,10 @@ def _secret(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _full_bucket(monkeypatch):
+def _full_bucket():
     """The token bucket is module state that survives between tests, so a file
     with a dozen requests in it would otherwise start throttling itself."""
-    monkeypatch.setattr("_src.routers.unsubscribe._tokens", 1000.0)
+    unsubscribe_route._bucket.refill()
 
 
 class TestTheToken:
@@ -132,11 +134,22 @@ class TestTheEndpoint:
         # variable hands a stranger the deployment's shape.
         assert "UNSUBSCRIBE_SECRET" not in r.text
 
-    async def test_the_bucket_eventually_refuses(self, client, monkeypatch):
-        monkeypatch.setattr("_src.routers.unsubscribe._tokens", 1.0)
+    async def test_the_bucket_eventually_refuses(self, client):
+        unsubscribe_route._bucket.refill(1.0)
         token = unsubscribe.mint_token(RECIPIENT)
         assert (await self._post(client, token)).status_code == 204
         assert (await self._post(client, token)).status_code == 429
+
+    async def test_a_flood_is_logged_once(self, client, caplog):
+        """The case the bucket exists for used to leave no trace at all."""
+        caplog.set_level(logging.WARNING, logger="splitdec.unsubscribe")
+        unsubscribe_route._bucket.refill(1.0)
+        token = unsubscribe.mint_token(RECIPIENT)
+        for _ in range(4):
+            await self._post(client, token)
+        refusals = [r for r in caplog.records if "rate limit" in r.getMessage()]
+        assert len(refusals) == 1
+        assert refusals[0].levelno == logging.WARNING  # back-pressure, not an alert
 
     async def test_requires_no_authentication(self, client, current_user):
         """The person this exists for has no account — that is the whole

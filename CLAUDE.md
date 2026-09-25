@@ -351,6 +351,13 @@ on `ENV=development`):
   Unauthenticated failures answer generically ("Authentication is unavailable") and put
   the specifics in the log — an anonymous 500 naming an environment variable hands a
   stranger the deployment's shape for nothing.
+  **A JWKS outage is a 503, not a 401.** `PyJWKClientConnectionError` and
+  `PyJWKSetError` both subclass `PyJWTError`, so they used to land in the bad-token
+  clause: every signed-in user got "Invalid or expired token" at once and nothing was
+  logged. They are now caught first — one ERROR per five minutes per instance, WARNING
+  after — and the fetch timeout is 5s rather than PyJWT's 30, which was the function's
+  whole `maxDuration`. An unknown `kid` is a `PyJWKClientError` too but stays a 401: it
+  comes from the token, and a stranger must not be able to mint 503s or alerts.
   `tests/test_auth.py` is the only place the boundary
   is exercised for real — every other API test overrides `verify_jwt`, so a change here that
   breaks authentication will not show up anywhere else in the suite.

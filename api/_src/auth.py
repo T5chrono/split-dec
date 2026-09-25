@@ -1,9 +1,12 @@
 import logging
+import threading
+import time
 import uuid
 
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKSetError
 
 from .config import (
     ALLOW_LEGACY_HS256,
@@ -48,6 +51,48 @@ ASYMMETRIC_ALGORITHMS = frozenset({"ES256", "RS256"})  # Supabase signing keys, 
 # it the JWKS response PyJWT holds for five minutes.
 _jwks_client: jwt.PyJWKClient | None = None
 
+# How long one JWKS fetch may take. PyJWT's default is 30s, which is this
+# function's whole `maxDuration`, and `verify_jwt` is synchronous — so a key
+# endpoint that stopped answering held a worker thread for the life of the
+# request. Five seconds is generous for a small JSON document fetched from
+# the same region, and in line with the other outbound timeouts here.
+JWKS_TIMEOUT = 5.0
+
+# A key-fetch outage is the one failure in this module that is not about the
+# token, and it fails every signed-in request at once. The first failure in a
+# window is an ERROR — which is a Sentry event (monitoring.py) — and the rest
+# are WARNINGs, so the log stays complete while one outage stays one alert
+# instead of one per request, each of which would also wait on a flush. Per
+# warm instance, like the invitation alert in ratelimit.py: the count of these
+# events measures instances, never requests.
+#
+# Locked, unlike the cooldown in ratelimit.py and the buckets in
+# token_bucket.py. Those run inside async handlers on one event loop; this
+# runs inside `verify_jwt`, a plain `def` that FastAPI calls on its thread
+# pool, so during an outage several threads reach the check at once and,
+# unlocked, each sees the window as expired and sends its own alert.
+KEY_OUTAGE_ALERT_COOLDOWN = 300.0
+_key_outage_alerted_at: float | None = None
+_key_outage_lock = threading.Lock()
+
+
+def _report_key_outage() -> None:
+    global _key_outage_alerted_at
+    with _key_outage_lock:
+        now = time.monotonic()
+        due = (
+            _key_outage_alerted_at is None
+            or now - _key_outage_alerted_at >= KEY_OUTAGE_ALERT_COOLDOWN
+        )
+        if due:
+            _key_outage_alerted_at = now
+    # Logged outside the lock: the decision is what needs serializing, and a
+    # log handler (Sentry's included) has no business holding it.
+    if due:
+        logger.error("Signing keys could not be loaded", exc_info=True)
+    else:
+        logger.warning("Signing keys could not be loaded", exc_info=True)
+
 
 def _get_jwks_client() -> jwt.PyJWKClient:
     global _jwks_client
@@ -68,7 +113,9 @@ def _get_jwks_client() -> jwt.PyJWKClient:
         # verifying tokens for as long as this instance stays warm. The
         # response cache is what spares us a fetch per request; the flag
         # bought nothing on top of it and bounded nothing.
-        _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+        _jwks_client = jwt.PyJWKClient(
+            f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", timeout=JWKS_TIMEOUT
+        )
     return _jwks_client
 
 
@@ -147,6 +194,16 @@ def verify_jwt(
         )
     except HTTPException:
         raise
+    except (PyJWKClientConnectionError, PyJWKSetError):
+        # Our side, not the caller's: the key endpoint was unreachable, answered
+        # with an error status, or served a key set nothing could be read from.
+        # Both classes subclass PyJWTError, so the clause below used to turn an
+        # outage into a 401 for every signed-in user with no log line at all.
+        # Deliberately *not* the whole PyJWKClientError family: "no key matches
+        # this kid" is one of those too, and the kid comes from the token — a
+        # stranger must not be able to mint 503s, or alerts, at will.
+        _report_key_outage()
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     # An anonymous sign-in produces a token with the same `aud` and `role` as a
