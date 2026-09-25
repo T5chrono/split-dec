@@ -312,9 +312,9 @@ async def enforce_group_creation_quota(db: AsyncSession, caller: uuid.UUID) -> N
 # and a cold start may re-alert immediately. That is the right way round for a
 # notification -- duplicates are cheap, a missed one is not -- but it does mean
 # the count of these events measures instances, never attempts. Module-level
-# and mutated without a lock, like the buckets in reports.py and
-# routers/unsubscribe.py: no `await` between the read and the write, so within
-# one event loop it runs to completion.
+# and mutated without a lock, like the buckets in token_bucket.py: no `await`
+# between the read and the write, so within one event loop it runs to
+# completion.
 GLOBAL_ALERT_COOLDOWN = timedelta(hours=1)
 _global_alerted_at: float | None = None
 

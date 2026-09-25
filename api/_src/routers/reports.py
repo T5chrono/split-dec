@@ -56,10 +56,11 @@ import json
 import logging
 import re
 import string
-import time
 from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter, Request, Response
+
+from ..token_bucket import TokenBucket
 
 router = APIRouter(tags=["reports"])
 
@@ -163,12 +164,11 @@ def log_value(value: str | None) -> str:
     return encoded if len(encoded) <= MAX_LOG_FIELD else "-"
 
 
-# Token bucket state. Module-level and mutated without a lock because the
-# helper below has no `await` in it: within one event loop it runs to
-# completion, so there is no interleaving to protect against.
-_tokens = float(REPORTS_PER_MINUTE)
-_last_refill = time.monotonic()
-_suppressing = False
+# One log line's worth of budget per token. The suppression notice is emitted
+# once per drought rather than once per dropped report, and costs no token.
+_bucket = TokenBucket(
+    REPORTS_PER_MINUTE, logger, "csp violation reports suppressed: rate limit reached"
+)
 
 
 def text(value: object) -> str:
@@ -307,7 +307,9 @@ def fold_blocked(value: str) -> str:
     return f"{parts.scheme}://{host}"
 
 
-def normalize(payload: object) -> list[dict[str, str | None]]:
+def normalize(
+    payload: object, limit: int = MAX_REPORTS_PER_REQUEST
+) -> list[dict[str, str | None]]:
     """Both wire formats, reduced to the fields worth keeping.
 
     No browser sends both: `report-uri` posts one `{"csp-report": {...}}`
@@ -319,6 +321,12 @@ def normalize(payload: object) -> list[dict[str, str | None]]:
     `origin` is `None` for a report that did not come from a host we serve;
     the endpoint drops those. It is carried here rather than checked earlier
     because the document URL is folded away by the time the caller sees it.
+
+    Stops at `limit` rather than folding everything and letting the caller
+    slice: the folding is the expensive part, and a cap applied after the work
+    it is meant to bound bounds nothing. Envelopes that are not violations are
+    skipped without counting, so a browser batching other report types to the
+    same endpoint does not crowd out real ones.
     """
     if isinstance(payload, dict) and isinstance(payload.get("csp-report"), dict):
         report = payload["csp-report"]
@@ -338,6 +346,8 @@ def normalize(payload: object) -> list[dict[str, str | None]]:
     if isinstance(payload, list):
         collected: list[dict[str, str | None]] = []
         for envelope in payload:
+            if len(collected) >= limit:
+                break
             if not isinstance(envelope, dict) or envelope.get("type") != "csp-violation":
                 continue
             body = envelope.get("body")
@@ -357,21 +367,6 @@ def normalize(payload: object) -> list[dict[str, str | None]]:
     return []
 
 
-def _take_token() -> bool:
-    """One log line's worth of budget, or `False` if the bucket is empty."""
-    global _tokens, _last_refill
-    now = time.monotonic()
-    _tokens = min(
-        float(REPORTS_PER_MINUTE),
-        _tokens + (now - _last_refill) * (REPORTS_PER_MINUTE / 60.0),
-    )
-    _last_refill = now
-    if _tokens < 1.0:
-        return False
-    _tokens -= 1.0
-    return True
-
-
 def _record(report: dict[str, str | None]) -> None:
     """Log one violation, unless the bucket says we are already shouting.
 
@@ -380,13 +375,8 @@ def _record(report: dict[str, str | None]) -> None:
     flood. It costs no token, which is safe because it can only alternate with
     a successful line.
     """
-    global _suppressing
-    if not _take_token():
-        if not _suppressing:
-            _suppressing = True
-            logger.warning("csp violation reports suppressed: rate limit reached")
+    if not _bucket.take():
         return
-    _suppressing = False
     # WARNING, not INFO: the root logger's default level is WARNING and
     # nothing here configures it, so anything quieter would be dropped
     # before it reached the function log this endpoint exists to fill.
@@ -479,14 +469,24 @@ async def csp_report(request: Request) -> Response:
         # Refused before the body is read, which is the point: this is the
         # cheapest possible answer to a request that was never a report.
         return _answer(415)
-    body = await request.body()
-    if len(body) > MAX_REPORT_BYTES:
-        return _answer(413)
+    # Counted as it arrives rather than read whole and measured afterwards, so
+    # the cap bounds what is buffered and not only what is parsed. Not a
+    # Content-Length check: a chunked body carries none.
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_REPORT_BYTES:
+            return _answer(413)
     try:
         payload = json.loads(body)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        # RecursionError is not a ValueError. On Python 3.12, which production
+        # runs, the parser gives up under three thousand levels of `[[[...]]]`
+        # and the body cap allows eight, so without this a nested array was a
+        # 500 on a route anyone can call. Safe to catch: the stack has unwound
+        # by the time this runs.
         return _answer(400)
-    for report in normalize(payload)[:MAX_REPORTS_PER_REQUEST]:
+    for report in normalize(payload):
         if report["origin"] is None:
             continue
         _record(report)

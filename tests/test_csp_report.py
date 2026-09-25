@@ -9,7 +9,7 @@ log-flooding primitive.
 """
 
 import logging
-import time
+import types
 
 import pytest
 
@@ -64,9 +64,7 @@ def _full_bucket():
     silence the next test's reports — and so the order tests happen to run in
     never decides whether they pass.
     """
-    reports._tokens = float(reports.REPORTS_PER_MINUTE)
-    reports._last_refill = time.monotonic()
-    reports._suppressing = False
+    reports._bucket.refill()
 
 
 async def test_report_uri_format_is_accepted_and_logged(client, logged):
@@ -153,6 +151,64 @@ async def test_malformed_body_is_refused(client, logged):
     )
     assert r.status_code == 400
     assert logged.text == ""
+
+
+async def test_deeply_nested_json_is_not_a_crash(client, logged):
+    """The body that used to be a 500 on the one route a stranger can reach
+    without a token. On Python 3.12, which production runs, `json.loads`
+    raises RecursionError somewhere under three thousand levels, and the body
+    cap allows eight. On 3.14 the limit is the C stack instead and this parses,
+    so the assertion is the part that holds on both: never a server error."""
+    depth = reports.MAX_REPORT_BYTES // 2 - 1
+    r = await client.post(
+        "/api/csp-report",
+        content=b"[" * depth + b"]" * depth,
+        headers={"Content-Type": "application/csp-report"},
+    )
+    assert r.status_code in (204, 400)
+    assert logged.text == ""
+
+
+async def test_a_recursion_error_is_a_400(client, logged, monkeypatch):
+    """The same case forced, so it is exercised whatever the interpreter's
+    nesting limit happens to be. RecursionError is not a ValueError."""
+
+    def too_deep(_body):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(reports, "json", types.SimpleNamespace(loads=too_deep))
+    r = await client.post("/api/csp-report", json=_report_uri_body())
+    assert r.status_code == 400
+    assert logged.text == ""
+
+
+async def test_a_chunked_body_over_the_cap_is_refused(client, logged):
+    """A chunked body declares no length, so the cap has to be counted as the
+    bytes arrive rather than read off a header."""
+
+    async def chunks():
+        for _ in range(reports.MAX_REPORT_BYTES // 1024 + 2):
+            yield b" " * 1024
+
+    r = await client.post(
+        "/api/csp-report",
+        content=chunks(),
+        headers={"Content-Type": "application/csp-report"},
+    )
+    assert "content-length" not in {k.lower() for k in r.request.headers}
+    assert r.status_code == 413
+    assert logged.text == ""
+
+
+def test_normalize_stops_at_the_cap_instead_of_folding_everything():
+    [envelope] = _report_to_body()
+    assert len(reports.normalize([envelope] * 500)) == reports.MAX_REPORTS_PER_REQUEST
+
+
+def test_other_report_types_do_not_count_against_the_cap():
+    [envelope] = _report_to_body()
+    batch = [{"type": "deprecation"}] * 20 + [envelope] * 3
+    assert len(reports.normalize(batch)) == 3
 
 
 async def test_unrecognized_but_valid_json_is_accepted_quietly(client, logged):
@@ -456,9 +512,8 @@ async def test_the_token_bucket_clips_a_flood_and_says_so_once(client, logged, m
     """Per warm instance, not global — the real ceiling is an edge rate limit
     (see the module docstring). What this asserts is that the floor exists and
     that the notice about it does not itself become the flood."""
-    monkeypatch.setattr(reports, "REPORTS_PER_MINUTE", 2)
-    reports._tokens = 2.0
-    reports._last_refill = time.monotonic()
+    monkeypatch.setattr(reports._bucket, "per_minute", 2)
+    reports._bucket.refill()
 
     for _ in range(6):
         r = await client.post("/api/csp-report", json=_report_uri_body())

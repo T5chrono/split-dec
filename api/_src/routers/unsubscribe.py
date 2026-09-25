@@ -23,12 +23,12 @@ cannot see each other's counters. The edge is where a ceiling would go.
 """
 
 import logging
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
+from ..token_bucket import TokenBucket
 from ..unsubscribe import UNSUBSCRIBE_SECRET, suppress, verify_token
 
 logger = logging.getLogger("splitdec.unsubscribe")
@@ -39,24 +39,11 @@ router = APIRouter(tags=["unsubscribe"])
 # one-click POST and for a page someone double-clicks, not for traffic.
 REQUESTS_PER_MINUTE = 30
 
-# Module-level and mutated without a lock, like the bucket in reports.py: the
-# helper has no `await` in it, so within one event loop it runs to completion.
-_tokens = float(REQUESTS_PER_MINUTE)
-_last_refill = time.monotonic()
-
-
-def _take_token() -> bool:
-    global _tokens, _last_refill
-    now = time.monotonic()
-    _tokens = min(
-        float(REQUESTS_PER_MINUTE),
-        _tokens + (now - _last_refill) * (REQUESTS_PER_MINUTE / 60.0),
-    )
-    _last_refill = now
-    if _tokens < 1.0:
-        return False
-    _tokens -= 1.0
-    return True
+# Refusals are logged once per drought: before the shared helper existed this
+# route answered 429 and said nothing, so a flood left no trace.
+_bucket = TokenBucket(
+    REQUESTS_PER_MINUTE, logger, "unsubscribe requests refused: rate limit reached"
+)
 
 
 @router.post("/unsubscribe", status_code=204)
@@ -73,7 +60,7 @@ async def unsubscribe(
     The token is verified before the session touches the database, so a request
     carrying a forged one never checks out a pooler connection.
     """
-    if not _take_token():
+    if not _bucket.take():
         raise HTTPException(status_code=429, detail="Too many requests")
     if not UNSUBSCRIBE_SECRET:
         # Generic to the caller, specific in the log: an anonymous 500 naming
