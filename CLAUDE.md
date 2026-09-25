@@ -252,6 +252,15 @@ on `ENV=development`):
 - **Database**: Supabase Postgres, project ref `kmlheefyzhhegxmtaovq`. Connection MUST use the
   transaction pooler (port 6543, `postgresql+asyncpg://`) with `NullPool` and
   `statement_cache_size=0` (`api/_src/db.py`) — never per-request engines, never the session pooler.
+  **Every wait is bounded, in order**: `lock_timeout` 5s, `statement_timeout` 12s and
+  `idle_in_transaction_session_timeout` 15s on the `splitdec_app` role (migration
+  `20260925000000`), then asyncpg's `command_timeout` 15s (`db.COMMAND_TIMEOUT`), all inside
+  Vercel's 30s `maxDuration`. Before that the role ran on cluster defaults — lock waits
+  unbounded — so one stalled transaction queued every writer behind it, each holding a
+  pooler connection. Role settings, not `server_settings`: those travel in the startup
+  packet, which a transaction pooler has to allow-list. The idle limit is also why the
+  Resend call must stay after the commit. `tests/test_grants_pg.py` checks the three
+  against production.
   **The server's certificate is verified, and that takes an explicit `SSLContext`.**
   asyncpg's default is `sslmode=prefer`: it drops to plaintext if something
   answers that the server does not do TLS, and when TLS *is* negotiated it uses
