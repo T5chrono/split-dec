@@ -40,7 +40,7 @@ fastapi>=0.115.14
 sqlalchemy[asyncio]>=2.0.41
 asyncpg>=0.30.0
 pydantic>=2.13.5
-PyJWT[crypto]>=2.10.1
+PyJWT[crypto]>=2.15.0
 uvicorn[standard]>=0.35.0
 python-dotenv>=1.1.1
 # The [fastapi] extra pulls nothing new — starlette and fastapi are already
