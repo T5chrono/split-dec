@@ -478,10 +478,33 @@ class TestKeyOutage:
         caplog.set_level(logging.WARNING, logger="splitdec.auth")
         return caplog
 
+    @pytest.fixture(autouse=True)
+    def _offline(self, monkeypatch):
+        """Fail loudly on any fetch the test did not stub.
+
+        PyJWT 2.15 stopped calling `urlopen` (it builds an opener that refuses
+        redirects), and the old stub on `urlopen` silently stopped applying:
+        the success-path tests reached for the real network, and the outage
+        tests passed only because this machine's DNS lookup failed.
+        """
+
+        def unstubbed(director, request, *args, **kwargs):
+            raise AssertionError(f"unstubbed JWKS fetch: {request.full_url}")
+
+        monkeypatch.setattr(urllib.request.OpenerDirector, "open", unstubbed)
+
     @staticmethod
     def _serve(monkeypatch, respond):
-        """Replace the one network call PyJWKClient makes."""
-        monkeypatch.setattr(jwt.jwks_client.urllib.request, "urlopen", respond)
+        """Replace the one network call PyJWKClient makes.
+
+        Stubbed at `OpenerDirector.open`, below whatever handlers PyJWT
+        installs, so the exception classes are still the library's own.
+        """
+        monkeypatch.setattr(
+            urllib.request.OpenerDirector,
+            "open",
+            lambda director, request, *args, **kwargs: respond(request, *args, **kwargs),
+        )
 
     @staticmethod
     def _token(signing_key, kid: str = "current") -> str:
