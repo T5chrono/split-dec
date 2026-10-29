@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Sentry from "@sentry/react";
 import type { Breadcrumb, ErrorEvent } from "@sentry/react";
 import {
+  initMonitoring,
   redactMessage,
   redactSelector,
   redactUrl,
@@ -125,6 +127,16 @@ describe("scrubBreadcrumb", () => {
     expect(crumb.message).toBe("Unhandled error: group [id] has no member [email]");
   });
 
+  it("drops the raw console arguments the message was formatted from", () => {
+    const crumb = scrubBreadcrumb({
+      category: "console",
+      level: "error",
+      message: "Unhandled error [email]",
+      data: { arguments: ["Unhandled error", "someone@example.com"], logger: "console" },
+    });
+    expect(crumb.data).toEqual({ logger: "console" });
+  });
+
   it("strips attribute values and identifiers from a ui breadcrumb", () => {
     const crumb = scrubBreadcrumb({
       category: "ui.click",
@@ -229,5 +241,37 @@ describe("redactMessage", () => {
     expect(redactMessage("Cannot read properties of undefined")).toBe(
       "Cannot read properties of undefined",
     );
+  });
+});
+
+describe("initMonitoring", () => {
+  afterEach(async () => {
+    await Sentry.close();
+    vi.unstubAllEnvs();
+  });
+
+  /** Read off a real client rather than a mocked `init`: what matters is what
+   *  the SDK resolved, and `sendDefaultPii` vanishing in v11 is exactly the
+   *  kind of change a mock would have hidden. */
+  it("collects no personal data, and asks Sentry not to infer the IP", () => {
+    vi.stubEnv("VITE_SENTRY_DSN", "https://public@o0.ingest.de.sentry.io/0");
+    initMonitoring();
+
+    const client = Sentry.getClient();
+    expect(client).toBeDefined();
+    const collection = client!.getDataCollectionOptions();
+    expect(collection.userInfo).toBe(false);
+    expect(collection.cookies).toBe(false);
+    expect(collection.httpBodies).toEqual([]);
+    expect(collection.urlQueryParams).toBe(false);
+    expect(collection.httpHeaders.response).toBe(false);
+    expect(collection.stackFrameVariables).toBe(false);
+    expect(client!.getOptions()._metadata?.sdk?.settings?.infer_ip).toBe("never");
+  });
+
+  it("starts nothing without a DSN", () => {
+    vi.stubEnv("VITE_SENTRY_DSN", "");
+    initMonitoring();
+    expect(Sentry.getClient()).toBeUndefined();
   });
 });

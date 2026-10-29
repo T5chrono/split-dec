@@ -126,6 +126,10 @@ export function scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb {
       const value = data[key];
       if (typeof value === "string") data[key] = redactUrl(value);
     }
+    // Console breadcrumbs also keep the raw arguments the message was
+    // formatted from — the unredacted twin of the text redacted above. The
+    // message already says everything they do.
+    delete data.arguments;
     scrubbed.data = data;
   }
 
@@ -213,7 +217,27 @@ export function initMonitoring(): void {
     environment: window.location.origin === APP_ORIGIN ? "production" : "preview",
     // No IP address, no cookies, no user identity. Errors here are diagnosed
     // from the stack, and this app has no support flow that needs "who".
-    sendDefaultPii: false,
+    //
+    // Every category is spelled out rather than left to the SDK. v11 removed
+    // `sendDefaultPii`, and with this object absent the SDK still falls back to
+    // that flag's old "off" mapping — but the fallback is marked for removal,
+    // and the defaults it would hand over to include `userInfo: true`, which is
+    // what tells Sentry to record the visitor's IP (`infer_ip: "auto"`).
+    // A field left unset here is one a minor release can turn on.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      // The browser SDK only ever sends these two, both built from the
+      // document. The referrer is redacted in `scrubEvent`; the user agent is
+      // what tells a Safari crash from a Chrome one.
+      httpHeaders: { request: { allow: ["user-agent", "referer"] }, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      stackFrameVariables: false,
+    },
     // Errors only. `tracesSampleRate` is deliberately unset: Vercel Speed
     // Insights already measures this app's performance, and a second
     // performance processor would be another disclosure for data we have.

@@ -632,8 +632,12 @@ back. That is a deliberate divergence from `insightsRoute` (src/App.tsx) and
 buckets have to line up with each other; nothing in monitoring has to line up
 with anything, so it can afford the stricter rule.
 
-The browser SDK costs **~29 kB gzip on the first-paint chunk** (measured: entry
-went 20.8 → 49.9 kB gzip) and is deliberately **not** in the vendor allow-list.
+The browser SDK costs **~35 kB gzip on the first-paint chunk** (measured: entry
+went 20.8 → 49.9 kB gzip on v10, and v11 added another 6.4 kB) and is
+deliberately **not** in the vendor allow-list. **Its `dataCollection` is spelled
+out field by field**: v11 removed `sendDefaultPii`, and the defaults it falls
+back to without that object include `userInfo: true`, which is what lets Sentry
+record the visitor's IP.
 Source maps are generated only when `SENTRY_AUTH_TOKEN` is set, emitted
 `hidden`, and deleted from `dist/` after upload — a served `.map` is the whole
 bundle, readable, on the origin holding the Supabase session. Two non-obvious
