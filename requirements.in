@@ -36,13 +36,13 @@
 # On a machine whose antivirus intercepts HTTPS (Norton, here), uv rejects the
 # substituted certificate — add --native-tls to read the OS trust store. Same
 # root cause as api/_src/dev_loop.py.
-fastapi>=0.115.14
+fastapi>=0.162.0
 sqlalchemy[asyncio]>=2.0.41
-asyncpg>=0.30.0
-pydantic>=2.13.5
+asyncpg>=0.32.0
+pydantic>=2.14.1
 PyJWT[crypto]>=2.10.1
 uvicorn[standard]>=0.35.0
-python-dotenv>=1.1.1
+python-dotenv>=1.2.4
 # The [fastapi] extra pulls nothing new — starlette and fastapi are already
 # here; it exists so the resolver fails loudly if that ever stops being true.
 sentry-sdk[fastapi]>=2.20
