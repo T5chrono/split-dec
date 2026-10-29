@@ -109,7 +109,22 @@ jobs:
           # blind, on the job that reviews everything else, is not a trade
           # worth taking — the recovery step below repairs the failure they
           # were meant to fix, and does it without changing modes.
+          #
+          # Agent mode hands this prompt over verbatim — it does not add the PR
+          # number. Without it the reviewer has to discover which PR it is on,
+          # from a detached depth-1 merge commit where a bare `gh pr diff`
+          # cannot tell, `gh pr list` is denied, and `git diff` shows the whole
+          # repository as added. #155's review read its diff backwards and
+          # #156's found none; #152, same action and config, happened to get
+          # it right. Only the number and the repository are interpolated —
+          # never the title or body, which the PR's author writes.
           prompt: |
+            You are reviewing PR #${{ github.event.pull_request.number }} in
+            ${{ github.repository }}. Read the change with
+            `gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }}`
+            first. The checkout is a single merge commit with no history, so
+            `git log`/`git diff` cannot show what this PR changed.
+
             Review this pull request for the SplitDec app (FastAPI + React
             Splitwise clone). Read README.md, CLAUDE.md, and
             "SplitDec - specification.md" for architecture and invariants,
