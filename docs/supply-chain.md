@@ -358,6 +358,27 @@ levers are `--omit=dev`, raising `--audit-level`, or a wrapper such as
 `audit-ci` — choose one, narrow it as far as it will go, and record it here
 with a date.
 
+### `deepmerge` prototype poisoning (GHSA-gcqx-w48m-w2h4)
+
+**Risk.** `deepmerge` 4.2.0–4.3.1 lets a crafted source object inject
+properties into the merged result's prototype (CVE-2026-93753, low). 4.3.1
+is in the tree via `vite-plugin-pwa` → `workbox-build` →
+`@rollup/plugin-node-resolve`, and no fixed release exists — 4.3.1 is the
+latest, from 2023. npm's only offered fix is a `vite-plugin-pwa` downgrade to
+0.2.1, which would break the build.
+
+**Why accepted.** The vulnerable path needs attacker-controlled input to the
+merge, and there is none. `@rollup/plugin-node-resolve` 16.0.3 calls it once,
+as `deepMerge({}, defaults)` over a constant in its own source. It runs only
+while the service worker is built, and nothing from it reaches `dist/`
+(checked by grepping the build). Below the `audit` job's `high` threshold, so
+nothing is red. Dependabot alert #64 dismissed as "vulnerable code not
+actually used", 2026-10-29.
+
+**Revisit when.** `deepmerge` ships a fix, `@rollup/plugin-node-resolve` starts
+passing user options through `deepMerge`, or anything in the runtime bundle
+starts depending on it.
+
 ### No breached-password screening
 
 **Risk.** Nothing checks a chosen password against known-leaked lists, so a
