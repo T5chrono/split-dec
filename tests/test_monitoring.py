@@ -462,3 +462,18 @@ class TestErrorIsTheEventContract:
         from sentry_sdk.integrations.logging import LoggingIntegration
 
         assert LoggingIntegration()._handler.level == logging.ERROR
+
+
+def test_fastapi_builtin_telemetry_is_off():
+    """FastAPI 0.162 ships OpenTelemetry that wakes up the moment any global
+    provider exists, and its `logs` signal records exception messages and
+    stack traces — unredacted, outside `before_send`. It is inert only while
+    nothing installs a provider, so every signal is switched off by name."""
+    from _src.main import app
+
+    config = app._telemetry
+    assert not config["tracing"]
+    assert not config["metrics"]
+    assert not config["logs"]
+    assert not config["auto_configure"]
+    assert not app._native_telemetry.enabled()

@@ -64,7 +64,14 @@ def docs_urls(env: str) -> dict[str, str | None]:
     return {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
 
-app = FastAPI(title="SplitDec API", **docs_urls(ENV))
+# FastAPI's built-in OpenTelemetry (0.162+) is off in every signal. It is inert
+# today — it waits for a provider, and none is installed — but its `logs`
+# default records exception messages and stack traces, and anything that
+# installs a global provider (sentry-sdk 3 is built on OpenTelemetry) would
+# switch it on silently. Errors reach Sentry through monitoring.py, redacted.
+TELEMETRY_OFF = {"tracing": False, "metrics": False, "logs": False, "auto_configure": False}
+
+app = FastAPI(title="SplitDec API", telemetry=TELEMETRY_OFF, **docs_urls(ENV))
 
 # CORS is a local-dev-only concern: in production the SPA and the API are
 # served same-origin under one Vercel domain (spec §1). Never enable this
