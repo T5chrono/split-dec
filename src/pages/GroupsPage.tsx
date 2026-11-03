@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, MailOpen, Plus, Users, X } from "lucide-react";
 import { api } from "../lib/api";
-import type { Group } from "../lib/types";
+import type { Group, GroupMode } from "../lib/types";
 import {
   expensesQuery,
   groupDetailQuery,
@@ -20,6 +20,7 @@ export default function GroupsPage() {
   const { t, dateLocale } = useI18n();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [shared, setShared] = useState(false);
 
   const { data: groups, isLoading, error } = useQuery(groupsQuery());
 
@@ -37,11 +38,13 @@ export default function GroupsPage() {
   };
 
   const createGroup = useMutation({
-    mutationFn: (groupName: string) => api.post<Group>("/groups", { name: groupName }),
+    mutationFn: ({ name, mode }: { name: string; mode: GroupMode }) =>
+      api.post<Group>("/groups", { name, mode }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       setCreating(false);
       setName("");
+      setShared(false);
     },
   });
 
@@ -150,7 +153,9 @@ export default function GroupsPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim()) createGroup.mutate(name.trim());
+              if (name.trim()) {
+                createGroup.mutate({ name: name.trim(), mode: shared ? "SHARED" : "SPLIT" });
+              }
             }}
             className="space-y-4"
           >
@@ -161,6 +166,24 @@ export default function GroupsPage() {
               placeholder={t("groupNamePlaceholder")}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-teal-500 dark:border-slate-600 dark:bg-slate-800"
             />
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={shared}
+                onChange={(e) => setShared(e.target.checked)}
+                aria-describedby="shared-budget-hint"
+                className="mt-0.5 h-4 w-4 accent-teal-600"
+              />
+              <span>
+                <span className="block text-sm font-medium">{t("sharedBudget")}</span>
+                <span
+                  id="shared-budget-hint"
+                  className="block text-xs text-slate-500 dark:text-slate-400"
+                >
+                  {t("sharedBudgetHint")}
+                </span>
+              </span>
+            </label>
             {createGroup.error && (
               <p className="text-sm text-red-600 dark:text-red-400">
                 {(createGroup.error as Error).message}

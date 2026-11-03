@@ -25,6 +25,7 @@ from ..schemas import (
     GroupCreate,
     GroupDetailOut,
     GroupOut,
+    GroupUpdate,
     UserOut,
 )
 
@@ -76,7 +77,7 @@ async def create_group(
     await enforce_group_creation_quota(db, caller)
     # Outlives the group: deleting one must not hand back the slot it cost.
     await record_write(db, caller, GROUP)
-    group = Group(name=body.name, created_by=caller)
+    group = Group(name=body.name, mode=body.mode, created_by=caller)
     db.add(group)
     await db.flush()
     db.add(GroupMember(group_id=group.id, user_id=caller))
@@ -85,17 +86,47 @@ async def create_group(
 
 
 @router.patch("/{group_id}", response_model=GroupOut)
-async def rename_group(
+async def update_group(
     group_id: uuid.UUID,
-    body: GroupCreate,
+    body: GroupUpdate,
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
-    # Shared lock like the other group-mutating endpoints: serializes against
-    # a concurrent delete_group so the follow-up get can't find nothing.
-    await require_membership(db, group_id, caller, lock="shared")
+    """Rename the group, change its mode, or both. Any member may do either.
+
+    A rename takes the shared lock like the other group-mutating endpoints:
+    it serializes against a concurrent delete_group so the follow-up get
+    can't find nothing. A mode change takes the exclusive one, like
+    delete_group, because it is checked against the balances: every ledger
+    write holds the shared lock and reads the mode under it, so none can land
+    between the check and the commit, or run on a mode that changed under it.
+
+    Into SHARED only from a settled group — a shared budget has no settle-up,
+    so a balance carried in could never be paid off there. Out of SHARED
+    always: its balances are zero by construction, and from then on its new
+    expenses are split as usual. Old rows are never rewritten either way; they
+    keep the split they were recorded with.
+    """
+    lock = "exclusive" if body.mode is not None else "shared"
+    await require_membership(db, group_id, caller, lock=lock)
     group = await db.get(Group, group_id)
-    group.name = body.name
+    if body.mode == "SHARED" and group.mode != "SHARED":
+        buckets = await net_balances(db, group_id)
+        unsettled = sorted(
+            c for c, users in buckets.items() if any(v != 0 for v in users.values())
+        )
+        if unsettled:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Settle up before making this group a shared budget. "
+                    "Outstanding balances in: " + ", ".join(unsettled)
+                ),
+            )
+    if body.name is not None:
+        group.name = body.name
+    if body.mode is not None:
+        group.mode = body.mode
     await db.commit()
     return group
 
@@ -125,6 +156,7 @@ async def get_group(
     return GroupDetailOut(
         id=group.id,
         name=group.name,
+        mode=group.mode,
         created_by=group.created_by,
         created_at=group.created_at,
         members=[UserOut.model_validate(m) for m in members],

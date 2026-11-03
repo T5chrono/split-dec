@@ -16,6 +16,7 @@ const bob = { id: "bob-id", email: "bob@test.dev", full_name: "Bob", avatar_url:
 const group: GroupDetail = {
   id: "group-id",
   name: "Trip",
+  mode: "SPLIT",
   created_by: alice.id,
   created_at: "2026-01-01T00:00:00Z",
   members: [alice],

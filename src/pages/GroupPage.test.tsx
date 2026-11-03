@@ -26,6 +26,7 @@ const bob = { id: "bob-id", email: "bob@test.dev", full_name: "Bob", avatar_url:
 const group: GroupDetail = {
   id: "group-id",
   name: "Trip",
+  mode: "SPLIT",
   created_by: alice.id,
   created_at: "2026-01-01T00:00:00Z",
   members: [alice, bob],
@@ -75,5 +76,29 @@ describe("GroupPage — total spent in the header", () => {
     renderPage();
     expect(await screen.findByText("Trip")).toBeInTheDocument();
     expect(screen.queryByText(/Total spent/)).not.toBeInTheDocument();
+  });
+});
+
+describe("GroupPage — shared-budget group", () => {
+  it("shows no balances or settlements tab", async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.endsWith("/totals")) return totals as never;
+      if (path.includes("/expenses")) return { items: [], limit: 20, offset: 0 } as never;
+      if (path.endsWith("/balances")) return {} as never;
+      if (path.endsWith("/settlements") || path.endsWith("/invitations")) return [] as never;
+      return { ...group, mode: "SHARED" } as never;
+    });
+    renderPage();
+    expect(await screen.findByText(/Shared budget/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expenses" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Members" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Balances" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Settlements" })).not.toBeInTheDocument();
+  });
+
+  it("keeps both tabs in an ordinary group", async () => {
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Balances" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settlements" })).toBeInTheDocument();
   });
 });

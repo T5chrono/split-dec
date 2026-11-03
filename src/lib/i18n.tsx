@@ -170,6 +170,13 @@ const dict = {
     groupSettings: "Group settings",
     groupName: "Group name",
     totalSpent: "Total spent",
+    sharedBudget: "Shared budget",
+    sharedBudgetHint:
+      "For people who share their money, like a couple. Expenses are tracked, but nobody owes anybody, so there is nothing to settle.",
+    sharedBudgetOnHint:
+      "Expenses are tracked, but nobody owes anybody. Turn this off to start splitting new expenses again.",
+    sharedBudgetOffHint:
+      "Turn this on if you share your money, like a couple: expenses are still tracked, but nobody owes anybody. Only possible when everyone is settled up.",
     // group page tabs
     tabExpenses: "Expenses",
     tabBalances: "Balances",
@@ -417,6 +424,13 @@ const dict = {
     groupSettings: "Ustawienia grupy",
     groupName: "Nazwa grupy",
     totalSpent: "Łącznie wydano",
+    sharedBudget: "Wspólny budżet",
+    sharedBudgetHint:
+      "Dla osób, które mają wspólne pieniądze, np. pary. Wydatki są zapisywane, ale nikt nikomu nic nie jest winien, więc nie ma czego rozliczać.",
+    sharedBudgetOnHint:
+      "Wydatki są zapisywane, ale nikt nikomu nic nie jest winien. Wyłącz, aby nowe wydatki znów były dzielone.",
+    sharedBudgetOffHint:
+      "Włącz, jeśli macie wspólne pieniądze, np. jako para: wydatki nadal są zapisywane, ale nikt nikomu nic nie jest winien. Możliwe tylko, gdy wszyscy są rozliczeni.",
     tabExpenses: "Wydatki",
     tabBalances: "Salda",
     tabSettlements: "Rozliczenia",
