@@ -347,10 +347,8 @@ def test_install_is_reproducible_and_runs_no_package_scripts():
       CI attested nothing about what Vercel resolved.
     - `--ignore-scripts`: the build container holds SENTRY_AUTH_TOKEN, and an
       install script is arbitrary code running there just for being in the
-      tree. The only one that would run on Linux today is @sentry/cli's, which
-      exits immediately when its platform binary came from optionalDependencies
-      — all eight @sentry/cli-* packages are in the lockfile, so nothing is
-      skipped that does work.
+      tree. None would run on Linux today (fsevents, the only package that
+      declares one, is darwin-only), so nothing is skipped that does work.
     - The override exists at all to *narrow* Vercel's inferred install, which
       would otherwise also install the root requirements.txt into the build
       container, where nothing uses it.
