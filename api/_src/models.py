@@ -41,6 +41,15 @@ class Group(Base):
     name: Mapped[str] = mapped_column(String)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # "SPLIT" (expenses are divided and leave balances) or "SHARED" (a common
+    # purse: every expense is the payer's alone, so nothing is ever owed).
+    # Migration 20261103000000; enforced in the routers, never in balances.py.
+    mode: Mapped[str] = mapped_column(
+        String,
+        CheckConstraint("mode IN ('SPLIT', 'SHARED')", name="groups_mode_check"),
+        default="SPLIT",
+        server_default="SPLIT",
+    )
 
 
 class GroupMember(Base):

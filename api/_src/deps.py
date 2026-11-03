@@ -266,6 +266,44 @@ async def ensure_no_outsider_debt(db: AsyncSession, group_id: uuid.UUID) -> None
         )
 
 
+async def group_mode(db: AsyncSession, group_id: uuid.UUID) -> str:
+    """The group's `mode` ("SPLIT" or "SHARED"). Read under whatever lock the
+    endpoint already holds: update_group takes the exclusive one to change it,
+    so a ledger write holding the shared lock sees a mode that stays put until
+    it commits."""
+    return (
+        await db.execute(select(Group.mode).where(Group.id == group_id))
+    ).scalar_one()
+
+
+async def ensure_shared_group_settled(db: AsyncSession, group_id: uuid.UUID) -> None:
+    """Refuse a ledger change that leaves a SHARED group with a balance.
+
+    New expenses in a shared group cannot create one — they are recorded as
+    the payer's alone (routers/expenses.py). What can is a row from before the
+    group was switched to SHARED: withdrawing an expense that was split, or a
+    settlement that paid one off, moves somebody off zero, and a shared group
+    has no settle-up to bring them back. Switching the group back to splitting
+    is the way to make such a change, so the message says so.
+
+    Same calling convention as ensure_no_outsider_debt: after the flush, under
+    the shared group lock.
+    """
+    if await group_mode(db, group_id) != "SHARED":
+        return
+    buckets = await net_balances(db, group_id)
+    unsettled = sorted(c for c, users in buckets.items() if any(v != 0 for v in users.values()))
+    if unsettled:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This group is a shared budget and keeps no balances, but this "
+                "change would create one in: " + ", ".join(unsettled) + ". Switch "
+                "the group to splitting expenses to make it."
+            ),
+        )
+
+
 def record_edit(row, caller: uuid.UUID) -> None:
     """Stamp who last changed a ledger row, and when.
 

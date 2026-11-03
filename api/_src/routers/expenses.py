@@ -10,7 +10,9 @@ from ..auth import verify_jwt
 from ..db import get_db
 from ..deps import (
     ensure_no_outsider_debt,
+    ensure_shared_group_settled,
     get_expense_for_member,
+    group_mode,
     idempotency_key_taken,
     record_edit,
     require_membership,
@@ -23,7 +25,7 @@ from ..ratelimit import (
     enforce_ledger_write_quota,
     record_write,
 )
-from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate
+from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate, SplitInput
 from ..splits import compute_splits
 
 router = APIRouter(tags=["expenses"])
@@ -46,6 +48,23 @@ async def _validate_participants(
         raise HTTPException(
             status_code=400, detail="All participants must be members of the group"
         )
+
+
+def _payer_only(body: ExpenseCreate | ExpenseUpdate) -> ExpenseCreate | ExpenseUpdate:
+    """The split a SHARED group records, whatever the request asked for: the
+    payer owes the whole amount to themselves, so the expense counts towards
+    what the group spent and moves nobody's balance.
+
+    Overridden rather than refused, so a client that predates group modes — an
+    installed PWA still on an old bundle — keeps working in a shared group
+    instead of failing every save. The payer stays the caller's to choose: who
+    paid is the one fact a shared budget still wants recorded."""
+    return body.model_copy(
+        update={
+            "split_type": "EXACT",
+            "splits": [SplitInput(user_id=body.paid_by_user_id, amount=body.total_amount)],
+        }
+    )
 
 
 async def _find_by_idempotency_key(
@@ -117,6 +136,8 @@ async def create_expense(
     # Charged now, committed with the expense below. A validation failure or
     # the idempotency race rolls the session back and takes the charge too.
     await record_write(db, caller, LEDGER)
+    if await group_mode(db, group_id) == "SHARED":
+        body = _payer_only(body)
     await _validate_participants(db, group_id, body)
     shares = compute_splits(
         body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
@@ -201,6 +222,8 @@ async def update_expense(
                     "splits must be provided together"
                 ),
             )
+        if await group_mode(db, expense.group_id) == "SHARED":
+            body = _payer_only(body)
         await _validate_participants(db, expense.group_id, body)
         shares = compute_splits(
             body.split_type, body.total_amount, body.currency, body.paid_by_user_id, body.splits
@@ -247,6 +270,9 @@ async def update_expense(
     # an expense they had already settled for.
     await db.flush()
     await ensure_no_outsider_debt(db, expense.group_id)
+    # Only bites on a row from before the group became SHARED: rewriting it
+    # payer-only un-splits it, which moves whoever it was split with.
+    await ensure_shared_group_settled(db, expense.group_id)
     await db.commit()
     await db.refresh(expense)
     return ExpenseOut.model_validate(expense)
@@ -273,4 +299,5 @@ async def delete_expense(
     # Withdrawing an expense un-settles everyone it touched, including anyone
     # who has since left and can no longer be a party to a settlement.
     await ensure_no_outsider_debt(db, expense.group_id)
+    await ensure_shared_group_settled(db, expense.group_id)
     await db.commit()

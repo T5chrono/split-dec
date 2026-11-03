@@ -26,6 +26,7 @@ const carol = { id: "carol-id", email: "carol@test.dev", full_name: "Carol", ava
 const group: GroupDetail = {
   id: "group-id",
   name: "Trip",
+  mode: "SPLIT",
   created_by: alice.id,
   created_at: "2026-01-01T00:00:00Z",
   members: [alice, bob, carol],
@@ -497,5 +498,75 @@ describe("ExpenseFormModal — idempotency key across retries", () => {
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
     expect(keys[0]).toBeTruthy();
+  });
+});
+
+describe("ExpenseFormModal — shared-budget group", () => {
+  const sharedGroup: GroupDetail = { ...group, mode: "SHARED", members: [alice, bob] };
+  // Recorded before the group became shared, so it is still split 50/50.
+  const legacyExpense: Expense = {
+    id: "e1",
+    group_id: group.id,
+    description: "Groceries",
+    category: "Groceries",
+    split_type: "EQUAL",
+    total_amount: "100.0000",
+    currency: "PLN",
+    paid_by_user_id: alice.id,
+    expense_date: "2026-06-01",
+    created_at: "2026-06-01T00:00:00Z",
+    created_by: null,
+    updated_by: null,
+    updated_at: null,
+    splits: [
+      { user_id: alice.id, owed_amount: "50.0000" },
+      { user_id: bob.id, owed_amount: "50.0000" },
+    ],
+  };
+
+  it("offers no split and records the expense as the payer's alone", async () => {
+    vi.mocked(api.post).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal group={sharedGroup} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: /equally/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Groceries");
+    await user.type(screen.getByPlaceholderText("120,50"), "84,20");
+    const payer = screen
+      .getAllByRole("combobox")
+      .find((el) => el.textContent?.includes("Bob")) as HTMLSelectElement;
+    await user.selectOptions(payer, bob.id);
+    await user.click(screen.getByRole("button", { name: /add expense/i }));
+
+    const [, body] = vi.mocked(api.post).mock.calls[0];
+    expect(body).toMatchObject({
+      split_type: "EXACT",
+      total_amount: "84.20",
+      paid_by_user_id: bob.id,
+      splits: [{ user_id: bob.id, amount: "84.20" }],
+    });
+  });
+
+  it("keeps a description edit metadata-only on a row that is still split", async () => {
+    vi.mocked(api.patch).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal
+        group={sharedGroup}
+        expense={legacyExpense}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const description = screen.getByPlaceholderText("Dinner at Nolio");
+    await user.clear(description);
+    await user.type(description, "Groceries (Lidl)");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    const [, body] = vi.mocked(api.patch).mock.calls[0];
+    expect(body).not.toHaveProperty("splits");
   });
 });

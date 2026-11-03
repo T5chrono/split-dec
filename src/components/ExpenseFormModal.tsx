@@ -64,6 +64,10 @@ export default function ExpenseFormModal({
   const { session } = useAuth();
   const { t } = useI18n();
   const myId = session?.user.id;
+  // A shared budget records every expense as the payer's alone; the server
+  // enforces that whatever is sent, so the form neither offers a split nor
+  // compares one.
+  const shared = group.mode === "SHARED";
 
   const [description, setDescription] = useState(expense?.description ?? "");
   const [category, setCategory] = useState(expense?.category ?? "General");
@@ -193,6 +197,16 @@ export default function ExpenseFormModal({
   // them on a metadata-only edit could silently shift money between members.
   const financialsUnchanged = (): boolean => {
     if (!expense) return false;
+    if (shared) {
+      // The split is not the user's to change here. Comparing it anyway would
+      // turn a description edit on a row from before the group became shared
+      // into a payer-only rewrite, which moves money and is refused.
+      return (
+        currency === expense.currency &&
+        paidBy === expense.paid_by_user_id &&
+        normalizeAmountInput(totalAmount) === trimAmount(expense.total_amount, expense.currency)
+      );
+    }
     if (
       splitType !== expense.split_type ||
       currency !== expense.currency ||
@@ -236,12 +250,14 @@ export default function ExpenseFormModal({
       const payload: ExpensePayload = {
         description: description.trim(),
         category,
-        split_type: splitType,
+        split_type: shared ? "EXACT" : splitType,
         total_amount: normalizeAmountInput(totalAmount),
         currency,
         paid_by_user_id: paidBy,
         expense_date: expenseDate,
-        splits: buildSplits(),
+        splits: shared
+          ? [{ user_id: paidBy, amount: normalizeAmountInput(totalAmount) }]
+          : buildSplits(),
       };
       if (expense) {
         return api.patch<Expense>(`/expenses/${expense.id}`, payload);
@@ -347,93 +363,95 @@ export default function ExpenseFormModal({
           </div>
         </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">{t("split")}</label>
-          <div className="mb-2 flex gap-1 rounded-lg bg-slate-200/60 p-1 dark:bg-slate-800">
-            {(
-              [
-                ["EQUAL", t("splitEqually")],
-                ["EXACT", t("splitExact")],
-                ["PERCENTAGE", t("splitPercent")],
-              ] as const
-            ).map(([type, label]) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setSplitType(type)}
-                className={`flex-1 rounded-md px-2 py-1 text-xs font-medium ${
-                  splitType === type
-                    ? "bg-white shadow-sm dark:bg-slate-700"
-                    : "text-slate-600 dark:text-slate-400"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        {!shared && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">{t("split")}</label>
+            <div className="mb-2 flex gap-1 rounded-lg bg-slate-200/60 p-1 dark:bg-slate-800">
+              {(
+                [
+                  ["EQUAL", t("splitEqually")],
+                  ["EXACT", t("splitExact")],
+                  ["PERCENTAGE", t("splitPercent")],
+                ] as const
+              ).map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setSplitType(type)}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium ${
+                    splitType === type
+                      ? "bg-white shadow-sm dark:bg-slate-700"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-          <ul className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-            {group.members.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-1">
-                <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={participants.has(m.id)}
-                    onChange={() => toggleParticipant(m.id)}
-                    className="h-4 w-4 accent-teal-600"
-                  />
-                  {m.id === myId ? t("you") : (m.full_name ?? m.email)}
-                </label>
-                {splitType === "EXACT" && participants.has(m.id) && (
-                  <input
-                    inputMode="decimal"
-                    pattern={AMOUNT_PATTERN}
-                    value={exactAmounts[m.id] ?? ""}
-                    onChange={(e) => setExactAmounts({ ...exactAmounts, [m.id]: e.target.value })}
-                    placeholder={
-                      autoExact !== null && emptyExactIds[0] === m.id ? autoExact : "0,00"
-                    }
-                    className={`w-24 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
-                      autoExact !== null && emptyExactIds[0] === m.id
-                        ? "border-teal-400 placeholder:text-teal-600 dark:border-teal-600 dark:placeholder:text-teal-400"
-                        : "border-slate-300 bg-white dark:border-slate-600"
-                    }`}
-                  />
-                )}
-                {splitType === "PERCENTAGE" && participants.has(m.id) && (
-                  <div className="flex items-center gap-1">
+            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+              {group.members.map((m) => (
+                <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-1">
+                  <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={participants.has(m.id)}
+                      onChange={() => toggleParticipant(m.id)}
+                      className="h-4 w-4 accent-teal-600"
+                    />
+                    {m.id === myId ? t("you") : (m.full_name ?? m.email)}
+                  </label>
+                  {splitType === "EXACT" && participants.has(m.id) && (
                     <input
                       inputMode="decimal"
                       pattern={AMOUNT_PATTERN}
-                      value={percentages[m.id] ?? ""}
-                      onChange={(e) => setPercentages({ ...percentages, [m.id]: e.target.value })}
+                      value={exactAmounts[m.id] ?? ""}
+                      onChange={(e) => setExactAmounts({ ...exactAmounts, [m.id]: e.target.value })}
                       placeholder={
-                        autoPct !== null && emptyPctIds[0] === m.id ? String(autoPct) : "0"
+                        autoExact !== null && emptyExactIds[0] === m.id ? autoExact : "0,00"
                       }
-                      className={`w-16 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
-                        autoPct !== null && emptyPctIds[0] === m.id
+                      className={`w-24 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
+                        autoExact !== null && emptyExactIds[0] === m.id
                           ? "border-teal-400 placeholder:text-teal-600 dark:border-teal-600 dark:placeholder:text-teal-400"
                           : "border-slate-300 bg-white dark:border-slate-600"
                       }`}
                     />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">%</span>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          {splitType === "EXACT" && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {t("sumOfAmounts")}: {exactSum} ({t("mustEqual")}{" "}
-              {totalAmount || t("theTotal")})
-            </p>
-          )}
-          {splitType === "PERCENTAGE" && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {t("sumOfPercentages")}: {pctSum} ({t("mustBe100")})
-            </p>
-          )}
-        </div>
+                  )}
+                  {splitType === "PERCENTAGE" && participants.has(m.id) && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        inputMode="decimal"
+                        pattern={AMOUNT_PATTERN}
+                        value={percentages[m.id] ?? ""}
+                        onChange={(e) => setPercentages({ ...percentages, [m.id]: e.target.value })}
+                        placeholder={
+                          autoPct !== null && emptyPctIds[0] === m.id ? String(autoPct) : "0"
+                        }
+                        className={`w-16 rounded-md border px-2 py-1 text-right text-sm dark:bg-slate-800 ${
+                          autoPct !== null && emptyPctIds[0] === m.id
+                            ? "border-teal-400 placeholder:text-teal-600 dark:border-teal-600 dark:placeholder:text-teal-400"
+                            : "border-slate-300 bg-white dark:border-slate-600"
+                        }`}
+                      />
+                      <span className="text-xs text-slate-500 dark:text-slate-400">%</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {splitType === "EXACT" && (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {t("sumOfAmounts")}: {exactSum} ({t("mustEqual")}{" "}
+                {totalAmount || t("theTotal")})
+              </p>
+            )}
+            {splitType === "PERCENTAGE" && (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {t("sumOfPercentages")}: {pctSum} ({t("mustBe100")})
+              </p>
+            )}
+          </div>
+        )}
 
         {save.error && (
           <p className="text-sm text-red-600 dark:text-red-400">{(save.error as Error).message}</p>
@@ -441,7 +459,9 @@ export default function ExpenseFormModal({
 
         <button
           type="submit"
-          disabled={save.isPending || participants.size === 0 || amountError !== null}
+          disabled={
+            save.isPending || (!shared && participants.size === 0) || amountError !== null
+          }
           className="w-full rounded-lg bg-teal-600 py-2 font-medium text-white hover:bg-teal-700 disabled:opacity-50"
         >
           {save.isPending ? t("saving") : expense ? t("saveChanges") : t("addExpense")}

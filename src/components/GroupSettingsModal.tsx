@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { api } from "../lib/api";
-import type { Group, GroupDetail } from "../lib/types";
+import type { Group, GroupDetail, GroupMode } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
@@ -29,6 +29,19 @@ export default function GroupSettingsModal({
       onClose();
     },
   });
+
+  // Applied the moment it is toggled, independently of the name form: it is
+  // reversible, and the server may refuse it (an unsettled group cannot become
+  // a shared budget), which is worth hearing before anything else is typed.
+  const changeMode = useMutation({
+    mutationFn: (mode: GroupMode) => api.patch<Group>(`/groups/${group.id}`, { mode }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["group", group.id] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["balances", group.id] });
+    },
+  });
+  const shared = group.mode === "SHARED";
 
   const deleteGroup = useMutation({
     mutationFn: () => api.delete<void>(`/groups/${group.id}`),
@@ -76,6 +89,33 @@ export default function GroupSettingsModal({
               </p>
             )}
           </form>
+
+          <div>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={shared}
+                disabled={changeMode.isPending}
+                onChange={(e) => changeMode.mutate(e.target.checked ? "SHARED" : "SPLIT")}
+                aria-describedby="group-mode-hint"
+                className="mt-0.5 h-4 w-4 accent-teal-600"
+              />
+              <span>
+                <span className="block text-sm font-medium">{t("sharedBudget")}</span>
+                <span
+                  id="group-mode-hint"
+                  className="block text-xs text-slate-500 dark:text-slate-400"
+                >
+                  {shared ? t("sharedBudgetOnHint") : t("sharedBudgetOffHint")}
+                </span>
+              </span>
+            </label>
+            {changeMode.error && (
+              <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                {(changeMode.error as Error).message}
+              </p>
+            )}
+          </div>
 
           <div className="rounded-xl border border-red-200 p-4 dark:border-red-900">
             <div className="mb-1 text-sm font-semibold text-red-600 dark:text-red-400">

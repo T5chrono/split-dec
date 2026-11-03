@@ -895,6 +895,16 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   outstanding is offered the form and refused by the server. The same constant caps
   `splits` on `ExpenseCreate`/`ExpenseUpdate` (422 at parse time), since no expense can
   name more people than a group holds.
+- **A group is either `SPLIT` or `SHARED`** (`groups.mode`, migration `20261103000000`).
+  `SHARED` is a common purse — a couple with joint finances: the routers record every
+  expense payer-only (`expenses._payer_only`, overriding whatever split was sent, so an
+  old client keeps working) and refuse new settlements, and the UI hides the split
+  picker and the Balances/Settlements tabs. **Nothing in `balances.py` knows about it**:
+  the balances are zero because of what is written, same principle as the welcome group.
+  Switching into `SHARED` needs a settled group and takes the exclusive group lock;
+  switching out is always allowed. Rows from before a switch keep their split, so
+  `deps.ensure_shared_group_settled` refuses any later change to them that would move
+  a balance (withdrawing a split expense or a settlement) — switching back is the way out.
 - **A group is never left without members.** `remove_member` refuses to remove the last one
   (400, pointing at group deletion, which is the same gesture with a confirmation behind it);
   `delete_account` cannot refuse on the group's behalf, so it purges any group its departure

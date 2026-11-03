@@ -15,6 +15,7 @@ const alice = { id: "alice-id", email: "alice@test.dev", full_name: "Alice", ava
 const group: GroupDetail = {
   id: "group-id",
   name: "Trip",
+  mode: "SPLIT",
   created_by: alice.id,
   created_at: "2026-01-01T00:00:00Z",
   members: [alice],
@@ -67,6 +68,22 @@ describe("GroupSettingsModal", () => {
     const confirm = screen.getAllByRole("button", { name: /delete group/i })[1];
     await user.click(confirm);
     expect(api.delete).toHaveBeenCalledWith("/groups/group-id");
+  });
+
+  it("turns the group into a shared budget on toggle, without closing", async () => {
+    vi.mocked(api.patch).mockResolvedValue({ ...group, mode: "SHARED" });
+    const { onClose } = renderModal();
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: /shared budget/i }));
+
+    expect(api.patch).toHaveBeenCalledWith("/groups/group-id", { mode: "SHARED" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows why the server refused the switch", async () => {
+    vi.mocked(api.patch).mockRejectedValue(new Error("Settle up first"));
+    renderModal();
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: /shared budget/i }));
+    expect(await screen.findByText("Settle up first")).toBeInTheDocument();
   });
 
   it("keeps the panel open when the backdrop is clicked", async () => {

@@ -12,7 +12,9 @@ from ..currencies import precision_for
 from ..db import get_db
 from ..deps import (
     ensure_no_outsider_debt,
+    ensure_shared_group_settled,
     get_settlement_for_member,
+    group_mode,
     idempotency_key_taken,
     record_edit,
     require_membership,
@@ -128,6 +130,14 @@ async def create_settlement(
     if replay is not None:
         response.status_code = 200
         return replay
+    # A shared budget has no balances, so a settlement could only create one.
+    # After the replay check, so a retry of one recorded before the switch to
+    # SHARED still gets its row back.
+    if await group_mode(db, group_id) == "SHARED":
+        raise HTTPException(
+            status_code=400,
+            detail="This group is a shared budget and has nothing to settle.",
+        )
     await enforce_ledger_write_quota(db, caller)
     await record_write(db, caller, LEDGER)  # committed with the settlement below
     await _validate_parties(db, group_id, body.paid_by_user_id, body.paid_to_user_id)
@@ -203,6 +213,7 @@ async def update_settlement(
     # off a former member leaves whatever they had settled unsettled again.
     await db.flush()
     await ensure_no_outsider_debt(db, settlement.group_id)
+    await ensure_shared_group_settled(db, settlement.group_id)
     await db.commit()
     return settlement
 
@@ -224,4 +235,5 @@ async def delete_settlement(
     # Withdrawing a settlement restores the debt it cleared — including one a
     # member cleared on their way out of the group.
     await ensure_no_outsider_debt(db, settlement.group_id)
+    await ensure_shared_group_settled(db, settlement.group_id)
     await db.commit()

@@ -19,10 +19,12 @@ import MembersTab from "../components/MembersTab";
 import GroupSettingsModal from "../components/GroupSettingsModal";
 import Spinner from "../components/Spinner";
 
-const TABS: { id: string; label: TKey }[] = [
+const TABS: { id: string; label: TKey; split?: true }[] = [
   { id: "expenses", label: "tabExpenses" },
-  { id: "balances", label: "tabBalances" },
-  { id: "settlements", label: "tabSettlements" },
+  // Only meaningful where expenses are divided: a shared-budget group has no
+  // balances by construction and refuses settlements (groups.mode).
+  { id: "balances", label: "tabBalances", split: true },
+  { id: "settlements", label: "tabSettlements", split: true },
   { id: "members", label: "tabMembers" },
 ];
 
@@ -53,6 +55,11 @@ export default function GroupPage() {
   if (error) return <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>;
   if (!group) return null;
 
+  const shared = group.mode === "SHARED";
+  const tabs = shared ? TABS.filter((tb) => !tb.split) : TABS;
+  // The mode can change while a hidden tab is open (GroupSettingsModal).
+  const activeTab = tabs.some((tb) => tb.id === tab) ? tab : "expenses";
+
   return (
     <div>
       <Link
@@ -73,6 +80,7 @@ export default function GroupPage() {
         </button>
       </h1>
       <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+        {shared && <>{t("sharedBudget")} · </>}
         {membersLabel(group.members.length)}
         {totals && totals.length > 0 && (
           <>
@@ -87,12 +95,12 @@ export default function GroupPage() {
       </p>
 
       <div className="mb-5 flex gap-1 rounded-lg bg-slate-200/60 p-1 dark:bg-slate-800">
-        {TABS.map(({ id, label }) => (
+        {tabs.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              tab === id
+              activeTab === id
                 ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100"
                 : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
@@ -102,10 +110,10 @@ export default function GroupPage() {
         ))}
       </div>
 
-      {tab === "expenses" && <ExpensesTab group={group} />}
-      {tab === "balances" && <BalancesTab group={group} />}
-      {tab === "settlements" && <SettlementsTab group={group} />}
-      {tab === "members" && <MembersTab group={group} />}
+      {activeTab === "expenses" && <ExpensesTab group={group} />}
+      {activeTab === "balances" && <BalancesTab group={group} />}
+      {activeTab === "settlements" && <SettlementsTab group={group} />}
+      {activeTab === "members" && <MembersTab group={group} />}
 
       {settingsOpen && (
         <GroupSettingsModal group={group} onClose={() => setSettingsOpen(false)} />

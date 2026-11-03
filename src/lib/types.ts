@@ -1,5 +1,10 @@
 export type SplitType = "EQUAL" | "EXACT" | "PERCENTAGE";
 
+/** "SPLIT" divides expenses and leaves balances to settle; "SHARED" is a
+ *  common purse — the server records every expense as the payer's alone, so
+ *  nothing is ever owed and there is nothing to settle. */
+export type GroupMode = "SPLIT" | "SHARED";
+
 export interface User {
   id: string;
   email: string;
@@ -10,6 +15,7 @@ export interface User {
 export interface Group {
   id: string;
   name: string;
+  mode: GroupMode;
   created_by: string;
   created_at: string;
 }

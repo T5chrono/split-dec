@@ -9,6 +9,8 @@ from .categories import Category
 from .deps import MAX_GROUP_MEMBERS
 
 SplitType = Literal["EQUAL", "EXACT", "PERCENTAGE"]
+# See models.Group.mode. SHARED groups record every expense as the payer's own.
+GroupMode = Literal["SPLIT", "SHARED"]
 
 
 def money(value: Decimal) -> str:
@@ -46,6 +48,15 @@ class WelcomeOut(BaseModel):
 
 class GroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    mode: GroupMode = "SPLIT"
+
+
+class GroupUpdate(BaseModel):
+    """Either field alone, or both. Changing `mode` has its own rules
+    (groups.update_group)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    mode: GroupMode | None = None
 
 
 class GroupOut(BaseModel):
@@ -53,6 +64,7 @@ class GroupOut(BaseModel):
 
     id: uuid.UUID
     name: str
+    mode: GroupMode
     created_by: uuid.UUID
     created_at: datetime
 
