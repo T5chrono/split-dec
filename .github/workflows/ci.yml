@@ -60,13 +60,11 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      # --ignore-scripts here for the same reason vercel.json carries it: the
-      # only package in this tree with an install script that runs on Linux is
-      # @sentry/cli, and its postinstall exits immediately when the platform
-      # binary arrived through optionalDependencies (it does — all eight
-      # @sentry/cli-* packages are in the lockfile). So the flag costs nothing
-      # today and denies a future dependency the ability to run code here just
-      # by being installed.
+      # --ignore-scripts here for the same reason vercel.json carries it: no
+      # package in this tree has an install script that runs on Linux (the
+      # only one that declares any is fsevents, darwin-only). So the flag costs
+      # nothing today and denies a future dependency the ability to run code
+      # here just by being installed.
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build

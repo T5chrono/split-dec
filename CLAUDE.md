@@ -133,12 +133,11 @@ on `ENV=development`):
   Vercel deployed was a different resolution event from the one CI tested and a
   green CI attested nothing about it. And `--ignore-scripts`, because this
   container holds `SENTRY_AUTH_TOKEN` and an install script is arbitrary code
-  running next to it for no reason but being in the tree. Nothing is lost: the
-  only install script that would run on Linux is `@sentry/cli`'s, and its
-  `postinstall` `process.exit(0)`s the moment it resolves the platform binary,
-  which arrives as a package — all eight `@sentry/cli-*` optional dependencies
-  are in the lockfile. The download is its fallback for `--no-optional`
-  installs, not its normal path.
+  running next to it for no reason but being in the tree. Nothing is lost: no
+  package in the tree declares an install script that runs on Linux. The last
+  one was `@sentry/cli`'s, which left with `@sentry/vite-plugin` 11 (November
+  2026) — its replacement, the `sentry` package, is plain JavaScript with no
+  install step. `fsevents` declares one and is darwin-only.
   **`.npmrc` carries `ignore-scripts=true` for the third machine.** The two
   flags above cover Vercel and CI — the machines that build what users are
   served — and covered nothing else, while the machine left out is the one
