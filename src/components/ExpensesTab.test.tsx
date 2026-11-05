@@ -415,10 +415,10 @@ describe("ExpensesTab — row interactions", () => {
     // Quick picker open, edit view NOT open.
     expect(screen.getByRole("listbox")).toBeInTheDocument();
     expect(screen.queryByText("Edit expense")).not.toBeInTheDocument();
-    // General leads the list (first option at the top). Scoped to the picker:
-    // the payer filter is a native <select> and contributes options too.
+    // The list follows the category document: Food and drink first. Scoped to
+    // the picker: the payer filter is a native <select> and contributes options too.
     const options = within(screen.getByRole("listbox")).getAllByRole("option");
-    expect(options[0]).toHaveTextContent("General");
+    expect(options[0]).toHaveTextContent("Dining out");
   });
 
   it("picking a category from the quick picker PATCHes only the category", async () => {

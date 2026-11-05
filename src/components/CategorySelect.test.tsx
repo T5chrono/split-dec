@@ -37,11 +37,12 @@ describe("CategorySelect", () => {
     );
   });
 
-  it("lists General first so the picker always starts at the top", async () => {
-    renderWithProviders(<CategorySelect value="Water" onChange={vi.fn()} />);
+  it("lists categories in the order of the category document", async () => {
+    renderWithProviders(<CategorySelect value="Bills" onChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button"));
     const options = screen.getAllByRole("option");
-    expect(options[0]).toHaveTextContent("General");
+    expect(options[0]).toHaveTextContent("Dining out");
+    expect(options.at(-1)).toHaveTextContent("General");
   });
 
   it("closes on Escape without changing the value", async () => {

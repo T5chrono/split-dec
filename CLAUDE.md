@@ -1044,7 +1044,12 @@ Security & Privacy settings would narrow that; it is a dashboard-only toggle.
   placeholder it has no value for visible rather than blanking it. Dark mode = Tailwind `dark:` variants
   on everything plus `color-scheme` on `.dark`.
 - Custom pickers (`DatePicker`, `CategorySelect`) are keyboard-accessible by prior review
-  mandate; category list order is user-specified (General first, list opens at top).
+  mandate; category list order is user-specified — the order of
+  `public/categories/Categories-Version2.md` (Food and drink first, Uncategorized last; the
+  list still opens at the top). `tests/test_categories.py` holds the frontend table and the
+  backend enum to the same values in the same order. Retired values from the first list
+  are translated on input (`categories.LEGACY_CATEGORIES`, for stale PWA bundles) and were
+  rewritten in stored rows by migration `20261105000000`, which uses the same table.
   `DatePicker` weeks start on Monday in every language (user-specified, not locale-derived).
 - `Modal` dismisses on a backdrop click by default; anything holding unsaved input
   (expense/settlement forms, group create, group settings) passes `dismissOnBackdrop={false}`
