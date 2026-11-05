@@ -88,6 +88,14 @@ def _bounded(text: str, limit: int) -> str:
     return encoded[:limit].decode("utf-8", "ignore").rstrip()
 
 
+# Named explicitly because urllib's default, `Python-urllib/3.x`, is refused by
+# the Cloudflare edge in front of api.resend.com: 403 with a plain-text body of
+# `error code: 1010`, before the request ever reaches Resend — so it appears in
+# no Resend log and no key rotation changes it. Every invitation email failed
+# that way, looking for all the world like a sandbox or key problem.
+USER_AGENT = "SplitDec/1.0 (+https://split-dec.app)"
+
+
 def _post_resend(payload: dict) -> None:
     req = urllib.request.Request(
         "https://api.resend.com/emails",
@@ -95,6 +103,7 @@ def _post_resend(payload: dict) -> None:
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
         method="POST",
     )
@@ -227,7 +236,8 @@ async def send_invitation_email(
         return True
     except urllib.error.HTTPError as e:
         # The status code alone distinguishes the cases worth acting on
-        # (403 sandbox restriction, 422 bad sender, 429 provider throttle).
+        # (403 sandbox restriction or an edge block — see USER_AGENT — 422 bad
+        # sender, 429 provider throttle).
         logger.error("Resend rejected invitation email %s: HTTP %s", correlator, e.code)
         return False
     except Exception as e:  # noqa: BLE001 — best-effort; must not fail the request

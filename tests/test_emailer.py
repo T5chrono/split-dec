@@ -167,6 +167,32 @@ class TestLogHygiene:
         assert "TimeoutError" in caplog.text
 
 
+def test_the_resend_request_names_its_own_user_agent(monkeypatch):
+    """Cloudflare in front of api.resend.com answers urllib's default
+    `Python-urllib/3.x` with 403 `error code: 1010`, so leaving the header to
+    urllib fails every send without the request reaching Resend at all."""
+    seen = []
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _urlopen(req, timeout):
+        seen.append(req)
+        return _Response()
+
+    monkeypatch.setattr(emailer.urllib.request, "urlopen", _urlopen)
+    emailer._post_resend({})
+    user_agent = seen[0].get_header("User-agent")
+    assert user_agent == emailer.USER_AGENT
+    assert not user_agent.startswith("Python-urllib")
+
+
 class TestFailureLevels:
     """Every way sending can fail has to be an *event*, not a breadcrumb.
 
