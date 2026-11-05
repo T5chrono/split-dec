@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/utils";
@@ -280,6 +280,104 @@ describe("ExpensesTab — filter by payer", () => {
 
     expect(await screen.findByText("No expenses paid by this member.")).toBeInTheDocument();
     expect(screen.queryByText(/Add the first one/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ExpensesTab — filter by month", () => {
+  const lastGetUrl = () =>
+    vi.mocked(api.get).mock.calls[vi.mocked(api.get).mock.calls.length - 1][0] as string;
+
+  /** Serves what the server would: the date range applied before the page. */
+  function serve(items: Expense[]) {
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      const from = params.get("date_from");
+      const to = params.get("date_to");
+      const offset = Number(params.get("offset") ?? 0);
+      const matching = items.filter(
+        (e) => (!from || e.expense_date >= from) && (!to || e.expense_date <= to),
+      );
+      return { items: matching.slice(offset, offset + 20), limit: 20, offset } satisfies ExpenseList;
+    });
+  }
+
+  const dated = (id: string, description: string, day: string) => ({
+    ...expense(id, description),
+    expense_date: day,
+  });
+
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset();
+    // Only Date is faked, so userEvent's own timers keep running.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 5, 12, 0)); // 5 November 2026
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("starts unfiltered and sends no date range", async () => {
+    serve([dated("e1", "Groceries", "2026-11-02")]);
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("Groceries");
+    expect(lastGetUrl()).not.toContain("date_from");
+    expect(screen.getByRole("button", { name: "Filter by month" })).toBeInTheDocument();
+  });
+
+  it("opens on the current month and steps back and forth", async () => {
+    serve([
+      dated("e1", "November rent", "2026-11-02"),
+      dated("e2", "October rent", "2026-10-31"),
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("October rent");
+
+    await user.click(screen.getByRole("button", { name: "Filter by month" }));
+    expect(screen.getByText("November 2026")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(lastGetUrl()).toContain("date_from=2026-11-01&date_to=2026-11-30"),
+    );
+    await waitFor(() => expect(screen.queryByText("October rent")).not.toBeInTheDocument());
+    expect(screen.getByText("November rent")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(screen.getByText("October 2026")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(lastGetUrl()).toContain("date_from=2026-10-01&date_to=2026-10-31"),
+    );
+    expect(await screen.findByText("October rent")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("November rent")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Show all months" }));
+    await waitFor(() => expect(lastGetUrl()).not.toContain("date_from"));
+    expect(await screen.findByText("November rent")).toBeInTheDocument();
+    expect(screen.getByText("October rent")).toBeInTheDocument();
+  });
+
+  it("goes back to the first page when the month changes", async () => {
+    serve(Array.from({ length: 25 }, (_, i) => dated(`e${i}`, `Item ${i}`, "2026-11-01")));
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("Item 0");
+
+    await user.click(screen.getByRole("button", { name: /older/i }));
+    await waitFor(() => expect(lastGetUrl()).toContain("offset=20"));
+
+    await user.click(screen.getByRole("button", { name: "Filter by month" }));
+    await waitFor(() => expect(lastGetUrl()).toContain("offset=0"));
+    expect(lastGetUrl()).toContain("date_from=2026-11-01");
+  });
+
+  it("shows a month-specific empty state without the call to action", async () => {
+    serve([dated("e1", "Groceries", "2026-11-02")]);
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("Groceries");
+
+    await user.click(screen.getByRole("button", { name: "Filter by month" }));
+    await user.click(screen.getByRole("button", { name: "Previous month" }));
+
+    expect(await screen.findByText("No expenses in this month.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /add expense/i })).toHaveLength(1);
   });
 });
 

@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "./api";
+import { monthRange } from "./dates";
 import type {
   Balances,
   CurrencyTotal,
@@ -24,22 +25,26 @@ export const groupDetailQuery = (groupId: string) =>
     queryFn: () => api.get<GroupDetail>(`/groups/${groupId}`),
   });
 
-/** `paidBy` filters the page server-side (pagination is server-side too, so
- *  filtering the fetched page in the client would leave holes). It is part of
- *  the key, and normalized to null so the unfiltered view shares the key the
- *  prefetchers warm. */
+/** `paidBy` and `month` filter the page server-side (pagination is
+ *  server-side too, so filtering the fetched page in the client would leave
+ *  holes). Both are part of the key, and normalized to null so the unfiltered
+ *  view shares the key the prefetchers warm. `month` is "YYYY-MM". */
 export const expensesQuery = (
   groupId: string,
   offset: number,
   paidBy: string | null = null,
+  month: string | null = null,
 ) =>
   queryOptions({
-    queryKey: ["expenses", groupId, offset, paidBy],
-    queryFn: () =>
-      api.get<ExpenseList>(
+    queryKey: ["expenses", groupId, offset, paidBy, month],
+    queryFn: () => {
+      const range = month ? monthRange(month) : null;
+      return api.get<ExpenseList>(
         `/groups/${groupId}/expenses?limit=${PAGE_SIZE}&offset=${offset}` +
-          (paidBy ? `&paid_by=${encodeURIComponent(paidBy)}` : ""),
-      ),
+          (paidBy ? `&paid_by=${encodeURIComponent(paidBy)}` : "") +
+          (range ? `&date_from=${range.from}&date_to=${range.to}` : ""),
+      );
+    },
   });
 
 export const balancesQuery = (groupId: string) =>
