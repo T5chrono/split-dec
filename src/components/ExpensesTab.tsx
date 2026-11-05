@@ -5,11 +5,11 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, ReceiptText } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, ReceiptText, X } from "lucide-react";
 import { api } from "../lib/api";
 import type { Expense, ExpenseList, GroupDetail } from "../lib/types";
 import { formatMoney } from "../lib/currency";
-import { parseLocalISO } from "../lib/dates";
+import { parseLocalISO, shiftMonthISO, toMonthISO } from "../lib/dates";
 import { expensesQuery, PAGE_SIZE } from "../lib/queries";
 import { useI18n } from "../lib/i18n";
 import { useAuth } from "../hooks/useAuth";
@@ -27,6 +27,8 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
   const payerFilterId = useId();
   const [offset, setOffset] = useState(0);
   const [paidBy, setPaidBy] = useState<string | null>(null);
+  // "YYYY-MM", or null for every month.
+  const [month, setMonth] = useState<string | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [adding, setAdding] = useState(false);
   const [categoryError, setCategoryError] = useState<Error | null>(null);
@@ -37,9 +39,21 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
     membersById.get(id)?.full_name ?? membersById.get(id)?.email ?? t("formerMember");
 
   const monthFmt = new Intl.DateTimeFormat(dateLocale, { month: "short" });
+  const monthYearFmt = new Intl.DateTimeFormat(dateLocale, { month: "long", year: "numeric" });
+  const monthLabel = (m: string) => {
+    const s = monthYearFmt.format(parseLocalISO(`${m}-01`));
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+
+  // Any filter change is a different result set — the current page index
+  // would point into the wrong list.
+  const changeMonth = (m: string | null) => {
+    setMonth(m);
+    setOffset(0);
+  };
 
   const { data, isLoading, error } = useQuery({
-    ...expensesQuery(group.id, offset, paidBy),
+    ...expensesQuery(group.id, offset, paidBy, month),
     // Keep showing the current page while the next one loads.
     placeholderData: keepPreviousData,
   });
@@ -75,7 +89,7 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <label
             htmlFor={payerFilterId}
@@ -110,6 +124,51 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
         </button>
       </div>
 
+      <div className="mb-4 flex items-center">
+        {month === null ? (
+          <button
+            onClick={() => changeMonth(toMonthISO(new Date()))}
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-600 hover:border-teal-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-teal-500"
+          >
+            <CalendarDays className="h-4 w-4" /> {t("filterByMonth")}
+          </button>
+        ) : (
+          <div
+            role="group"
+            aria-label={t("filterByMonth")}
+            className="flex items-center gap-1 rounded-lg border border-teal-500 bg-white px-1 py-0.5 dark:bg-slate-800"
+          >
+            <button
+              onClick={() => changeMonth(shiftMonthISO(month, -1))}
+              title={t("prevMonth")}
+              aria-label={t("prevMonth")}
+              className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="min-w-[9.5rem] text-center text-sm font-medium" aria-live="polite">
+              {monthLabel(month)}
+            </span>
+            <button
+              onClick={() => changeMonth(shiftMonthISO(month, 1))}
+              title={t("nextMonth")}
+              aria-label={t("nextMonth")}
+              className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => changeMonth(null)}
+              title={t("showAllMonths")}
+              aria-label={t("showAllMonths")}
+              className="ml-1 rounded-md border-l border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
+
       {isLoading && <ListSkeleton rows={4} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
       {deleteExpense.error && (
@@ -124,11 +183,21 @@ export default function ExpensesTab({ group }: { group: GroupDetail }) {
       {data && data.items.length === 0 && offset === 0 && (
         <EmptyState
           icon={ReceiptText}
-          message={paidBy ? t("noExpensesForMember") : t("noExpenses")}
-          // No CTA while a payer filter is on: the list is empty because of
-          // the filter, so "add an expense" answers a question nobody asked.
+          message={
+            paidBy && month
+              ? t("noExpensesForFilters")
+              : paidBy
+                ? t("noExpensesForMember")
+                : month
+                  ? t("noExpensesInMonth")
+                  : t("noExpenses")
+          }
+          // No CTA while a filter is on: the list is empty because of the
+          // filter, so "add an expense" answers a question nobody asked.
           action={
-            paidBy ? undefined : { label: t("addExpense"), onClick: () => setAdding(true) }
+            paidBy || month
+              ? undefined
+              : { label: t("addExpense"), onClick: () => setAdding(true) }
           }
         />
       )}

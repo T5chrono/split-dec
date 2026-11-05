@@ -294,6 +294,78 @@ async def test_filter_by_payer_still_requires_membership(client, two_user_group,
     assert r.status_code == 403
 
 
+async def _seed_dated(client, g, rows):
+    for payer, day, description in rows:
+        r = await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(
+                payer, [g["alice"], g["bob"]], description=description, expense_date=day
+            ),
+            headers=idem(),
+        )
+        assert r.status_code == 201, r.text
+
+
+async def test_filter_by_month_includes_both_ends(client, two_user_group):
+    """The month filter sends the first and last day; both must be inside,
+    and the days either side of them outside."""
+    g = two_user_group
+    await _seed_dated(client, g, [
+        (g["alice"], "2026-09-30", "before"),
+        (g["alice"], "2026-10-01", "first"),
+        (g["bob"], "2026-10-15", "middle"),
+        (g["alice"], "2026-10-31", "last"),
+        (g["alice"], "2026-11-01", "after"),
+    ])
+    r = await client.get(
+        f"/api/groups/{g['group'].id}/expenses?date_from=2026-10-01&date_to=2026-10-31"
+    )
+    assert r.status_code == 200, r.text
+    # Newest first, same order as the unfiltered list.
+    assert [e["description"] for e in r.json()["items"]] == ["last", "middle", "first"]
+
+
+async def test_filter_by_date_accepts_one_open_end(client, two_user_group):
+    g = two_user_group
+    await _seed_dated(client, g, [
+        (g["alice"], "2026-01-10", "old"),
+        (g["alice"], "2026-06-10", "new"),
+    ])
+    since = await client.get(f"/api/groups/{g['group'].id}/expenses?date_from=2026-03-01")
+    until = await client.get(f"/api/groups/{g['group'].id}/expenses?date_to=2026-03-01")
+    assert [e["description"] for e in since.json()["items"]] == ["new"]
+    assert [e["description"] for e in until.json()["items"]] == ["old"]
+
+
+async def test_filter_by_month_combines_with_payer_and_paginates(client, two_user_group):
+    """Both filters apply before limit/offset."""
+    g = two_user_group
+    rows = []
+    for day in ("2026-10-02", "2026-10-03", "2026-10-04"):
+        rows += [(g["alice"], day, f"a-{day}"), (g["bob"], day, f"b-{day}")]
+    rows.append((g["alice"], "2026-11-02", "a-november"))
+    await _seed_dated(client, g, rows)
+
+    base = (
+        f"/api/groups/{g['group'].id}/expenses?paid_by={g['alice'].id}"
+        "&date_from=2026-10-01&date_to=2026-10-31&limit=2"
+    )
+    page = (await client.get(base + "&offset=0")).json()["items"]
+    rest = (await client.get(base + "&offset=2")).json()["items"]
+    assert [e["description"] for e in page + rest] == [
+        "a-2026-10-04", "a-2026-10-03", "a-2026-10-02",
+    ]
+
+
+async def test_filter_by_date_rejects_bad_input(client, two_user_group):
+    g = two_user_group
+    url = f"/api/groups/{g['group'].id}/expenses"
+    assert (await client.get(f"{url}?date_from=2026-13-01")).status_code == 422
+    assert (await client.get(f"{url}?date_from=October")).status_code == 422
+    reversed_range = await client.get(f"{url}?date_from=2026-10-31&date_to=2026-10-01")
+    assert reversed_range.status_code == 422
+
+
 async def test_non_member_cannot_touch_expense(client, two_user_group, db_session, current_user):
     from conftest import make_user
 

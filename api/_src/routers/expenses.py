@@ -87,19 +87,33 @@ async def list_expenses(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     paid_by: uuid.UUID | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     caller: uuid.UUID = Depends(verify_jwt),
 ):
     """`paid_by` narrows the page to one payer. It is deliberately not
     validated against the membership: expenses of members who have since left
     must stay filterable, and an unknown id simply matches nothing (the group
-    scope is what keeps other groups' rows out)."""
+    scope is what keeps other groups' rows out).
+
+    `date_from` / `date_to` bound `expense_date`, both ends inclusive, either
+    one optional — the client's month filter sends the first and last day of
+    the month. They compare calendar days, never instants: `expense_date` is a
+    DATE, so no time zone is involved. Like `paid_by`, they are applied before
+    limit/offset, or a page would be a filtered slice of the unfiltered one."""
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from is after date_to")
     await require_membership(db, group_id, caller)
     query = select(Expense).where(
         Expense.group_id == group_id, Expense.deleted_at.is_(None)
     )
     if paid_by is not None:
         query = query.where(Expense.paid_by_user_id == paid_by)
+    if date_from is not None:
+        query = query.where(Expense.expense_date >= date_from)
+    if date_to is not None:
+        query = query.where(Expense.expense_date <= date_to)
     expenses = (
         await db.execute(
             query.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
