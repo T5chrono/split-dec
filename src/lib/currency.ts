@@ -16,7 +16,9 @@ export function setMoneyLocale(lang: "en" | "pl"): void {
   decimalSep = lang === "pl" ? "," : ".";
 }
 
-const NBSP = " ";
+// Escaped on purpose: a literal no-break space looks exactly like a space
+// and is one careless edit away from becoming one.
+const NBSP = String.fromCharCode(0xa0);
 
 /** Format a backend money string (e.g. "120.5000") for display at the
  *  currency's own precision, without ever passing through a float total. */
