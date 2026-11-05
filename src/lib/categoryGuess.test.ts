@@ -25,7 +25,13 @@ describe("guessCategory", () => {
     ["Zakupy w Biedronce", "Groceries"],
     ["Bilety do kina", "Movies"],
     ["Naprawa pralki", "Maintenance"],
-    ["Claude subscription", "LLM APIs"],
+    ["Claude subscription", "AI subscriptions"],
+    ["Anthropic API credits", "LLM APIs"],
+    ["Piwo w pubie", "Alcohol"],
+    ["Kawa i ciastko", "Coffee & snacks"],
+    ["Bilet lotniczy Ryanair", "Flights"],
+    ["Czynsz za listopad", "Building fees"],
+    ["Fryzjer", "Hair/beauty"],
   ])("maps %j to %j", (description, expected) => {
     expect(guessCategory(description)).toBe(expected);
   });
@@ -39,19 +45,19 @@ describe("guessCategory", () => {
   });
 
   it("ignores case and diacritics in both directions", () => {
-    expect(guessCategory("ŚMIECI")).toBe("Trash");
-    expect(guessCategory("smieci")).toBe("Trash");
-    expect(guessCategory("Prąd")).toBe("Electricity");
+    expect(guessCategory("ŚMIECI")).toBe("Bills");
+    expect(guessCategory("smieci")).toBe("Bills");
+    expect(guessCategory("Prąd")).toBe("Bills");
   });
 
   it("reads the leading word as the subject and the rest as context", () => {
     expect(guessCategory("Parking przy hotelu")).toBe("Parking");
     expect(guessCategory("Hotel z parkingiem")).toBe("Hotel");
-    expect(guessCategory("Claude subscription")).toBe("LLM APIs");
+    expect(guessCategory("Claude subscription")).toBe("AI subscriptions");
   });
 
   it("does not let a brand in the leading word hijack the real subject", () => {
-    expect(guessCategory("GitHub Copilot")).toBe("Copilots");
+    expect(guessCategory("GitHub Copilot")).toBe("AI subscriptions");
     expect(guessCategory("Office supplies")).toBe("Household supplies");
   });
 

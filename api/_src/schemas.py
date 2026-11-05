@@ -1,13 +1,21 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_serializer,
+)
 
-from .categories import Category
+from .categories import Category, upgrade_legacy_category
 from .deps import MAX_GROUP_MEMBERS
 
+# A retired category value from a stale client is translated, not refused.
+CategoryInput = Annotated[Category, BeforeValidator(upgrade_legacy_category)]
 SplitType = Literal["EQUAL", "EXACT", "PERCENTAGE"]
 # See models.Group.mode. SHARED groups record every expense as the payer's own.
 GroupMode = Literal["SPLIT", "SHARED"]
@@ -121,7 +129,7 @@ class SplitInput(BaseModel):
 
 class ExpenseCreate(BaseModel):
     description: str = Field(min_length=1, max_length=500)
-    category: Category
+    category: CategoryInput
     split_type: SplitType
     total_amount: Decimal = Field(gt=0, max_digits=14, decimal_places=4)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
@@ -139,7 +147,7 @@ class ExpenseUpdate(BaseModel):
     splits always stay consistent with the amount, currency, and payer."""
 
     description: str | None = Field(default=None, min_length=1, max_length=500)
-    category: Category | None = None
+    category: CategoryInput | None = None
     split_type: SplitType | None = None
     total_amount: Decimal | None = Field(
         default=None, gt=0, max_digits=14, decimal_places=4

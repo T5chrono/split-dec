@@ -17,24 +17,19 @@
  *  insurance "OC" safe to list. Short words that do inflect ("tax" → "taxes")
  *  carry the inflected form as a second stem. */
 const KEYWORDS: ReadonlyArray<readonly [category: string, stems: readonly string[]]> = [
-  // Transportation
-  ["Parking", ["park", "parkomat"]],
-  ["Gas/fuel", ["fuel", "petrol", "diesel", "gas", "paliw", "benzyn", "tankow", "lpg"]],
-  ["Taxi", ["taxi", "taks", "uber", "bolt", "lyft"]],
-  ["Plane", ["plane", "flight", "airline", "airfare", "samolot", "lotnisk"]],
-  ["Bus/train", ["bus", "train", "tram", "metro", "pkp", "autobus", "pociag", "kolej"]],
-  ["Car", ["car", "cars", "auto", "samochod", "tire", "opon", "myjnia"]],
-  ["Hotel", ["hotel", "hostel", "motel", "airbnb", "nocleg", "booking", "pensjonat"]],
-  ["Bicycle", ["bike", "bicycle", "rower"]],
-
   // Food and drink
   [
     "Dining out",
     [
       "restaurant", "restaurac", "dinner", "lunch", "breakfast", "obiad", "kolacja",
-      "sniadan", "pizza", "sushi", "burger", "kebab", "bar", "pub", "cafe", "kawiarni",
-      "mcdonald", "kfc", "bistro", "jedzenie",
+      "sniadan", "pizza", "sushi", "burger", "kebab", "mcdonald", "kfc", "bistro", "jedzenie",
     ],
+  ],
+  ["Takeout/delivery", ["takeout", "delivery", "dostaw", "wolt", "glovo", "pyszne", "catering"]],
+  [
+    "Coffee & snacks",
+    ["coffee", "kawa", "kawy", "cafe", "kawiarni", "starbucks", "snack", "przekask", "lody",
+      "dessert", "deser", "slodycz", "ciast"],
   ],
   [
     "Groceries",
@@ -45,79 +40,124 @@ const KEYWORDS: ReadonlyArray<readonly [category: string, stems: readonly string
       "carrefour", "kaufland", "tesco", "aldi", "warzyw",
     ],
   ],
-  ["Liquor", ["beer", "wine", "vodka", "whisky", "liquor", "alkohol", "piwo", "wino", "wodka"]],
-  ["Other Food and drink", ["coffee", "kawa", "snack", "przekask", "lody", "dessert", "deser"]],
-
-  // Entertainment
-  ["Movies", ["movie", "cinema", "kino", "kina", "film"]],
-  ["Games", ["game", "gaming", "gra", "gry", "konsol", "playstation", "xbox", "steam", "nintendo"]],
-  ["Music", ["concert", "koncert", "music", "muzyk", "festival", "festiwal"]],
-
-  // Sports
-  ["Skiing", ["ski", "skiing", "skipass", "narty", "narciar", "snowboard", "wyciag"]],
-  ["Climbing", ["climb", "wspinacz", "scianka", "boulder"]],
-  ["Swimming", ["swim", "basen", "plywa"]],
-  ["Running", ["bieg", "marathon", "maraton"]],
-  ["Other Sports", ["gym", "silown", "fitness", "yoga", "joga", "tennis", "tenis", "squash"]],
-
-  // Home
-  ["Rent", ["rent", "czynsz", "najem", "wynajem"]],
-  ["Mortgage", ["mortgage", "hipotek", "kredyt"]],
-  ["Maintenance", ["repair", "naprawa", "remont", "hydraulik", "plumber", "mechanik", "malowan"]],
-  ["Furniture", ["furniture", "mebl", "sofa", "kanapa", "krzesl", "lozko", "szafa", "ikea"]],
   [
-    "Electronics",
-    ["laptop", "komputer", "computer", "monitor", "tablet", "elektronik", "electronic", "sluchawki"],
+    "Alcohol",
+    ["beer", "wine", "vodka", "whisky", "liquor", "alkohol", "piwo", "wino", "wodka", "bar",
+      "pub", "drink"],
   ],
-  ["Household supplies", ["detergent", "chemia", "proszek", "supplies"]],
-  ["Pets", ["pet", "pets", "dog", "dogs", "cat", "cats", "pies", "psa", "kot", "vet", "weterynar", "karma"]],
-  ["Services", ["service", "uslug"]],
 
-  // Utilities
-  ["Electricity", ["electric", "prad", "energia", "tauron", "enea", "pge"]],
-  ["Water", ["water", "woda", "wodociag"]],
-  ["Heat/gas", ["heating", "ogrzewan", "cieplo", "gaz"]],
-  ["Trash", ["trash", "garbage", "smieci", "odpady"]],
+  // Personal care & health
   [
-    "TV/Phone/Internet",
-    ["internet", "wifi", "phone", "telefon", "komork", "netia", "swiatlowod", "tv"],
+    "Hygiene/cosmetics",
+    ["kosmetyk", "cosmetic", "drogeri", "rossmann", "hebe", "szampon", "shampoo"],
   ],
-  ["Cleaning", ["clean", "sprzat", "pralnia", "laundry"]],
-
-  // Life
+  ["Hair/beauty", ["fryzjer", "barber", "haircut", "kosmetyczk", "manicure", "pedicure"]],
+  ["Pharmacy", ["apteka", "apteki", "pharmacy", "leki", "lekow", "recept", "suplement"]],
   [
     "Medical expenses",
-    ["doctor", "lekarz", "apteka", "pharmacy", "medic", "dentyst", "dentist", "szpital",
-      "hospital", "leki", "recept"],
+    ["doctor", "lekarz", "medic", "dentyst", "dentist", "szpital", "hospital", "okulist",
+      "badani"],
   ],
-  ["Childcare", ["childcare", "babysit", "przedszkol", "zlobek", "opiekunka", "niania"]],
-  ["Clothing", ["clothes", "clothing", "ubran", "odziez", "buty", "shoes", "koszul", "kurtka"]],
-  ["Education", ["school", "szkol", "studia", "czesne", "tuition"]],
-  ["Gifts", ["gift", "prezent", "upominek"]],
-  ["Insurance", ["insurance", "ubezpiecz", "polisa", "oc", "ac"]],
-  ["Taxes", ["tax", "taxes", "podat", "skarbow"]],
 
-  // Subscriptions
+  // Clothing & footwear
+  ["Clothing", ["clothes", "clothing", "ubran", "odziez", "koszul", "kurtka", "spodni"]],
+  ["Footwear", ["buty", "butow", "shoes", "obuwie", "sneakers"]],
+  ["Accessories", ["torebk", "plecak", "zegarek", "bizuteri", "jewelry", "pasek"]],
+
+  // Entertainment
+  ["Books", ["book", "ksiazk", "ebook", "audiobook", "podrecznik"]],
+  ["Movies", ["movie", "cinema", "kino", "kina", "film", "teatr", "theatre", "theater"]],
+  ["Music", ["music", "muzyk", "vinyl", "winyl", "plyta"]],
+  ["Games", ["game", "gaming", "gra", "gry", "konsol", "playstation", "xbox", "steam", "nintendo"]],
   ["Streaming", ["netflix", "spotify", "hbo", "disney", "youtube", "streaming"]],
+  ["Hobbies", ["hobby"]],
+  ["Concerts & events", ["concert", "koncert", "festival", "festiwal", "mecz"]],
+
+  // Learning
+  ["Courses", ["course", "kurs", "szkolenie", "bootcamp", "warsztat", "studia", "czesne", "tuition"]],
+  ["Tutor", ["tutor", "korepetycj", "lekcj"]],
+  ["Other Learning", ["school", "szkol"]],
+
+  // Sports
+  ["Climbing", ["climb", "wspinacz", "scianka", "boulder"]],
+  ["Skiing", ["ski", "skiing", "skipass", "narty", "narciar", "snowboard", "wyciag"]],
+  ["Swimming", ["swim", "basen", "plywa", "aquapark"]],
+  ["Running", ["bieg", "marathon", "maraton"]],
+  ["Biking", ["bike", "bicycle", "rower"]],
+  ["Gym/fitness", ["gym", "silown", "fitness", "yoga", "joga", "karnet", "multisport"]],
+  ["Sports gear", ["decathlon"]],
+  ["Competitions", ["zawody", "competition", "startow"]],
+  ["Other Sports", ["tennis", "tenis", "squash"]],
+
+  // Transportation
+  ["Bus/train", ["bus", "train", "tram", "metro", "pkp", "autobus", "pociag", "kolej"]],
+  ["Highways", ["autostrad", "highway", "winiet", "toll"]],
+  ["Gas/fuel", ["fuel", "petrol", "diesel", "gas", "paliw", "benzyn", "tankow", "lpg"]],
+  ["Car", ["car", "cars", "auto", "samochod", "tire", "opon", "myjnia"]],
+  ["Parking", ["park", "parkomat"]],
+  ["Taxi", ["taxi", "taks", "uber", "bolt", "lyft"]],
+
+  // Travel and vacations
+  ["Flights", ["plane", "flight", "airline", "airfare", "samolot", "lotnisk", "ryanair", "wizzair"]],
+  ["Hotel", ["hotel", "hostel", "motel", "airbnb", "nocleg", "booking", "pensjonat", "kemping"]],
+  ["Travel transport", ["wypozyczal", "rental", "kamper", "camper"]],
+  ["Attractions & tours", ["muzeum", "museum", "wycieczk", "tour", "przewodnik", "zwiedzan"]],
+  ["Travel insurance & visas", ["visa", "visas", "wiza", "wizy"]],
+  ["Other Travel", ["pamiatk", "souvenir"]],
+
+  // Tech, Software & AI
+  ["Phone", ["phone", "telefon", "komork", "doladow"]],
+  ["Internet", ["internet", "wifi", "swiatlowod", "netia"]],
   // No "office" or "github": both lead descriptions that mean something else
   // ("Office supplies", "GitHub Copilot"), and "microsoft" already covers the
   // Office subscription.
   ["Software", ["software", "licenc", "adobe", "microsoft", "jetbrains"]],
-  ["Memberships", ["membership", "karnet", "czlonkost"]],
-  ["Other Subscriptions", ["subscription", "subskrypc", "abonament"]],
-
-  // Learning
-  ["Books", ["book", "ksiazk", "ebook", "audiobook", "podrecznik"]],
-  ["Courses", ["course", "kurs", "szkolenie", "bootcamp", "warsztat"]],
-  ["Tutor", ["tutor", "korepetycj", "lekcj"]],
-
-  // AI Expenses
+  // The chat products people subscribe to are named after the model, so the
+  // model's name means the subscription; API credits say so ("Anthropic API").
   [
-    "LLM APIs",
-    ["openai", "anthropic", "claude", "gpt", "chatgpt", "llm", "gemini", "mistral", "deepseek"],
+    "AI subscriptions",
+    ["claude", "chatgpt", "gpt", "copilot", "cursor", "midjourney", "dalle", "sora", "runway",
+      "veo", "elevenlabs", "perplexity"],
   ],
-  ["Copilots", ["copilot", "cursor"]],
-  ["Generation Tools", ["midjourney", "dalle", "sora", "runway", "veo", "elevenlabs"]],
+  ["LLM APIs", ["openai", "anthropic", "llm", "api", "gemini", "mistral", "deepseek", "openrouter"]],
+  ["Cloud & hosting", ["hosting", "vercel", "aws", "domen", "domain", "serwer", "server", "vps", "cloud"]],
+  ["Memberships", ["membership", "czlonkost", "prime", "subscription", "subskrypc", "abonament"]],
+
+  // Home and appliances
+  ["Rent", ["rent", "najem", "wynajem"]],
+  ["Mortgage", ["mortgage", "hipotek", "kredyt"]],
+  ["Building fees", ["czynsz", "wspolnot", "spoldzielni"]],
+  [
+    "Bills",
+    ["bill", "bills", "rachun", "electric", "prad", "energia", "tauron", "enea", "pge", "water",
+      "woda", "wodociag", "heating", "ogrzewan", "cieplo", "gaz", "trash", "garbage", "smieci",
+      "odpady"],
+  ],
+  ["Appliances", ["pralk", "lodowk", "zmywark", "odkurzacz", "appliance", "agd"]],
+  [
+    "Electronics",
+    ["laptop", "komputer", "computer", "monitor", "tablet", "elektronik", "electronic",
+      "sluchawki", "telewizor"],
+  ],
+  ["Furniture", ["furniture", "mebl", "sofa", "kanapa", "krzesl", "lozko", "szafa", "ikea"]],
+  [
+    "Household supplies",
+    ["detergent", "chemia", "proszek", "supplies", "clean", "sprzat", "pralnia", "laundry"],
+  ],
+  ["Maintenance", ["repair", "naprawa", "remont", "hydraulik", "plumber", "mechanik", "malowan"]],
+  ["Other Home", ["pet", "pets", "dog", "dogs", "cat", "cats", "pies", "psa", "kot", "vet",
+    "weterynar", "karma", "ogrod", "garden", "rosli"]],
+
+  // Finance and life
+  ["Bank fees", ["prowizj", "bank", "przewalutow"]],
+  ["Insurance", ["insurance", "ubezpiecz", "polisa", "oc", "ac"]],
+  ["Taxes", ["tax", "taxes", "podat", "skarbow"]],
+  ["Gifts", ["gift", "prezent", "upominek"]],
+  ["Childcare", ["childcare", "babysit", "przedszkol", "zlobek", "opiekunka", "niania"]],
+  ["Other Life", ["notariusz", "notary", "prawnik", "lawyer", "urzad"]],
+
+  // Uncategorized
+  ["Big purchases", ["wesel", "wedding", "kaucj", "deposit"]],
 ];
 
 /** Every category this module can return. Exported so a test can assert the
