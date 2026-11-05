@@ -16,10 +16,10 @@ export function setMoneyLocale(lang: "en" | "pl"): void {
   decimalSep = lang === "pl" ? "," : ".";
 }
 
-/** Format a backend money string (e.g. "120.5000") for display at the
- *  currency's own precision, without ever passing through a float total. */
 const NBSP = " ";
 
+/** Format a backend money string (e.g. "120.5000") for display at the
+ *  currency's own precision, without ever passing through a float total. */
 export function formatMoney(amount: string, currency: string): string {
   const precision = precisionFor(currency);
   const negative = amount.startsWith("-");
