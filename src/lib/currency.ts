@@ -18,14 +18,18 @@ export function setMoneyLocale(lang: "en" | "pl"): void {
 
 /** Format a backend money string (e.g. "120.5000") for display at the
  *  currency's own precision, without ever passing through a float total. */
+const NBSP = " ";
+
 export function formatMoney(amount: string, currency: string): string {
   const precision = precisionFor(currency);
   const negative = amount.startsWith("-");
   const [intPartRaw, fracRaw = ""] = amount.replace("-", "").split(".");
   const frac = fracRaw.padEnd(precision, "0").slice(0, precision);
-  const intPart = intPartRaw.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  // No-break spaces, both between digit groups and before the code: an
+  // ordinary space lets a narrow row wrap "6 918.58 PLN" over three lines.
+  const intPart = intPartRaw.replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
   const digits = precision > 0 ? `${intPart}${decimalSep}${frac}` : intPart;
-  return `${negative ? "-" : ""}${digits} ${currency}`;
+  return `${negative ? "-" : ""}${digits}${NBSP}${currency}`;
 }
 
 /** Normalize user-typed amounts: trims and accepts both comma and dot as

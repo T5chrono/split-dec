@@ -94,12 +94,16 @@ export default function GroupPage() {
         )}
       </p>
 
-      <div className="mb-5 flex gap-1 rounded-lg bg-slate-200/60 p-1 dark:bg-slate-800">
+      {/* Four labels have to fit a 360px phone in both languages, so the
+          padding and type tighten below `sm`. If a narrower screen or a longer
+          label still does not fit, the strip scrolls sideways instead of
+          letting a label run past its own pill. */}
+      <div className="mb-5 flex gap-1 overflow-x-auto rounded-lg bg-slate-200/60 p-1 [scrollbar-width:none] dark:bg-slate-800">
         {tabs.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            className={`flex-1 whitespace-nowrap rounded-md px-1.5 py-1.5 text-[13px] font-medium transition sm:px-3 sm:text-sm ${
               activeTab === id
                 ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100"
                 : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"

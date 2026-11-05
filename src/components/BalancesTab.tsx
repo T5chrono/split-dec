@@ -53,28 +53,35 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
                     ? "text-emerald-600 dark:text-emerald-400"
                     : "text-slate-600 dark:text-slate-300";
                 return (
+                  // Two lines on a phone — who → whom, then amount and Settle —
+                  // because one line leaves the names ~100px at 360px wide and
+                  // they wrap into a column. One line again from `sm` up.
                   <li
                     key={`${currency}-${i}`}
-                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                    className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-900"
                   >
-                    <div className="flex items-center gap-2 text-sm">
-                      {from && <Avatar user={from} size={6} />}
-                      <span className="font-medium">
-                        {iOwe ? t("you") : nameOf(tr.from_user_id)}
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        {from && <Avatar user={from} size={6} />}
+                        <span className="font-medium">
+                          {iOwe ? t("you") : nameOf(tr.from_user_id)}
+                        </span>
                       </span>
-                      <ArrowRight className="h-4 w-4 text-slate-400" />
-                      {to && <Avatar user={to} size={6} />}
-                      <span className="font-medium">
-                        {owedToMe ? t("you") : nameOf(tr.to_user_id)}
+                      <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
+                      <span className="flex min-w-0 items-center gap-2">
+                        {to && <Avatar user={to} size={6} />}
+                        <span className="font-medium">
+                          {owedToMe ? t("you") : nameOf(tr.to_user_id)}
+                        </span>
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
-                        <div className={`font-semibold ${amountCls}`}>
+                    <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                      <div className="sm:text-right">
+                        <div className={`whitespace-nowrap font-semibold ${amountCls}`}>
                           {formatMoney(tr.amount, currency)}
                         </div>
                         {(iOwe || owedToMe) && (
-                          <div className={`text-[10px] leading-tight ${amountCls}`}>
+                          <div className={`whitespace-nowrap text-[10px] leading-tight ${amountCls}`}>
                             {iOwe ? t("youOwe") : t("owedToYou")}
                           </div>
                         )}
@@ -88,7 +95,7 @@ export default function BalancesTab({ group }: { group: GroupDetail }) {
                             currency,
                           })
                         }
-                        className="flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
+                        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
                       >
                         <HandCoins className="h-4 w-4" /> {t("settle")}
                       </button>
