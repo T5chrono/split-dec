@@ -33,33 +33,42 @@ describe("precisionFor", () => {
 });
 
 describe("formatMoney", () => {
+  /** Expected strings are written with ordinary spaces for readability;
+   *  formatMoney emits no-break spaces so an amount never wraps. */
+  const nb = (s: string) => s.replace(/ /g, " ");
+
   it("formats a standard 2-decimal amount", () => {
-    expect(formatMoney("120.5000", "USD")).toBe("120.50 USD");
+    expect(formatMoney("120.5000", "USD")).toBe(nb("120.50 USD"));
   });
 
   it("truncates to the currency's precision, not the backend's 4 decimals", () => {
-    expect(formatMoney("120.5678", "USD")).toBe("120.56 USD");
+    expect(formatMoney("120.5678", "USD")).toBe(nb("120.56 USD"));
   });
 
   it("drops the decimal point entirely for 0-decimal currencies", () => {
-    expect(formatMoney("100.0000", "JPY")).toBe("100 JPY");
+    expect(formatMoney("100.0000", "JPY")).toBe(nb("100 JPY"));
   });
 
   it("keeps 3 decimals for KWD", () => {
-    expect(formatMoney("10.3340", "KWD")).toBe("10.334 KWD");
+    expect(formatMoney("10.3340", "KWD")).toBe(nb("10.334 KWD"));
   });
 
   it("preserves a negative sign", () => {
-    expect(formatMoney("-45.0000", "EUR")).toBe("-45.00 EUR");
+    expect(formatMoney("-45.0000", "EUR")).toBe(nb("-45.00 EUR"));
   });
 
   it("adds thousands separators", () => {
-    expect(formatMoney("1234567.0000", "PLN")).toBe("1 234 567.00 PLN");
+    expect(formatMoney("1234567.0000", "PLN")).toBe(nb("1 234 567.00 PLN"));
+  });
+
+  it("never contains a space a line can break at", () => {
+    // "6 918.58 PLN" used to wrap over three lines in a narrow balance row.
+    expect(formatMoney("6918.5800", "PLN")).not.toMatch(/ /);
   });
 
   it("uses a comma decimal separator in Polish locale", () => {
     setMoneyLocale("pl");
-    expect(formatMoney("120.5000", "PLN")).toBe("120,50 PLN");
+    expect(formatMoney("120.5000", "PLN")).toBe(nb("120,50 PLN"));
   });
 });
 

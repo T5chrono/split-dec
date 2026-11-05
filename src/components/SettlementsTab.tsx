@@ -89,17 +89,19 @@ export default function SettlementsTab({ group }: { group: GroupDetail }) {
         {data?.items.map((s) => (
           <li
             key={s.id}
-            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+            className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
           >
-            <div className="flex items-center gap-2 text-sm">
+            {/* Same squeeze as the balances row: the names may wrap, the
+                amount and its buttons may not. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
               <span className="font-medium">{nameOf(s.paid_by_user_id)}</span>
               <ArrowRight className="h-4 w-4 text-slate-400" />
               <span className="font-medium">{nameOf(s.paid_to_user_id)}</span>
-              <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 {new Date(s.created_at).toLocaleDateString(dateLocale)}
               </span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <span className="mr-2 font-semibold text-emerald-700 dark:text-emerald-400">
                 {formatMoney(s.amount, s.currency)}
               </span>
