@@ -5,6 +5,7 @@ import { api } from "./api";
 import { monthRange } from "./dates";
 import type {
   Balances,
+  CategoryTotal,
   CurrencyTotal,
   ExpenseList,
   Group,
@@ -45,6 +46,23 @@ export const expensesQuery = (
           (range ? `&date_from=${range.from}&date_to=${range.to}` : ""),
       );
     },
+  });
+
+/** Per-category totals for one "YYYY-MM" month (the expenses tab's summary).
+ *  Its own key root rather than under "expenses": the optimistic delete
+ *  rewrites every ["expenses", groupId, …] entry as an ExpenseList. Stale
+ *  immediately, so opening the summary always refetches — it is opened on
+ *  demand, usually right after the edits it is meant to add up. */
+export const categoryTotalsQuery = (groupId: string, month: string) =>
+  queryOptions({
+    queryKey: ["categoryTotals", groupId, month],
+    queryFn: () => {
+      const { from, to } = monthRange(month);
+      return api.get<CategoryTotal[]>(
+        `/groups/${groupId}/expenses/by-category?date_from=${from}&date_to=${to}`,
+      );
+    },
+    staleTime: 0,
   });
 
 export const balancesQuery = (groupId: string) =>

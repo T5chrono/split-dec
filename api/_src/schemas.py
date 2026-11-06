@@ -202,6 +202,20 @@ class ExpenseListOut(BaseModel):
     offset: int
 
 
+class CategoryTotalOut(BaseModel):
+    """What a group spent on one category in one currency. Per category, not
+    per top-level group: the grouping into the twelve headings lives in the
+    frontend's `CATEGORY_GROUPS`, and one copy of it is enough."""
+
+    category: str
+    currency: str
+    total: Decimal
+
+    @field_serializer("total")
+    def _ser_total(self, v: Decimal) -> str:
+        return money(v)
+
+
 # ---------- Settlements ----------
 
 class SettlementCreate(BaseModel):
