@@ -1,8 +1,9 @@
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +26,14 @@ from ..ratelimit import (
     enforce_ledger_write_quota,
     record_write,
 )
-from ..schemas import ExpenseCreate, ExpenseListOut, ExpenseOut, ExpenseUpdate, SplitInput
+from ..schemas import (
+    CategoryTotalOut,
+    ExpenseCreate,
+    ExpenseListOut,
+    ExpenseOut,
+    ExpenseUpdate,
+    SplitInput,
+)
 from ..splits import compute_splits
 
 router = APIRouter(tags=["expenses"])
@@ -126,6 +134,53 @@ async def list_expenses(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/groups/{group_id}/expenses/by-category", response_model=list[CategoryTotalOut]
+)
+async def expense_totals_by_category(
+    group_id: uuid.UUID,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    caller: uuid.UUID = Depends(verify_jwt),
+):
+    """The group's live expenses summed per (category, currency), for the
+    monthly summary the expenses tab copies into a spreadsheet.
+
+    Same date bounds as the list (inclusive calendar days, either optional),
+    and the same full `total_amount` the group-header total adds up — what the
+    group spent, not any one member's share. Currencies are never added
+    together: there are no exchange rates anywhere in this codebase. Only
+    categories that were actually used come back; the client fills the rest
+    with zeros, since it is the one that knows the full list's shape."""
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from is after date_to")
+    await require_membership(db, group_id, caller)
+    query = select(
+        Expense.category, Expense.currency, func.sum(Expense.total_amount)
+    ).where(Expense.group_id == group_id, Expense.deleted_at.is_(None))
+    if date_from is not None:
+        query = query.where(Expense.expense_date >= date_from)
+    if date_to is not None:
+        query = query.where(Expense.expense_date <= date_to)
+    rows = (
+        await db.execute(
+            query.group_by(Expense.category, Expense.currency).order_by(
+                Expense.currency, Expense.category
+            )
+        )
+    ).all()
+    return [
+        CategoryTotalOut(
+            category=category,
+            currency=currency,
+            # SQLite (the test suite) hands SUM back as a float.
+            total=total if isinstance(total, Decimal) else Decimal(str(total)),
+        )
+        for category, currency, total in rows
+    ]
 
 
 @router.post("/groups/{group_id}/expenses", response_model=ExpenseOut, status_code=201)

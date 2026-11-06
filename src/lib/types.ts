@@ -94,6 +94,15 @@ export interface CurrencyTotal {
   total: string;
 }
 
+/** What the group spent on one category in one currency. Only categories
+ *  that were used come back; `categorySummary.ts` folds them into the twelve
+ *  top-level groups. */
+export interface CategoryTotal {
+  category: string;
+  currency: string;
+  total: string;
+}
+
 export interface SplitInput {
   user_id: string;
   amount?: string;

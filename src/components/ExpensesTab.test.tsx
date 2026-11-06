@@ -379,6 +379,28 @@ describe("ExpensesTab — filter by month", () => {
     expect(await screen.findByText("No expenses in this month.")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /add expense/i })).toHaveLength(1);
   });
+
+  it("offers the month's category summary only while a month is picked", async () => {
+    serve([dated("e1", "Groceries", "2026-11-02")]);
+    const listing = vi.mocked(api.get).getMockImplementation()!;
+    vi.mocked(api.get).mockImplementation(async (url: string) =>
+      url.includes("/by-category")
+        ? [{ category: "Groceries", currency: "PLN", total: "10.0000" }]
+        : listing(url),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ExpensesTab group={group} />);
+    await screen.findByText("Groceries");
+    expect(screen.queryByRole("button", { name: "Summary" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter by month" }));
+    await user.click(screen.getByRole("button", { name: "Summary" }));
+
+    expect(await screen.findByText("Summary · November 2026")).toBeInTheDocument();
+    expect(lastGetUrl()).toBe(
+      "/groups/group-id/expenses/by-category?date_from=2026-11-01&date_to=2026-11-30",
+    );
+  });
 });
 
 describe("ExpensesTab — row interactions", () => {

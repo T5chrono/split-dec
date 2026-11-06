@@ -366,6 +366,75 @@ async def test_filter_by_date_rejects_bad_input(client, two_user_group):
     assert reversed_range.status_code == 422
 
 
+async def _seed_categorized(client, g, rows):
+    ids = []
+    for category, amount, currency, day in rows:
+        r = await client.post(
+            f"/api/groups/{g['group'].id}/expenses",
+            json=expense_payload(
+                g["alice"], [g["alice"], g["bob"]],
+                category=category, total_amount=amount, currency=currency,
+                expense_date=day,
+            ),
+            headers=idem(),
+        )
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    return ids
+
+
+async def test_category_totals_sum_full_amounts_per_category_and_currency(
+    client, two_user_group
+):
+    """Full total_amount (not anyone's share), one row per (category,
+    currency), currencies never added together, the month's ends inclusive,
+    and a withdrawn expense left out."""
+    g = two_user_group
+    ids = await _seed_categorized(client, g, [
+        ("Groceries", "10.10", "PLN", "2026-10-01"),
+        ("Groceries", "20.25", "PLN", "2026-10-31"),
+        ("Groceries", "5.00", "EUR", "2026-10-15"),
+        ("Rent", "2000.00", "PLN", "2026-10-02"),
+        ("Taxi", "40.00", "PLN", "2026-10-03"),
+        ("Groceries", "99.00", "PLN", "2026-09-30"),
+        ("Groceries", "99.00", "PLN", "2026-11-01"),
+    ])
+    deleted = await client.delete(f"/api/expenses/{ids[4]}")
+    assert deleted.status_code == 204, deleted.text
+
+    r = await client.get(
+        f"/api/groups/{g['group'].id}/expenses/by-category"
+        "?date_from=2026-10-01&date_to=2026-10-31"
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == [
+        {"category": "Groceries", "currency": "EUR", "total": "5.0000"},
+        {"category": "Groceries", "currency": "PLN", "total": "30.3500"},
+        {"category": "Rent", "currency": "PLN", "total": "2000.0000"},
+    ]
+
+
+async def test_category_totals_empty_month_and_bad_range(client, two_user_group):
+    g = two_user_group
+    url = f"/api/groups/{g['group'].id}/expenses/by-category"
+    empty = await client.get(f"{url}?date_from=2030-01-01&date_to=2030-01-31")
+    assert empty.status_code == 200
+    assert empty.json() == []
+    reversed_range = await client.get(f"{url}?date_from=2026-10-31&date_to=2026-10-01")
+    assert reversed_range.status_code == 422
+
+
+async def test_category_totals_require_membership(
+    client, two_user_group, db_session, current_user
+):
+    from conftest import make_user
+
+    g = two_user_group
+    current_user.id = (await make_user(db_session, "counter@test.dev")).id
+    r = await client.get(f"/api/groups/{g['group'].id}/expenses/by-category")
+    assert r.status_code == 403
+
+
 async def test_non_member_cannot_touch_expense(client, two_user_group, db_session, current_user):
     from conftest import make_user
 
