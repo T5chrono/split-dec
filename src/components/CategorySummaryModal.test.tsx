@@ -61,7 +61,7 @@ describe("CategorySummaryModal", () => {
 
     await user.click(screen.getByRole("button", { name: /copy for excel/i }));
     expect(await navigator.clipboard.readText()).toBe(
-      ["1244.75", ...Array(8).fill("0.00"), "2000.00", "0.00", "0.00"].join("\n"),
+      ["1244.75", ...Array(7).fill("0.00"), "2000.00", "0.00", "0.00", "0.00"].join("\n"),
     );
     expect(screen.getByRole("button", { name: /copied/i })).toBeInTheDocument();
   });
@@ -75,7 +75,7 @@ describe("CategorySummaryModal", () => {
     await user.click(await screen.findByRole("button", { name: /kopiuj do excela/i }));
     const lines = (await navigator.clipboard.readText()).split("\n");
     expect(lines).toHaveLength(12);
-    expect(lines[6]).toBe("42,50"); // Transportation is the seventh group
+    expect(lines[5]).toBe("42,50"); // Transportation is the sixth group
   });
 
   it("switches between currencies and copies only the one shown", async () => {
@@ -93,7 +93,7 @@ describe("CategorySummaryModal", () => {
     );
     await user.click(screen.getByRole("button", { name: "PLN" }));
     await user.click(screen.getByRole("button", { name: /copy for excel/i }));
-    expect((await navigator.clipboard.readText()).split("\n")[7]).toBe("300.00");
+    expect((await navigator.clipboard.readText()).split("\n")[6]).toBe("300.00"); // Travel
   });
 
   it("says so when the clipboard refuses", async () => {

@@ -19,7 +19,7 @@
     ACCESSORIES = "Accessories"                            # Torby, plecaki, paski, zegarki, biżuteria
     OTHER_CLOTHING = "Other Clothing"                      # Pozostała odzież i dodatki krawieckie
 
-# 4. Entertainment (Rozrywka: kina, Netflix, streamingi, kultura)
+# 4. Entertainment and learning (Rozrywka i nauka: kina, Netflix, kultura, kursy, korepetycje)
     BOOKS = "Books"                                        # Książki papierowe, e-booki, audiobooki
     MOVIES = "Movies"                                      # Kino, teatr, spektakle, bilety filmowe
     MUSIC = "Music"                                        # Płyty, winyle, instrumenty muzyczne
@@ -28,13 +28,11 @@
     HOBBIES = "Hobbies"                                    # Rękodzieło, foto/wideo, materiały do pasji
     CONCERTS_EVENTS = "Concerts & events"                  # Koncerty, festiwale, mecze, widowiska
     OTHER_ENTERTAINMENT = "Other Entertainment"            # Pozostała rozrywka, kultura i wyjścia
-
-# 5. Learning (Edukacja, kursy, korepetycje)
     COURSES = "Courses"                                    # Szkolenia, kursy online, bootcampy, studia
     TUTOR = "Tutor"                                        # Korepetycje, prywatne lekcje językowe
     OTHER_LEARNING = "Other Learning"                      # Inne wydatki edukacyjne i naukowe
 
-# 6. Sports (Wydatki sportowe: wejściówki, karnety i sprzęt)
+# 5. Sports (Wydatki sportowe: wejściówki, karnety i sprzęt)
     CLIMBING = "Climbing"                                  # Wspinaczka, ścianka, bouldering, sekcje
     SKIING = "Skiing"                                      # Narty, snowboard, skipassy, serwis zimowy
     SWIMMING = "Swimming"                                  # Basen, aquapark, lekcje i wejściówki
@@ -45,7 +43,7 @@
     COMPETITIONS = "Competitions"                          # Wejściówki i opłaty startowe na zawody sportowe
     OTHER_SPORTS = "Other Sports"                          # Pozostałe aktywności i rekreacja sportowa
 
-# 7. Transportation (Codzienny transport i utrzymanie auta)
+# 6. Transportation (Codzienny transport i utrzymanie auta)
     BUS_TRAIN = "Bus/train"                                # Komunikacja miejska, autobusy, tramwaje, pociągi
     HIGHWAYS = "Highways"                                  # Autostrady, winiety, opłaty drogowe
     GAS_FUEL = "Gas/fuel"                                  # Paliwo: benzyna, diesel, LPG, ładowanie EV
@@ -54,7 +52,7 @@
     TAXI = "Taxi"                                          # Uber, Bolt, FreeNow, tradycyjne taksówki
     OTHER_TRANSPORTATION = "Other Transportation"          # Hulajnogi, skutery, promy, inne przejazdy
 
-# 8. Travel and vacations (Wycieczki, urlopy, wyjazdy)
+# 7. Travel and vacations (Wycieczki, urlopy, wyjazdy)
     FLIGHTS = "Flights"                                    # Bilety lotnicze, bagaż rejestrowany
     HOTEL = "Hotel"                                        # Noclegi (hotele, Airbnb, pensjonaty, kempingi)
     TRAVEL_TRANSPORT = "Travel transport"                  # Wynajem aut/kamperów, przejazdy wewnątrzkrajowe
@@ -62,7 +60,7 @@
     TRAVEL_INSURANCE_VISAS = "Travel insurance & visas"    # Ubezpieczenia turystyczne, wizy, opłaty wjazdowe
     OTHER_TRAVEL = "Other Travel"                          # Pamiątki, opłaty klimatyczne, inne podróżne
 
-# 9. Tech, Software & AI (Subskrypcje narzędziowe, chmura i AI)
+# 8. Tech, Software & AI (Subskrypcje narzędziowe, chmura i AI)
     PHONE = "Phone"                                        # Abonament telefoniczny, doładowania na kartę
     INTERNET = "Internet"                                  # Internet stacjonarny, światłowód, mobilny LTE/5G
     SOFTWARE = "Software"                                  # Programy, licencje, pakiety biurowe, SaaS
@@ -72,17 +70,20 @@
     MEMBERSHIPS = "Memberships"                            # Członkostwa (Allegro Smart, Amazon Prime, YouTube)
     OTHER_TECH = "Other Tech"                              # Inne wydatki IT i narzędzia cyfrowe
 
-# 10. Home and appliances (Czynsz, rachunki, meble, sprzęt AGD, chemia)
+# 9. Home (Dom: najem, kredyt, czynsz, rachunki, naprawy)
     RENT = "Rent"                                          # Odstępne za wynajem mieszkania lub pokoju
     MORTGAGE = "Mortgage"                                  # Rata kredytu hipotecznego
     BUILDING_FEES = "Building fees"                        # Czynsz administracyjny (wspólnota, spółdzielnia)
     BILLS = "Bills"                                        # Media: prąd, gaz, woda, ogrzewanie, wywóz śmieci
+    MAINTENANCE = "Maintenance"                            # Drobne naprawy, narzędzia, hydraulik, remonty
+    OTHER_HOME = "Other Home"                              # Ogród, rośliny, inne wydatki domowe
+
+# 10. Appliances (AGD: sprzęt, elektronika, meble, chemia)
     APPLIANCES = "Appliances"                              # Sprzęt AGD (pralka, lodówka, ekspres, odkurzacz)
     ELECTRONICS = "Electronics"                            # RTV, telewizory, audio, smart home
     FURNITURE = "Furniture"                                # Meble, oświetlenie, tekstylia, wyposażenie
     HOUSEHOLD_SUPPLIES = "Household supplies"              # Chemia gospodarcza, środki czystości, papier
-    MAINTENANCE = "Maintenance"                            # Drobne naprawy, narzędzia, hydraulik, remonty
-    OTHER_HOME = "Other Home"                              # Ogród, rośliny, inne wydatki domowe
+    OTHER_APPLIANCES = "Other Appliances"                  # Inne wyposażenie i sprzęty domowe
 
 # 11. Finance and life (Opłaty bankowe, podatki, ubezpieczenia, prezenty, dzieci)
     BANK_FEES = "Bank fees"                                # Prowizje bankowe, opłaty za karty, przewalutowania

@@ -17,8 +17,9 @@ describe("summarizeByGroup", () => {
     expect(CATEGORY_GROUPS).toHaveLength(12);
     expect(sums.map(fromUnits)).toEqual([
       "10.3000", // Food and drink: 10.10 + 0.20, exactly — no float drift
-      "0.0000", "0.0000", "0.0000", "0.0000", "0.0000", "0.0000", "0.0000", "0.0000",
-      "2000.0000", // Home and appliances
+      "0.0000", "0.0000", "0.0000", "0.0000", "0.0000", "0.0000", "0.0000",
+      "2000.0000", // Home
+      "0.0000", // Appliances
       "0.0000",
       "1.0000", // Uncategorized
     ]);
@@ -27,8 +28,8 @@ describe("summarizeByGroup", () => {
   it("keeps currencies apart, alphabetically", () => {
     const out = summarizeByGroup([row("Taxi", "5.0000", "PLN"), row("Taxi", "3.0000", "EUR")]);
     expect([...out.keys()]).toEqual(["EUR", "PLN"]);
-    expect(fromUnits(out.get("EUR")![6])).toBe("3.0000");
-    expect(fromUnits(out.get("PLN")![6])).toBe("5.0000");
+    expect(fromUnits(out.get("EUR")![5])).toBe("3.0000"); // Transportation
+    expect(fromUnits(out.get("PLN")![5])).toBe("5.0000");
   });
 
   it("puts a category this bundle does not know under the last heading", () => {

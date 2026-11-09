@@ -567,7 +567,7 @@ const CATEGORY_PL: Record<string, string> = {
   Footwear: "Obuwie",
   Accessories: "Dodatki",
   "Other Clothing": "Inna odzież",
-  // Entertainment
+  // Entertainment and learning
   Books: "Książki",
   Movies: "Filmy",
   Music: "Muzyka",
@@ -576,7 +576,6 @@ const CATEGORY_PL: Record<string, string> = {
   Hobbies: "Hobby",
   "Concerts & events": "Koncerty i wydarzenia",
   "Other Entertainment": "Inna rozrywka",
-  // Learning
   Courses: "Kursy",
   Tutor: "Korepetycje",
   "Other Learning": "Inna nauka",
@@ -614,17 +613,19 @@ const CATEGORY_PL: Record<string, string> = {
   "Cloud & hosting": "Chmura i hosting",
   Memberships: "Członkostwa",
   "Other Tech": "Inna technologia",
-  // Home and appliances
+  // Home
   Rent: "Najem",
   Mortgage: "Kredyt hipoteczny",
   "Building fees": "Czynsz administracyjny",
   Bills: "Rachunki",
+  Maintenance: "Naprawy i remonty",
+  "Other Home": "Inne domowe",
+  // Appliances
   Appliances: "AGD",
   Electronics: "Elektronika",
   Furniture: "Meble",
   "Household supplies": "Artykuły domowe",
-  Maintenance: "Naprawy i remonty",
-  "Other Home": "Inne domowe",
+  "Other Appliances": "Inne AGD",
   // Finance and life
   "Bank fees": "Opłaty bankowe",
   Insurance: "Ubezpieczenie",
@@ -641,13 +642,13 @@ const CATEGORY_GROUP_PL: Record<string, string> = {
   "Food and drink": "Jedzenie i napoje",
   "Personal care & health": "Higiena i zdrowie",
   "Clothing & footwear": "Odzież i obuwie",
-  Entertainment: "Rozrywka",
-  Learning: "Nauka",
+  "Entertainment and learning": "Rozrywka i nauka",
   Sports: "Sport",
   Transportation: "Transport",
   "Travel and vacations": "Podróże i wakacje",
   "Tech, Software & AI": "Technologia i AI",
-  "Home and appliances": "Dom i AGD",
+  Home: "Dom",
+  Appliances: "AGD",
   "Finance and life": "Finanse i życie",
   Uncategorized: "Bez kategorii",
 };

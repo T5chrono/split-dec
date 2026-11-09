@@ -10,7 +10,7 @@ import {
   Plane, Hotel, CarFront, FerrisWheel, Stamp, Luggage,
   Smartphone, Wifi, AppWindow, WandSparkles, Bot, Cloud, IdCard, Cpu,
   KeyRound, Landmark, Building2, Zap, WashingMachine, MonitorSmartphone, Armchair, SprayCan,
-  Wrench, House,
+  Wrench, House, Lamp,
   CreditCard, ShieldCheck, Receipt, Gift, Baby, Scale,
   Gem, CircleDollarSign,
 } from "lucide-react";
@@ -54,7 +54,7 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    group: "Entertainment",
+    group: "Entertainment and learning",
     categories: [
       { value: "Books", icon: Book },
       { value: "Movies", icon: Film },
@@ -64,11 +64,6 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
       { value: "Hobbies", icon: Palette },
       { value: "Concerts & events", icon: Ticket },
       { value: "Other Entertainment", icon: Sparkles },
-    ],
-  },
-  {
-    group: "Learning",
-    categories: [
       { value: "Courses", icon: GraduationCap },
       { value: "Tutor", icon: UserRound },
       { value: "Other Learning", icon: Lightbulb },
@@ -125,18 +120,24 @@ export const CATEGORY_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    group: "Home and appliances",
+    group: "Home",
     categories: [
       { value: "Rent", icon: KeyRound },
       { value: "Mortgage", icon: Landmark },
       { value: "Building fees", icon: Building2 },
       { value: "Bills", icon: Zap },
+      { value: "Maintenance", icon: Wrench },
+      { value: "Other Home", icon: House },
+    ],
+  },
+  {
+    group: "Appliances",
+    categories: [
       { value: "Appliances", icon: WashingMachine },
       { value: "Electronics", icon: MonitorSmartphone },
       { value: "Furniture", icon: Armchair },
       { value: "Household supplies", icon: SprayCan },
-      { value: "Maintenance", icon: Wrench },
-      { value: "Other Home", icon: House },
+      { value: "Other Appliances", icon: Lamp },
     ],
   },
   {
