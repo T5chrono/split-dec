@@ -27,7 +27,7 @@ class Category(StrEnum):
     FOOTWEAR = "Footwear"
     ACCESSORIES = "Accessories"
     OTHER_CLOTHING = "Other Clothing"
-    # Entertainment
+    # Entertainment and learning
     BOOKS = "Books"
     MOVIES = "Movies"
     MUSIC = "Music"
@@ -36,7 +36,6 @@ class Category(StrEnum):
     HOBBIES = "Hobbies"
     CONCERTS_EVENTS = "Concerts & events"
     OTHER_ENTERTAINMENT = "Other Entertainment"
-    # Learning
     COURSES = "Courses"
     TUTOR = "Tutor"
     OTHER_LEARNING = "Other Learning"
@@ -74,17 +73,19 @@ class Category(StrEnum):
     CLOUD_HOSTING = "Cloud & hosting"
     MEMBERSHIPS = "Memberships"
     OTHER_TECH = "Other Tech"
-    # Home and appliances
+    # Home
     RENT = "Rent"
     MORTGAGE = "Mortgage"
     BUILDING_FEES = "Building fees"
     BILLS = "Bills"
+    MAINTENANCE = "Maintenance"
+    OTHER_HOME = "Other Home"
+    # Appliances
     APPLIANCES = "Appliances"
     ELECTRONICS = "Electronics"
     FURNITURE = "Furniture"
     HOUSEHOLD_SUPPLIES = "Household supplies"
-    MAINTENANCE = "Maintenance"
-    OTHER_HOME = "Other Home"
+    OTHER_APPLIANCES = "Other Appliances"
     # Finance and life
     BANK_FEES = "Bank fees"
     INSURANCE = "Insurance"
