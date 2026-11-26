@@ -55,3 +55,6 @@ SplitDec DesignSystem/
 
 # Local reporting-style instructions for Claude Code. Personal, not repo policy.
 /CLAUDE.local.md
+
+# Editor settings for one machine (VS Code). Personal, not repo policy.
+/.vscode/
