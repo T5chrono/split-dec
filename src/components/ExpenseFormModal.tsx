@@ -12,6 +12,7 @@ import { Trash2 } from "lucide-react";
 import {
   AMOUNT_PATTERN,
   COMMON_CURRENCIES,
+  formatMoney,
   fromMinorUnits,
   normalizeAmountInput,
   toMinorUnits,
@@ -19,6 +20,7 @@ import {
 } from "../lib/currency";
 import { useAuth } from "../hooks/useAuth";
 import { useAmountError } from "../hooks/useAmountError";
+import { resolveAmountInput } from "../lib/amountExpression";
 import { useIdempotencyKey } from "../hooks/useIdempotencyKey";
 import { useI18n } from "../lib/i18n";
 import { todayLocalISO } from "../lib/dates";
@@ -128,7 +130,23 @@ export default function ExpenseFormModal({
     const m = group.members.find((x) => x.id === id);
     return m?.full_name ?? m?.email ?? t("formerMember");
   };
-  const amountError = useAmountError(totalAmount, currency);
+  const amountError = useAmountError(totalAmount, currency, { allowExpression: true });
+  // The field may hold arithmetic ("20.45 + 16,78"). Everything downstream —
+  // autofill, the edit comparison, the payload — reads `effectiveAmount`: the
+  // raw text for a plain number, exactly as before, and the computed result
+  // (or nothing, while it cannot be computed) for an expression.
+  const resolvedAmount = resolveAmountInput(totalAmount, currency);
+  const effectiveAmount = resolvedAmount.isExpression
+    ? (resolvedAmount.amount ?? "")
+    : totalAmount;
+  // Swap the expression for its result once the user is done with it, so what
+  // is saved is what the field shows. Left alone while it has no result, so
+  // the user can fix what they typed.
+  const commitExpression = () => {
+    if (resolvedAmount.isExpression && resolvedAmount.amount !== null) {
+      setTotalAmount(resolvedAmount.amount);
+    }
+  };
 
   // Percentage autofill: when exactly one selected member has no percentage,
   // it is obviously 100 minus the rest — fill it in automatically.
@@ -150,7 +168,7 @@ export default function ExpenseFormModal({
   const emptyExactIds = selected
     .map((m) => m.id)
     .filter((id) => !(exactAmounts[id] ?? "").trim());
-  const totalUnits = toMinorUnits(totalAmount, currency);
+  const totalUnits = toMinorUnits(effectiveAmount, currency);
   const filledExactUnits = selected
     .filter((m) => (exactAmounts[m.id] ?? "").trim())
     .map((m) => toMinorUnits(exactAmounts[m.id], currency));
@@ -204,14 +222,14 @@ export default function ExpenseFormModal({
       return (
         currency === expense.currency &&
         paidBy === expense.paid_by_user_id &&
-        normalizeAmountInput(totalAmount) === trimAmount(expense.total_amount, expense.currency)
+        normalizeAmountInput(effectiveAmount) === trimAmount(expense.total_amount, expense.currency)
       );
     }
     if (
       splitType !== expense.split_type ||
       currency !== expense.currency ||
       paidBy !== expense.paid_by_user_id ||
-      normalizeAmountInput(totalAmount) !== trimAmount(expense.total_amount, expense.currency)
+      normalizeAmountInput(effectiveAmount) !== trimAmount(expense.total_amount, expense.currency)
     ) {
       return false;
     }
@@ -235,6 +253,7 @@ export default function ExpenseFormModal({
   };
 
   const idempotencyKey = useIdempotencyKey();
+  const showAmountResult = resolvedAmount.isExpression && resolvedAmount.amount !== null;
 
   const save = useMutation({
     mutationFn: async () => {
@@ -251,12 +270,12 @@ export default function ExpenseFormModal({
         description: description.trim(),
         category,
         split_type: shared ? "EXACT" : splitType,
-        total_amount: normalizeAmountInput(totalAmount),
+        total_amount: normalizeAmountInput(effectiveAmount),
         currency,
         paid_by_user_id: paidBy,
         expense_date: expenseDate,
         splits: shared
-          ? [{ user_id: paidBy, amount: normalizeAmountInput(totalAmount) }]
+          ? [{ user_id: paidBy, amount: normalizeAmountInput(effectiveAmount) }]
           : buildSplits(),
       };
       if (expense) {
@@ -286,6 +305,7 @@ export default function ExpenseFormModal({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          commitExpression();
           save.mutate();
         }}
         className="space-y-4"
@@ -313,12 +333,21 @@ export default function ExpenseFormModal({
             <input
               required
               inputMode="decimal"
-              pattern={AMOUNT_PATTERN}
+              // The native pattern only knows plain numbers; an expression is
+              // checked by resolveAmountInput instead, which also holds submit.
+              pattern={resolvedAmount.isExpression ? undefined : AMOUNT_PATTERN}
               value={totalAmount}
               onChange={(e) => setTotalAmount(e.target.value)}
+              onBlur={commitExpression}
               placeholder="120,50"
               aria-invalid={amountError !== null}
-              aria-describedby={amountError ? "expense-amount-error" : undefined}
+              aria-describedby={
+                amountError
+                  ? "expense-amount-error"
+                  : showAmountResult
+                    ? "expense-amount-result"
+                    : undefined
+              }
               className={`${inputCls} ${
                 amountError ? "border-red-500 focus:border-red-500 dark:border-red-500" : ""
               }`}
@@ -337,6 +366,14 @@ export default function ExpenseFormModal({
             </select>
           </div>
         </div>
+        {showAmountResult && (
+          <p
+            id="expense-amount-result"
+            className="-mt-2 text-sm text-slate-500 dark:text-slate-400"
+          >
+            {t("amountExprResult", { value: formatMoney(resolvedAmount.amount!, currency) })}
+          </p>
+        )}
         {amountError && (
           <p
             id="expense-amount-error"
@@ -442,7 +479,7 @@ export default function ExpenseFormModal({
             {splitType === "EXACT" && (
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {t("sumOfAmounts")}: {exactSum} ({t("mustEqual")}{" "}
-                {totalAmount || t("theTotal")})
+                {effectiveAmount || t("theTotal")})
               </p>
             )}
             {splitType === "PERCENTAGE" && (

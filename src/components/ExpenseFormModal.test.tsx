@@ -473,6 +473,118 @@ describe("ExpenseFormModal — the amount is explained, not echoed back as a 422
   });
 });
 
+describe("ExpenseFormModal — arithmetic in the amount field", () => {
+  const amountField = () => screen.getByPlaceholderText("120,50");
+
+  it("shows the result while typing and saves it, normalized on blur", async () => {
+    vi.mocked(api.post).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "toys for christmas");
+    await user.type(amountField(), "20.45 + 16,78");
+
+    // formatMoney separates the amount and the code with a no-break space.
+    expect(screen.getByText(/^= 37\.23\sPLN$/)).toBeInTheDocument();
+    expect(amountField()).toHaveAttribute("aria-invalid", "false");
+    expect(amountField()).toHaveAttribute("aria-describedby", "expense-amount-result");
+
+    await user.tab();
+    expect(amountField()).toHaveValue("37.23");
+    expect(screen.queryByText(/^= /)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add expense/i }));
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const [, payload] = vi.mocked(api.post).mock.calls[0];
+    expect(payload).toHaveProperty("total_amount", "37.23");
+  });
+
+  it("submits the result when Enter is pressed inside the field", async () => {
+    vi.mocked(api.post).mockResolvedValue({} as Expense);
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Taxi");
+    await user.type(amountField(), "0.1 + 0.2{Enter}");
+
+    const [, payload] = vi.mocked(api.post).mock.calls[0];
+    expect(payload).toHaveProperty("total_amount", "0.30");
+    expect(amountField()).toHaveValue("0.30");
+  });
+
+  it("explains an expression it cannot compute and refuses to submit", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText("Dinner at Nolio"), "Dinner");
+    await user.type(amountField(), "5 / (2 - 2)");
+
+    expect(screen.getByText("Can't divide by zero.")).toBeInTheDocument();
+    expect(amountField()).toHaveAttribute("aria-invalid", "true");
+    await user.tab();
+    expect(amountField()).toHaveValue("5 / (2 - 2)"); // left for the user to fix
+
+    const submit = screen.getByRole("button", { name: /add expense/i });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("refuses a negative result", async () => {
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={null} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.type(amountField(), "5 - 10");
+    expect(
+      screen.getByText(/The calculation comes out below zero/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add expense/i })).toBeDisabled();
+  });
+
+  it("keeps an edit metadata-only when the expression equals the stored amount", async () => {
+    vi.mocked(api.patch).mockResolvedValue({} as Expense);
+    const expense: Expense = {
+      id: "e7",
+      group_id: group.id,
+      description: "Groceries",
+      category: "Groceries",
+      split_type: "EQUAL",
+      total_amount: "30.0000",
+      currency: "PLN",
+      paid_by_user_id: alice.id,
+      expense_date: "2026-06-01",
+      created_at: "2026-06-01T00:00:00Z",
+      created_by: null,
+      updated_by: null,
+      updated_at: null,
+      splits: [
+        { user_id: alice.id, owed_amount: "10.0000" },
+        { user_id: bob.id, owed_amount: "10.0000" },
+        { user_id: carol.id, owed_amount: "10.0000" },
+      ],
+    };
+    renderWithProviders(
+      <ExpenseFormModal group={group} expense={expense} onClose={vi.fn()} onSaved={vi.fn()} />,
+    );
+    const user = userEvent.setup();
+    await user.clear(amountField());
+    await user.type(amountField(), "12,5 + 17.5");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(amountField()).toHaveValue("30.00");
+    const [, body] = vi.mocked(api.patch).mock.calls[0];
+    expect(body).toEqual({
+      description: "Groceries",
+      category: "Groceries",
+      expense_date: "2026-06-01",
+    });
+  });
+});
+
 describe("ExpenseFormModal — idempotency key across retries", () => {
   it("resends the same key after a failed attempt", async () => {
     // The failure that matters is the one where the request *arrived* and only
