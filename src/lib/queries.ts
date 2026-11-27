@@ -48,18 +48,19 @@ export const expensesQuery = (
     },
   });
 
-/** Per-category totals for one "YYYY-MM" month (the expenses tab's summary).
- *  Its own key root rather than under "expenses": the optimistic delete
+/** Per-category totals for one "YYYY-MM" month, or for the group's whole
+ *  history when `month` is null (the expenses tab's summary). Its own key root rather than under "expenses": the optimistic delete
  *  rewrites every ["expenses", groupId, …] entry as an ExpenseList. Stale
  *  immediately, so opening the summary always refetches — it is opened on
  *  demand, usually right after the edits it is meant to add up. */
-export const categoryTotalsQuery = (groupId: string, month: string) =>
+export const categoryTotalsQuery = (groupId: string, month: string | null) =>
   queryOptions({
     queryKey: ["categoryTotals", groupId, month],
     queryFn: () => {
-      const { from, to } = monthRange(month);
+      const range = month ? monthRange(month) : null;
       return api.get<CategoryTotal[]>(
-        `/groups/${groupId}/expenses/by-category?date_from=${from}&date_to=${to}`,
+        `/groups/${groupId}/expenses/by-category` +
+          (range ? `?date_from=${range.from}&date_to=${range.to}` : ""),
       );
     },
     staleTime: 0,

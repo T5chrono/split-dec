@@ -380,7 +380,7 @@ describe("ExpensesTab — filter by month", () => {
     expect(screen.getAllByRole("button", { name: /add expense/i })).toHaveLength(1);
   });
 
-  it("offers the month's category summary only while a month is picked", async () => {
+  it("offers the category summary for the whole group, then for the picked month", async () => {
     serve([dated("e1", "Groceries", "2026-11-02")]);
     const listing = vi.mocked(api.get).getMockImplementation()!;
     vi.mocked(api.get).mockImplementation(async (url: string) =>
@@ -391,7 +391,12 @@ describe("ExpensesTab — filter by month", () => {
     const user = userEvent.setup();
     renderWithProviders(<ExpensesTab group={group} />);
     await screen.findByText("Groceries");
-    expect(screen.queryByRole("button", { name: "Summary" })).not.toBeInTheDocument();
+
+    // No month picked: the summary covers every expense the group has.
+    await user.click(screen.getByRole("button", { name: "Summary" }));
+    expect(await screen.findByText("Summary · All time")).toBeInTheDocument();
+    expect(lastGetUrl()).toBe("/groups/group-id/expenses/by-category");
+    await user.click(screen.getByRole("button", { name: /close/i }));
 
     await user.click(screen.getByRole("button", { name: "Filter by month" }));
     await user.click(screen.getByRole("button", { name: "Summary" }));

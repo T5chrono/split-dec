@@ -9,7 +9,8 @@ import { useI18n } from "../lib/i18n";
 import Modal from "./Modal";
 import ListSkeleton from "./ListSkeleton";
 
-/** One month of a group's spending folded into the twelve top-level category
+/** One month of a group's spending — or all of it, when no month is
+ *  picked — folded into the twelve top-level category
  *  groups, with a button that copies the amounts as a single spreadsheet
  *  column. Always all twelve rows in `CATEGORY_GROUPS` order, zeros included,
  *  so the column pasted one month lines up with the one pasted the next. */
@@ -20,9 +21,10 @@ export default function CategorySummaryModal({
   onClose,
 }: {
   groupId: string;
-  /** "YYYY-MM" */
-  month: string;
-  monthLabel: string;
+  /** "YYYY-MM", or null for the group's whole history. */
+  month: string | null;
+  /** Shown in the title; ignored when `month` is null. */
+  monthLabel?: string;
   onClose: () => void;
 }) {
   const { t, tCategoryGroup, lang } = useI18n();
@@ -54,11 +56,16 @@ export default function CategorySummaryModal({
   };
 
   return (
-    <Modal title={t("monthSummaryTitle", { month: monthLabel })} onClose={onClose}>
+    <Modal
+      title={t("monthSummaryTitle", { month: month ? (monthLabel ?? month) : t("summaryAllTime") })}
+      onClose={onClose}
+    >
       {isLoading && <ListSkeleton rows={4} />}
       {error && <p className="text-red-600 dark:text-red-400">{(error as Error).message}</p>}
       {data && !currency && (
-        <p className="text-sm text-slate-500 dark:text-slate-400">{t("noExpensesInMonth")}</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          {t(month ? "noExpensesInMonth" : "noExpensesInGroup")}
+        </p>
       )}
 
       {currency && sums && (
@@ -128,7 +135,7 @@ export default function CategorySummaryModal({
                 </>
               )}
             </button>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{t("summaryCopyHint")}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t(month ? "summaryCopyHint" : "summaryCopyHintAll")}</p>
             {copy === "failed" && (
               <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                 {t("copyFailed")}
