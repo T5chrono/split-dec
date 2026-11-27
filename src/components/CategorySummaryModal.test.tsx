@@ -43,6 +43,16 @@ describe("CategorySummaryModal", () => {
     expect(screen.queryByRole("button", { name: /copy for excel/i })).not.toBeInTheDocument();
   });
 
+  it("asks for the whole group's totals when no month is picked", async () => {
+    serve([]);
+    renderWithProviders(
+      <CategorySummaryModal groupId="group-id" month={null} onClose={() => {}} />,
+    );
+    expect(await screen.findByText("Summary · All time")).toBeInTheDocument();
+    await screen.findByText("No expenses in this group yet.");
+    expect(get).toHaveBeenCalledWith("/groups/group-id/expenses/by-category");
+  });
+
   it("shows all twelve groups with a total, and copies twelve plain numbers", async () => {
     serve([
       { category: "Groceries", currency: "PLN", total: "1234.5000" },
